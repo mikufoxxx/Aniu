@@ -11,6 +11,10 @@ from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
 
 
+_MAX_AI_MARKET_CONTEXT_LIMIT = 100
+_MAX_AI_MARKET_CONTEXT_LOOKBACK_DAYS = 1825
+
+
 class AIMarketContextService:
     def build_context(
         self,
@@ -24,10 +28,16 @@ class AIMarketContextService:
         if not settings.ai_market_context_enabled:
             return ""
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
-        normalized_limit = max(1, min(50, int(limit or settings.ai_market_context_limit)))
+        normalized_limit = max(
+            1,
+            min(_MAX_AI_MARKET_CONTEXT_LIMIT, int(limit or settings.ai_market_context_limit)),
+        )
         normalized_lookback = max(
             1,
-            min(120, int(lookback_days or settings.ai_market_context_lookback_days)),
+            min(
+                _MAX_AI_MARKET_CONTEXT_LOOKBACK_DAYS,
+                int(lookback_days or settings.ai_market_context_lookback_days),
+            ),
         )
         try:
             dataset = quant_service.build_dataset(

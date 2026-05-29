@@ -19,6 +19,7 @@ _TUSHARE_DAILY_FIELDS = (
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
+_MAX_DAILY_REFRESH_RANGE_DAYS = 1825
 
 
 def _to_float(value: Any) -> float | None:
@@ -545,8 +546,8 @@ class HistoricalDataService:
         if start > end:
             raise ValueError("开始日期不能晚于结束日期。")
         days = (end - start).days + 1
-        if days > 120:
-            raise ValueError("单次最多刷新 120 个自然日。")
+        if days > _MAX_DAILY_REFRESH_RANGE_DAYS:
+            raise ValueError(f"单次最多刷新 {_MAX_DAILY_REFRESH_RANGE_DAYS} 个自然日。")
         return [
             (start + timedelta(days=offset)).strftime("%Y%m%d")
             for offset in range(days)

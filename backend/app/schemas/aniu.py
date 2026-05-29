@@ -344,9 +344,9 @@ class MarketDataCoverageResponse(BaseModel):
 
 class QuantCandidatesRequest(BaseModel):
     symbols: list[str] | None = None
-    limit: int = Field(default=200, ge=1, le=200)
+    limit: int = Field(default=200, ge=1, le=1000)
     prefer_realtime: bool = True
-    lookback_days: int = Field(default=120, ge=1, le=120)
+    lookback_days: int = Field(default=1825, ge=1, le=1825)
 
 
 class QuantDatasetRequest(QuantCandidatesRequest):
@@ -387,8 +387,8 @@ class QuantDatasetResponse(BaseModel):
 
 class AIMarketContextRequest(BaseModel):
     symbols: list[str] | None = None
-    limit: int = Field(default=50, ge=1, le=50)
-    lookback_days: int = Field(default=120, ge=1, le=120)
+    limit: int = Field(default=100, ge=1, le=100)
+    lookback_days: int = Field(default=1825, ge=1, le=1825)
 
 
 class AIMarketContextResponse(BaseModel):
@@ -415,7 +415,7 @@ class MarketReportRequest(BaseModel):
     report_type: Literal["morning", "closing"]
     symbols: list[str] | None = None
     limit: int = Field(default=50, ge=1, le=50)
-    lookback_days: int = Field(default=120, ge=1, le=120)
+    lookback_days: int = Field(default=1825, ge=1, le=1825)
 
 
 class MarketReportRecommendationRead(BaseModel):
@@ -508,9 +508,9 @@ class DailyRangeRefreshResponse(BaseModel):
 
 class MarketDataMaintenanceRunRequest(BaseModel):
     end_date: str | None = Field(default=None, min_length=8, max_length=10)
-    lookback_days: int = Field(default=120, ge=1, le=120)
+    lookback_days: int = Field(default=1825, ge=1, le=1825)
     symbols: list[str] | None = None
-    dataset_limit: int = Field(default=500, ge=1, le=500)
+    dataset_limit: int = Field(default=1000, ge=1, le=1000)
     report_type: Literal["morning", "closing"] | None = None
 
 

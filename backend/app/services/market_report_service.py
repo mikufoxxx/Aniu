@@ -15,6 +15,7 @@ REPORT_TITLES = {
     "morning": "早盘推荐",
     "closing": "收盘分析",
 }
+_MAX_REPORT_LOOKBACK_DAYS = 1825
 
 
 class MarketReportService:
@@ -30,7 +31,7 @@ class MarketReportService:
         normalized_type = self._normalize_report_type(report_type)
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
         normalized_limit = max(1, min(50, int(limit)))
-        normalized_lookback = max(1, min(120, int(lookback_days)))
+        normalized_lookback = max(1, min(_MAX_REPORT_LOOKBACK_DAYS, int(lookback_days)))
         dataset = quant_service.build_dataset(
             db,
             symbols=normalized_symbols,

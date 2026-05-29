@@ -251,6 +251,39 @@ def test_refresh_daily_range_processes_each_date_and_summarizes_coverage(monkeyp
     _reset_state()
 
 
+def test_refresh_daily_range_allows_maximized_backfill_window(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    calls: list[str] = []
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        assert symbols is None
+        calls.append(trade_date)
+        return []
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh-range",
+            headers=headers,
+            json={
+                "start_date": "20260101",
+                "end_date": "20260501",
+                "symbols": None,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["processed_days"] == 121
+    assert payload["stored_count"] == 0
+    assert len(calls) == 121
+
+    _reset_state()
+
+
 def test_refresh_daily_range_skips_failed_dates(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

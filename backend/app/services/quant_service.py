@@ -21,7 +21,7 @@ def _number(value: Any, default: float = 0.0) -> float:
 
 
 class QuantService:
-    _AUTO_UNIVERSE_LIMIT = 500
+    _AUTO_UNIVERSE_LIMIT = 1000
 
     def generate_candidates(
         self,

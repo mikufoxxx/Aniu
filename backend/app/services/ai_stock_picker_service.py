@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.services.ai_market_context_service import ai_market_context_service
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_service import normalize_symbol
@@ -19,15 +20,19 @@ class AIStockPickerService:
         symbols: list[str] | None = None,
         limit: int = 50,
         prefer_realtime: bool = True,
-        lookback_days: int = 120,
+        lookback_days: int | None = None,
     ) -> dict[str, Any]:
+        settings = get_settings()
+        normalized_lookback_days = int(
+            lookback_days or settings.market_data_maintenance_lookback_days
+        )
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
         dataset = quant_service.build_dataset(
             db,
             symbols=normalized_symbols,
             limit=limit,
             prefer_realtime=prefer_realtime,
-            lookback_days=lookback_days,
+            lookback_days=normalized_lookback_days,
         )
         context = ai_market_context_service.format_dataset_context(db, dataset)
         coverage = historical_data_service.summarize_daily_coverage(db)

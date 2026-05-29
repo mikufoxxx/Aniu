@@ -124,6 +124,66 @@ def test_market_report_generation_persists_structured_morning_report(monkeypatch
     _reset_state()
 
 
+def test_market_report_uses_maximized_lookback_for_dataset(monkeypatch, tmp_path) -> None:
+    from app.services.ai_market_context_service import ai_market_context_service
+    from app.services.quant_service import quant_service
+
+    captured: dict[str, object] = {}
+
+    def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=20):
+        captured["dataset"] = (symbols, limit, prefer_realtime, lookback_days)
+        return {
+            "universe_size": 1,
+            "item_count": 1,
+            "lookback_days": lookback_days,
+            "data_sources": ["tushare_daily"],
+            "coverage": {"daily_history_symbols": 1},
+            "items": [
+                {
+                    "symbol": "600519.SH",
+                    "name": "贵州茅台",
+                    "price": 100.0,
+                    "change_pct": 1.0,
+                    "amount": 10_000_000,
+                    "turnover": 0.5,
+                    "volume_ratio": 1.2,
+                    "source": "tencent",
+                    "timestamp": "2026-05-29 15:00:00",
+                    "score": 80.0,
+                    "factor_scores": {},
+                    "daily_factors": {"momentum_pct": 3.0},
+                    "rationale": "测试候选",
+                }
+            ],
+        }
+
+    def fake_context(db, *, symbols=None, limit=None, lookback_days=None):
+        captured["context"] = (symbols, limit, lookback_days)
+        return "AI量化市场上下文"
+
+    monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+    monkeypatch.setattr(ai_market_context_service, "build_context", fake_context)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/reports",
+            headers=headers,
+            json={
+                "report_type": "closing",
+                "limit": 50,
+                "lookback_days": 1825,
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["dataset"] == (None, 50, True, 1825)
+    assert captured["context"] == (None, 50, 1825)
+    assert response.json()["lookback_days"] == 1825
+
+    _reset_state()
+
+
 def test_market_report_uses_stored_universe_when_symbols_are_omitted(
     monkeypatch,
     tmp_path,

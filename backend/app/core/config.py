@@ -53,17 +53,17 @@ class Settings(BaseSettings):
         default="08:45,15:30", alias="MARKET_DATA_MAINTENANCE_TIMES"
     )
     market_data_maintenance_lookback_days: int = Field(
-        default=120, alias="MARKET_DATA_MAINTENANCE_LOOKBACK_DAYS"
+        default=1825, alias="MARKET_DATA_MAINTENANCE_LOOKBACK_DAYS"
     )
     market_data_maintenance_dataset_limit: int = Field(
-        default=500, alias="MARKET_DATA_MAINTENANCE_DATASET_LIMIT"
+        default=1000, alias="MARKET_DATA_MAINTENANCE_DATASET_LIMIT"
     )
     ai_market_context_enabled: bool = Field(
         default=True, alias="AI_MARKET_CONTEXT_ENABLED"
     )
-    ai_market_context_limit: int = Field(default=50, alias="AI_MARKET_CONTEXT_LIMIT")
+    ai_market_context_limit: int = Field(default=100, alias="AI_MARKET_CONTEXT_LIMIT")
     ai_market_context_lookback_days: int = Field(
-        default=120, alias="AI_MARKET_CONTEXT_LOOKBACK_DAYS"
+        default=1825, alias="AI_MARKET_CONTEXT_LOOKBACK_DAYS"
     )
     app_login_password: str | None = Field(default=None, alias="APP_LOGIN_PASSWORD")
     jwt_secret: str | None = Field(default=None, alias="JWT_SECRET")

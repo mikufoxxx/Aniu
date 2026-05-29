@@ -18,6 +18,10 @@ from app.services.market_report_service import market_report_service
 from app.services.quant_service import quant_service
 
 
+_MAX_MAINTENANCE_LOOKBACK_DAYS = 1825
+_MAX_MAINTENANCE_DATASET_LIMIT = 1000
+
+
 class MarketDataMaintenanceService:
     def __init__(self) -> None:
         self._completed_slots: set[str] = set()
@@ -71,11 +75,17 @@ class MarketDataMaintenanceService:
         settings = get_settings()
         normalized_lookback = max(
             1,
-            min(120, int(lookback_days or settings.market_data_maintenance_lookback_days)),
+            min(
+                _MAX_MAINTENANCE_LOOKBACK_DAYS,
+                int(lookback_days or settings.market_data_maintenance_lookback_days),
+            ),
         )
         normalized_limit = max(
             1,
-            min(500, int(dataset_limit or settings.market_data_maintenance_dataset_limit)),
+            min(
+                _MAX_MAINTENANCE_DATASET_LIMIT,
+                int(dataset_limit or settings.market_data_maintenance_dataset_limit),
+            ),
         )
         normalized_end = self._normalize_end_date(end_date)
         start_date = (
@@ -85,10 +95,11 @@ class MarketDataMaintenanceService:
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
         if normalized_symbols is None:
             coverage = historical_data_service.summarize_daily_coverage(db)
-            suggestion = coverage.get("refresh_suggestion") or {}
-            if suggestion.get("needed") and suggestion.get("start_date") and suggestion.get("end_date"):
-                start_date = str(suggestion["start_date"])
-                normalized_end = str(suggestion["end_date"])
+            start_date, normalized_end = self._refresh_window(
+                coverage=coverage,
+                end_date=normalized_end,
+                lookback_days=normalized_lookback,
+            )
         refresh = historical_data_service.refresh_daily_range(
             db,
             start_date=start_date,
@@ -321,6 +332,36 @@ class MarketDataMaintenanceService:
         if len(text) != 8 or not text.isdigit():
             raise ValueError(f"交易日期格式不正确: {end_date}")
         return text
+
+    def _refresh_window(
+        self,
+        *,
+        coverage: dict[str, Any],
+        end_date: str,
+        lookback_days: int,
+    ) -> tuple[str, str]:
+        full_start = (
+            datetime.strptime(end_date, "%Y%m%d").date()
+            - timedelta(days=lookback_days - 1)
+        ).strftime("%Y%m%d")
+        latest_trade_date = coverage.get("latest_trade_date")
+        readiness = coverage.get("readiness") or {}
+        suggestion = coverage.get("refresh_suggestion") or {}
+        if suggestion.get("needed") and suggestion.get("start_date") and suggestion.get("end_date"):
+            return str(suggestion["start_date"]), str(suggestion["end_date"])
+
+        has_daily_history = bool(readiness.get("has_daily_history") or latest_trade_date)
+        if not has_daily_history:
+            return full_start, end_date
+
+        latest_text = str(latest_trade_date or "")
+        if latest_text and latest_text < end_date:
+            catch_up_start = (
+                datetime.strptime(latest_text, "%Y%m%d").date() + timedelta(days=1)
+            ).strftime("%Y%m%d")
+            return catch_up_start, end_date
+
+        return end_date, end_date
 
     def _due_time(self, now: datetime, configured_times: str) -> str | None:
         current_minutes = now.hour * 60 + now.minute

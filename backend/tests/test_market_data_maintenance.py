@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 import threading
@@ -59,10 +59,165 @@ def test_market_data_defaults_maximize_monthly_allowance(monkeypatch) -> None:
 
     settings = get_settings()
 
-    assert settings.market_data_maintenance_lookback_days == 120
-    assert settings.market_data_maintenance_dataset_limit == 500
-    assert settings.ai_market_context_limit == 50
-    assert settings.ai_market_context_lookback_days == 120
+    assert settings.market_data_maintenance_lookback_days == 1825
+    assert settings.market_data_maintenance_dataset_limit == 1000
+    assert settings.ai_market_context_limit == 100
+    assert settings.ai_market_context_lookback_days == 1825
+
+    _reset_state()
+
+
+def test_market_data_maintenance_initial_backfill_uses_full_configured_window(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.historical_data_service import historical_data_service
+    from app.services.quant_service import quant_service
+
+    captured: dict[str, object] = {}
+
+    def fake_coverage(db):
+        return {
+            "latest_trade_date": None,
+            "readiness": {"has_daily_history": False},
+            "refresh_suggestion": {
+                "needed": False,
+                "start_date": None,
+                "end_date": None,
+                "reason": "暂无日线库存",
+            },
+        }
+
+    def fake_refresh_range(
+        db,
+        *,
+        start_date: str,
+        end_date: str,
+        symbols=None,
+        progress_callback=None,
+    ):
+        captured["range"] = (start_date, end_date, symbols)
+        return {
+            "start_date": start_date,
+            "end_date": end_date,
+            "source": "tushare",
+            "processed_days": 1825,
+            "stored_count": 200000,
+            "skipped_count": 0,
+            "unique_symbols": 5500,
+            "requested_symbols": symbols or [],
+            "daily_results": [],
+        }
+
+    def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=20):
+        captured["dataset"] = (symbols, limit, prefer_realtime, lookback_days)
+        return {
+            "universe_size": 5500,
+            "item_count": 1000,
+            "lookback_days": lookback_days,
+            "data_sources": ["tushare_daily"],
+            "coverage": {"daily_history_symbols": 1000},
+            "items": [],
+        }
+
+    monkeypatch.setattr(historical_data_service, "summarize_daily_coverage", fake_coverage)
+    monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
+    monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/maintenance/run",
+            headers=headers,
+            json={
+                "end_date": "20260528",
+                "lookback_days": 1825,
+                "dataset_limit": 1000,
+            },
+        )
+
+    expected_start = (
+        datetime.strptime("20260528", "%Y%m%d").date() - timedelta(days=1824)
+    ).strftime("%Y%m%d")
+    assert response.status_code == 200
+    assert captured["range"] == (expected_start, "20260528", None)
+    assert captured["dataset"] == (None, 1000, True, 1825)
+
+    _reset_state()
+
+
+def test_market_data_maintenance_catches_up_after_latest_complete_date(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.historical_data_service import historical_data_service
+    from app.services.quant_service import quant_service
+
+    captured: dict[str, object] = {}
+
+    def fake_coverage(db):
+        return {
+            "latest_trade_date": "20260526",
+            "readiness": {"has_daily_history": True},
+            "refresh_suggestion": {
+                "needed": False,
+                "start_date": None,
+                "end_date": None,
+                "reason": "最新交易日覆盖充足",
+            },
+        }
+
+    def fake_refresh_range(
+        db,
+        *,
+        start_date: str,
+        end_date: str,
+        symbols=None,
+        progress_callback=None,
+    ):
+        captured["range"] = (start_date, end_date, symbols)
+        return {
+            "start_date": start_date,
+            "end_date": end_date,
+            "source": "tushare",
+            "processed_days": 2,
+            "stored_count": 11000,
+            "skipped_count": 0,
+            "unique_symbols": 5500,
+            "requested_symbols": symbols or [],
+            "daily_results": [],
+        }
+
+    def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=20):
+        captured["dataset"] = (symbols, limit, prefer_realtime, lookback_days)
+        return {
+            "universe_size": 5500,
+            "item_count": 1000,
+            "lookback_days": lookback_days,
+            "data_sources": ["tushare_daily"],
+            "coverage": {"daily_history_symbols": 1000},
+            "items": [],
+        }
+
+    monkeypatch.setattr(historical_data_service, "summarize_daily_coverage", fake_coverage)
+    monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
+    monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/maintenance/run",
+            headers=headers,
+            json={
+                "end_date": "20260528",
+                "lookback_days": 1825,
+                "dataset_limit": 1000,
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["range"] == ("20260527", "20260528", None)
+    assert captured["dataset"] == (None, 1000, True, 1825)
 
     _reset_state()
 

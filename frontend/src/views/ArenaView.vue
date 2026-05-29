@@ -137,7 +137,7 @@
           </label>
           <label class="arena-field">
             <span>维护回看</span>
-            <input v-model.number="maintenanceLookbackDays" type="number" min="1" max="120" />
+            <input v-model.number="maintenanceLookbackDays" type="number" min="1" :max="maxDataLookbackDays" />
           </label>
           <label class="arena-field">
             <span>开始日期</span>
@@ -482,6 +482,9 @@ import { api } from '@/services/api'
 import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunRecord, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
+const maxDataLookbackDays = 1825
+const maxDatasetLimit = 1000
+const maxAIContextLimit = 100
 const defaultAgents: ArenaAgentConfig[] = [
   { id: 'momentum_ai', name: '动量 AI', style: 'momentum', provider: 'openai-compatible', model: '', enabled: true, prompt: '' },
   { id: 'balanced_ai', name: '均衡 AI', style: 'balanced', provider: 'openai-compatible', model: '', enabled: true, prompt: '' },
@@ -511,7 +514,7 @@ const marketReports = ref<MarketReport[]>([])
 const marketReportPerformance = ref<Record<number, MarketReportPerformancePayload>>({})
 const refreshStartDate = ref('20260526')
 const refreshEndDate = ref('20260528')
-const maintenanceLookbackDays = ref(120)
+const maintenanceLookbackDays = ref(maxDataLookbackDays)
 const backtestStartDate = ref('20260526')
 const backtestEndDate = ref('20260528')
 const refreshFullMarket = ref(true)
@@ -587,9 +590,9 @@ async function loadCandidates(): Promise<void> {
   try {
     const payload = await api.generateQuantCandidates({
       symbols: selectedSymbols(),
-      limit: 200,
+      limit: maxDatasetLimit,
       prefer_realtime: true,
-      lookback_days: 120,
+      lookback_days: maxDataLookbackDays,
     })
     candidates.value = payload.candidates
   } catch (error) {
@@ -603,9 +606,9 @@ async function loadQuantDataset(): Promise<void> {
   try {
     const payload = await api.buildQuantDataset({
       symbols: selectedSymbols(),
-      limit: 200,
+      limit: maxDatasetLimit,
       prefer_realtime: true,
-      lookback_days: 120,
+      lookback_days: maxDataLookbackDays,
     })
     quantDataset.value = payload
     candidates.value = payload.items
@@ -622,8 +625,8 @@ async function loadAIMarketContext(): Promise<void> {
   try {
     aiMarketContext.value = await api.buildAIMarketContext({
       symbols: selectedSymbols(),
-      limit: 50,
-      lookback_days: 120,
+      limit: maxAIContextLimit,
+      lookback_days: maxDataLookbackDays,
     })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'AI 上下文构建失败。'
@@ -638,9 +641,9 @@ async function loadAIStockPicks(): Promise<void> {
   try {
     const payload = await api.buildAIStockPicks({
       symbols: selectedSymbols(),
-      limit: 200,
+      limit: maxDatasetLimit,
       prefer_realtime: true,
-      lookback_days: 120,
+      lookback_days: maxDataLookbackDays,
     })
     quantDataset.value = payload.dataset
     candidates.value = payload.recommendations
@@ -677,7 +680,7 @@ async function generateReport(reportType: 'morning' | 'closing'): Promise<void> 
       report_type: reportType,
       symbols: selectedSymbols(),
       limit: 50,
-      lookback_days: 120,
+      lookback_days: maxDataLookbackDays,
     })
     marketReports.value = [report, ...marketReports.value.filter((item) => item.id !== report.id)].slice(0, 6)
     await loadReportPerformance(report.id)
@@ -744,7 +747,7 @@ async function runMaintenance(): Promise<void> {
       end_date: refreshEndDate.value,
       lookback_days: maintenanceLookbackDays.value,
       symbols: selectedSymbols(),
-      dataset_limit: 500,
+      dataset_limit: maxDatasetLimit,
     })
     maintenanceJob.value = job
     await pollMaintenanceJob(job.job_id)

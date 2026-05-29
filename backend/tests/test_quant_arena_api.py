@@ -494,6 +494,80 @@ def test_arena_run_reuses_autonomous_stock_pick_snapshot(
     _reset_state()
 
 
+def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path) -> None:
+    from app.services.ai_stock_picker_service import ai_stock_picker_service
+
+    captured: dict[str, object] = {}
+
+    def candidate(symbol: str, score: float) -> dict[str, object]:
+        return {
+            "symbol": symbol,
+            "name": symbol,
+            "price": 10.0,
+            "change_pct": 1.5,
+            "amount": 10_000_000,
+            "turnover": 0.8,
+            "volume_ratio": 1.2,
+            "source": "tencent",
+            "timestamp": "2026-05-29 15:00:03",
+            "score": score,
+            "factor_scores": {},
+            "daily_factors": {"bars_used": 120},
+            "rationale": "测试候选",
+        }
+
+    def fake_build_snapshot(
+        *,
+        db,
+        symbols=None,
+        limit=50,
+        prefer_realtime=True,
+        lookback_days=120,
+    ):
+        captured["request"] = (symbols, limit, prefer_realtime, lookback_days)
+        items = [candidate("600519.SH", 80), candidate("000001.SZ", 70)]
+        return {
+            "snapshot_id": "ai-picks-test",
+            "selection_mode": "auto_universe",
+            "data_sources": ["tencent", "tushare_daily"],
+            "coverage": {},
+            "dataset": {
+                "universe_size": 1000,
+                "item_count": len(items),
+                "lookback_days": lookback_days,
+                "data_sources": ["tencent", "tushare_daily"],
+                "coverage": {"daily_history_symbols": len(items)},
+                "items": items,
+            },
+            "recommendations": items,
+            "context": "context",
+            "context_length": 7,
+        }
+
+    monkeypatch.setattr(ai_stock_picker_service, "build_snapshot", fake_build_snapshot)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "initial_cash": 200000,
+                "agents": [
+                    {"id": "deepseek", "name": "DeepSeek", "style": "momentum"},
+                    {"id": "gpt", "name": "GPT", "style": "balanced"},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured["request"] == (None, 1000, True, 1825)
+    payload = response.json()
+    assert payload["stock_pick_snapshot"]["dataset"]["lookback_days"] == 1825
+
+    _reset_state()
+
+
 def test_arena_orders_store_shared_snapshot_and_agent_decision_context(
     monkeypatch,
     tmp_path,

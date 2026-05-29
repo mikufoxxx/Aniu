@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import get_settings
 from app.db.models import (
     AppSettings,
     ArenaAccount,
@@ -42,13 +43,14 @@ class ArenaService:
         initial_cash: float = 200000.0,
     ) -> dict[str, Any]:
         active_agents = agents or self.enabled_agents(db)
+        settings = get_settings()
         app_settings = settings_service.get_or_create_settings(db)
         stock_pick_snapshot = ai_stock_picker_service.build_snapshot(
             db=db,
             symbols=symbols,
-            limit=max(20, len(active_agents) * 5),
+            limit=settings.market_data_maintenance_dataset_limit,
             prefer_realtime=True,
-            lookback_days=120,
+            lookback_days=settings.market_data_maintenance_lookback_days,
         )
         dataset = stock_pick_snapshot["dataset"]
         candidate_payload = {

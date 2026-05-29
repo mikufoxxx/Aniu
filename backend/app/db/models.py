@@ -220,6 +220,26 @@ class ArenaRun(Base):
     )
 
 
+class ArenaAgentConfig(Base):
+    __tablename__ = "arena_agent_configs"
+    __table_args__ = (
+        UniqueConstraint("agent_id", name="uq_arena_agent_configs_agent_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_name: Mapped[str] = mapped_column(String(120))
+    style: Mapped[str] = mapped_column(String(32), default="balanced")
+    provider: Mapped[str] = mapped_column(String(64), default="openai-compatible")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class ArenaAccount(Base):
     __tablename__ = "arena_accounts"
     __table_args__ = (

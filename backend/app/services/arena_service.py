@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import ArenaAccount, ArenaOrder, ArenaPosition, ArenaRun
+from app.db.models import ArenaAccount, ArenaAgentConfig, ArenaOrder, ArenaPosition, ArenaRun
 from app.services.quant_service import quant_service
 
 
@@ -31,7 +31,7 @@ class ArenaService:
         agents: list[dict[str, str]] | None = None,
         initial_cash: float = 200000.0,
     ) -> dict[str, Any]:
-        active_agents = agents or DEFAULT_AGENTS
+        active_agents = agents or self.enabled_agents(db)
         candidate_payload = quant_service.generate_candidates(
             symbols=symbols,
             limit=max(5, len(active_agents)),
@@ -112,6 +112,95 @@ class ArenaService:
         items = [self._leaderboard_item(account, include_positions=True) for account in accounts]
         items.sort(key=lambda item: item["total_assets"], reverse=True)
         return {"items": items}
+
+    def list_agents(self, db: Session) -> dict[str, Any]:
+        stored = db.scalars(
+            select(ArenaAgentConfig).order_by(ArenaAgentConfig.id)
+        ).all()
+        if stored:
+            agents = [self._agent_config_payload(item) for item in stored]
+        else:
+            agents = [
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "style": item["style"],
+                    "provider": "openai-compatible",
+                    "model": "",
+                    "enabled": True,
+                    "prompt": "",
+                }
+                for item in DEFAULT_AGENTS
+            ]
+        return {"agents": agents}
+
+    def replace_agents(
+        self,
+        db: Session,
+        *,
+        agents: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        existing_by_id = {
+            item.agent_id: item
+            for item in db.scalars(select(ArenaAgentConfig)).all()
+        }
+        seen: set[str] = set()
+        saved: list[ArenaAgentConfig] = []
+        for agent in agents:
+            agent_id = str(agent.get("id") or "").strip()
+            if not agent_id:
+                raise ValueError("AI 选手 id 不能为空。")
+            if agent_id in seen:
+                raise ValueError(f"AI 选手 id 重复: {agent_id}")
+            seen.add(agent_id)
+            record = existing_by_id.get(agent_id) or ArenaAgentConfig(agent_id=agent_id)
+            record.agent_name = str(agent.get("name") or agent_id)
+            record.style = str(agent.get("style") or "balanced")
+            record.provider = str(agent.get("provider") or "openai-compatible")
+            record.model = str(agent.get("model") or "")
+            record.prompt = str(agent.get("prompt") or "")
+            record.enabled = bool(agent.get("enabled", True))
+            db.add(record)
+            saved.append(record)
+
+        for agent_id, record in existing_by_id.items():
+            if agent_id not in seen:
+                db.delete(record)
+        db.commit()
+        for item in saved:
+            db.refresh(item)
+        return {"agents": [self._agent_config_payload(item) for item in saved]}
+
+    def enabled_agents(self, db: Session) -> list[dict[str, Any]]:
+        records = db.scalars(
+            select(ArenaAgentConfig)
+            .where(ArenaAgentConfig.enabled.is_(True))
+            .order_by(ArenaAgentConfig.id)
+        ).all()
+        if not records:
+            return DEFAULT_AGENTS
+        return [
+            {
+                "id": item.agent_id,
+                "name": item.agent_name,
+                "style": item.style,
+                "provider": item.provider,
+                "model": item.model,
+                "prompt": item.prompt,
+            }
+            for item in records
+        ]
+
+    def _agent_config_payload(self, item: ArenaAgentConfig) -> dict[str, Any]:
+        return {
+            "id": item.agent_id,
+            "name": item.agent_name,
+            "style": item.style,
+            "provider": item.provider,
+            "model": item.model,
+            "enabled": item.enabled,
+            "prompt": item.prompt,
+        }
 
     def _decide_for_agent(
         self,

@@ -10,6 +10,13 @@
           <div class="panel-head-actions">
             <button
               class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="agentSaving"
+              @click="saveAgents"
+            >
+              {{ agentSaving ? '保存中…' : '保存选手' }}
+            </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
               :class="{ 'is-loading': loading }"
               :disabled="loading"
               @click="runArena"
@@ -34,8 +41,30 @@
 
         <div class="arena-agent-grid">
           <div v-for="agent in agents" :key="agent.id" class="arena-agent-card">
-            <strong>{{ agent.name }}</strong>
-            <span>{{ styleText(agent.style) }}</span>
+            <label>
+              <span>ID</span>
+              <input v-model="agent.id" type="text" />
+            </label>
+            <label>
+              <span>名称</span>
+              <input v-model="agent.name" type="text" />
+            </label>
+            <label>
+              <span>风格</span>
+              <select v-model="agent.style">
+                <option value="momentum">动量型</option>
+                <option value="balanced">均衡型</option>
+                <option value="risk_control">风控型</option>
+              </select>
+            </label>
+            <label>
+              <span>模型</span>
+              <input v-model="agent.model" type="text" placeholder="deepseek-chat" />
+            </label>
+            <label class="arena-inline-check">
+              <input v-model="agent.enabled" type="checkbox" />
+              <b>启用</b>
+            </label>
           </div>
         </div>
       </section>
@@ -230,17 +259,19 @@ import { api } from '@/services/api'
 import type { ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRefreshPayload, MarketSourceHealthPayload, QuantCandidate } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
-const agents: ArenaAgentConfig[] = [
-  { id: 'momentum_ai', name: '动量 AI', style: 'momentum' },
-  { id: 'balanced_ai', name: '均衡 AI', style: 'balanced' },
-  { id: 'risk_ai', name: '风控 AI', style: 'risk_control' },
+const defaultAgents: ArenaAgentConfig[] = [
+  { id: 'momentum_ai', name: '动量 AI', style: 'momentum', provider: 'openai-compatible', model: '', enabled: true, prompt: '' },
+  { id: 'balanced_ai', name: '均衡 AI', style: 'balanced', provider: 'openai-compatible', model: '', enabled: true, prompt: '' },
+  { id: 'risk_ai', name: '风控 AI', style: 'risk_control', provider: 'openai-compatible', model: '', enabled: true, prompt: '' },
 ]
 
 const symbolsText = ref(defaultSymbols.join('\n'))
 const initialCash = ref(200000)
 const loading = ref(false)
 const historyLoading = ref(false)
+const agentSaving = ref(false)
 const errorMessage = ref('')
+const agents = ref<ArenaAgentConfig[]>(defaultAgents.map((agent) => ({ ...agent })))
 const sourceHealth = ref<MarketSourceHealthPayload | null>(null)
 const candidates = ref<QuantCandidate[]>([])
 const arenaResult = ref<ArenaRunPayload | null>(null)
@@ -268,6 +299,30 @@ async function loadSources(): Promise<void> {
   sourceHealth.value = await api.getMarketSourceHealth()
 }
 
+async function loadAgents(): Promise<void> {
+  const payload = await api.getArenaAgents()
+  agents.value = payload.agents.map((agent) => ({
+    ...agent,
+    provider: agent.provider ?? 'openai-compatible',
+    model: agent.model ?? '',
+    enabled: agent.enabled ?? true,
+    prompt: agent.prompt ?? '',
+  }))
+}
+
+async function saveAgents(): Promise<void> {
+  agentSaving.value = true
+  errorMessage.value = ''
+  try {
+    const payload = await api.updateArenaAgents({ agents: agents.value })
+    agents.value = payload.agents
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'AI 选手保存失败。'
+  } finally {
+    agentSaving.value = false
+  }
+}
+
 async function loadLeaderboard(): Promise<void> {
   arenaLeaderboard.value = await api.getArenaLeaderboard()
 }
@@ -292,7 +347,6 @@ async function runArena(): Promise<void> {
   try {
     const payload = await api.runArena({
       symbols: parseSymbols(),
-      agents,
       initial_cash: initialCash.value,
     })
     arenaResult.value = payload
@@ -384,7 +438,7 @@ function formatPercent(value: number | null | undefined): string {
 
 onMounted(async () => {
   try {
-    await Promise.all([loadSources(), loadCandidates(), loadLeaderboard()])
+    await Promise.all([loadSources(), loadAgents(), loadCandidates(), loadLeaderboard()])
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '页面初始化失败。'
   }
@@ -493,6 +547,28 @@ onMounted(async () => {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.035);
   padding: 12px;
+}
+
+.arena-agent-card {
+  display: grid;
+  gap: 8px;
+}
+
+.arena-agent-card label {
+  display: grid;
+  gap: 4px;
+  color: #9cb2cf;
+  font-size: 12px;
+}
+
+.arena-agent-card input,
+.arena-agent-card select {
+  width: 100%;
+  border: 1px solid rgba(145, 170, 214, 0.16);
+  border-radius: 8px;
+  background: rgba(7, 14, 27, 0.82);
+  color: #eef4ff;
+  padding: 8px 10px;
 }
 
 .arena-agent-card strong,

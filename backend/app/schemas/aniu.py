@@ -369,12 +369,24 @@ class ArenaAgentRequest(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=120)
     style: Literal["momentum", "balanced", "risk_control"] = "balanced"
+    provider: str = Field(default="openai-compatible", max_length=64)
+    model: str = Field(default="", max_length=128)
+    enabled: bool = True
+    prompt: str = Field(default="", max_length=2000)
 
 
 class ArenaRunRequest(BaseModel):
     symbols: list[str] | None = None
     agents: list[ArenaAgentRequest] | None = None
     initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
+
+
+class ArenaAgentsUpdateRequest(BaseModel):
+    agents: list[ArenaAgentRequest] = Field(min_length=1, max_length=20)
+
+
+class ArenaAgentsResponse(BaseModel):
+    agents: list[ArenaAgentRequest] = Field(default_factory=list)
 
 
 class ArenaOrderRead(BaseModel):

@@ -272,3 +272,73 @@ def test_arena_stop_loss_sells_position_and_records_realized_pnl(monkeypatch, tm
     assert item["cash"] < 200000
 
     _reset_state()
+
+
+def test_arena_agents_can_be_saved_and_used_as_default_runner(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 3.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        save_response = client.put(
+            "/api/aniu/arena/agents",
+            headers=headers,
+            json={
+                "agents": [
+                    {
+                        "id": "deepseek_ai",
+                        "name": "DeepSeek 量化",
+                        "style": "momentum",
+                        "provider": "openai-compatible",
+                        "model": "deepseek-chat",
+                        "enabled": True,
+                        "prompt": "偏动量和量价确认。",
+                    },
+                    {
+                        "id": "gpt_ai",
+                        "name": "GPT 风控",
+                        "style": "risk_control",
+                        "provider": "openai-compatible",
+                        "model": "gpt-4o-mini",
+                        "enabled": False,
+                        "prompt": "偏风险控制。",
+                    },
+                ]
+            },
+        )
+        list_response = client.get("/api/aniu/arena/agents", headers=headers)
+        run_response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={"symbols": ["000001.SZ"], "initial_cash": 200000},
+        )
+
+    assert save_response.status_code == 200
+    assert [item["id"] for item in save_response.json()["agents"]] == [
+        "deepseek_ai",
+        "gpt_ai",
+    ]
+    assert list_response.status_code == 200
+    assert list_response.json()["agents"][0]["model"] == "deepseek-chat"
+    assert run_response.status_code == 200
+    payload = run_response.json()
+    assert [item["agent_id"] for item in payload["leaderboard"]] == ["deepseek_ai"]
+    assert payload["orders"][0]["agent_name"] == "DeepSeek 量化"
+
+    _reset_state()

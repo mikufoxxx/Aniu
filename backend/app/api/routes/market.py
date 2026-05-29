@@ -9,6 +9,8 @@ from app.schemas.aniu import (
     ArenaRunRequest,
     ArenaRunResponse,
     ArenaLeaderboardResponse,
+    ArenaAgentsResponse,
+    ArenaAgentsUpdateRequest,
     BacktestRequest,
     BacktestResponse,
     DailyRefreshRequest,
@@ -111,3 +113,26 @@ def get_arena_leaderboard(
     _user: str = Depends(get_current_user),
 ) -> ArenaLeaderboardResponse:
     return arena_service.leaderboard(db)
+
+
+@router.get("/arena/agents", response_model=ArenaAgentsResponse)
+def list_arena_agents(
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentsResponse:
+    return arena_service.list_agents(db)
+
+
+@router.put("/arena/agents", response_model=ArenaAgentsResponse)
+def replace_arena_agents(
+    payload: ArenaAgentsUpdateRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentsResponse:
+    try:
+        return arena_service.replace_agents(
+            db,
+            agents=[agent.model_dump() for agent in payload.agents],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

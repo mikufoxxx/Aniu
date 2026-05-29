@@ -251,6 +251,14 @@ export interface ArenaAgentConfig {
   id: string
   name: string
   style: 'momentum' | 'balanced' | 'risk_control'
+  provider?: string
+  model?: string
+  enabled?: boolean
+  prompt?: string
+}
+
+export interface ArenaAgentsPayload {
+  agents: ArenaAgentConfig[]
 }
 
 export interface ArenaOrder {

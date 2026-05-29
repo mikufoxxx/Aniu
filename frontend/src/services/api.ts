@@ -1,4 +1,4 @@
-import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -396,6 +396,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 60000,
+    })
+  },
+  getArenaAgents() {
+    return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents`)
+  },
+  updateArenaAgents(payload: { agents: ArenaAgentConfig[] }) {
+    return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     })
   },
   getArenaLeaderboard() {

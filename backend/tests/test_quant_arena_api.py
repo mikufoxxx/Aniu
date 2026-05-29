@@ -1111,6 +1111,10 @@ def test_arena_stop_loss_sells_position_and_records_realized_pnl(monkeypatch, tm
 
     assert first["orders"][0]["action"] == "BUY"
     assert second["orders"][0]["action"] == "SELL"
+    assert (
+        second["orders"][0]["decision_context"]["stock_pick_snapshot_id"]
+        == second["stock_pick_snapshot"]["snapshot_id"]
+    )
     item = [row for row in leaderboard["items"] if row["agent_id"] == "risk_agent"][0]
     assert item["order_count"] == 2
     assert item["positions"] == []

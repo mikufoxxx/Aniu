@@ -81,7 +81,12 @@ class ArenaService:
                 initial_cash=initial_cash,
             )
             self._mark_positions(account, candidates)
-            sell_decision = self._stop_loss_decision(account)
+            sell_decision = self._stop_loss_decision(
+                account,
+                snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
+                data_sources=data_sources,
+            )
             decision = sell_decision or self._decide_for_agent(
                 account=account,
                 agent=agent,
@@ -641,7 +646,14 @@ class ArenaService:
             ratio = ratio / 100
         return min(max(ratio, 0.01), 1.0)
 
-    def _stop_loss_decision(self, account: ArenaAccount) -> dict[str, Any] | None:
+    def _stop_loss_decision(
+        self,
+        account: ArenaAccount,
+        *,
+        snapshot_id: str,
+        stock_pick_snapshot_id: str,
+        data_sources: list[str],
+    ) -> dict[str, Any] | None:
         stop_loss = STOP_LOSS_BY_STYLE.get(account.style, 0.06)
         for position in account.positions:
             if position.quantity <= 0 or position.avg_cost <= 0 or position.last_price <= 0:
@@ -665,7 +677,8 @@ class ArenaService:
                     f"{account.style} 触发止损，当前价较成本回撤 {abs(drawdown) * 100:.2f}%。"
                 ),
                 "decision_context": {
-                    "snapshot_id": None,
+                    "snapshot_id": snapshot_id,
+                    "stock_pick_snapshot_id": stock_pick_snapshot_id,
                     "agent": {
                         "id": account.agent_id,
                         "name": account.agent_name,
@@ -674,7 +687,7 @@ class ArenaService:
                     "action": "SELL",
                     "risk": {"drawdown_pct": round(drawdown * 100, 4)},
                     "selected_candidate": {},
-                    "data_sources": [],
+                    "data_sources": data_sources,
                 },
             }
         return None

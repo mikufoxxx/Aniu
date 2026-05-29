@@ -508,6 +508,12 @@ def test_refresh_daily_bars_stores_hot_sector_members(monkeypatch, tmp_path) -> 
                 "con_code": "600519.SH",
                 "con_name": "贵州茅台",
                 "is_new": "Y",
+            },
+            {
+                "ts_code": "885001.TI",
+                "con_code": "001282.HK",
+                "con_name": "港股样本",
+                "is_new": "N",
             }
         ]
 

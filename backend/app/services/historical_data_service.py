@@ -646,6 +646,8 @@ class HistoricalDataService:
         for row in rows:
             sector_symbol = normalize_symbol(str(row.get("ts_code") or ""))
             stock_symbol = normalize_symbol(str(row.get("con_code") or ""))
+            if not self._is_a_share_symbol(stock_symbol):
+                continue
             info = metadata.get(sector_symbol) or {}
             existing = db.scalar(
                 select(SectorMember).where(
@@ -669,6 +671,9 @@ class HistoricalDataService:
             db.add(member)
             stored_count += 1
         return stored_count
+
+    def _is_a_share_symbol(self, symbol: str) -> bool:
+        return symbol.endswith((".SH", ".SZ", ".BJ"))
 
     def _store_sector_rows(
         self,

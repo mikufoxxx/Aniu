@@ -30,7 +30,6 @@ _TUSHARE_THS_DAILY_FIELDS = (
 )
 _TUSHARE_THS_MEMBER_FIELDS = "ts_code,con_code,con_name,is_new"
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
-_MAX_SECTOR_MEMBER_REFRESH_SECTORS = 50
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -628,8 +627,6 @@ class HistoricalDataService:
             if not symbol:
                 continue
             symbols.append(symbol)
-            if len(symbols) >= _MAX_SECTOR_MEMBER_REFRESH_SECTORS:
-                break
         return symbols
 
     def _store_sector_member_rows(

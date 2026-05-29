@@ -400,6 +400,7 @@ def test_refresh_daily_bars_stores_tushare_sector_rows(monkeypatch, tmp_path) ->
     def fake_fetch_sector_index_rows():
         return [
             {"ts_code": "885001.TI", "name": "白酒概念", "type": "N"},
+            {"ts_code": "885002.TI", "name": "食品饮料", "type": "N"},
             {"ts_code": "881155.TI", "name": "半导体", "type": "I"},
         ]
 
@@ -497,11 +498,12 @@ def test_refresh_daily_bars_stores_hot_sector_members(monkeypatch, tmp_path) -> 
     def fake_fetch_sector_daily_rows(trade_date: str):
         return [
             {"ts_code": "885001.TI", "trade_date": "20260528", "pct_change": 3.21},
+            {"ts_code": "885002.TI", "trade_date": "20260528", "pct_change": 1.08},
             {"ts_code": "881155.TI", "trade_date": "20260528", "pct_change": -1.12},
         ]
 
     def fake_fetch_sector_member_rows(sector_symbols: list[str]):
-        assert sector_symbols == ["885001.TI"]
+        assert sector_symbols == ["885001.TI", "885002.TI"]
         return [
             {
                 "ts_code": "885001.TI",
@@ -540,7 +542,7 @@ def test_refresh_daily_bars_stores_hot_sector_members(monkeypatch, tmp_path) -> 
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["sector_count"] == 2
+        assert payload["sector_count"] == 3
         assert payload["sector_member_count"] == 1
 
         with session_scope() as db:

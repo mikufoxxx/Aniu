@@ -192,6 +192,13 @@
             >
               构建数据集
             </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="loading"
+              @click="loadAIMarketContext"
+            >
+              AI上下文
+            </button>
           </div>
         </div>
         <div v-if="quantDataset" class="arena-dataset-summary">
@@ -211,6 +218,10 @@
             <strong>{{ quantDataset.lookback_days }}</strong>
             <span>回看日</span>
           </div>
+        </div>
+        <div v-if="aiMarketContext" class="arena-ai-context">
+          <strong>AI 输入上下文 · {{ aiMarketContext.context_length }} 字</strong>
+          <pre>{{ aiMarketContext.context }}</pre>
         </div>
         <div class="positions-surface" v-if="candidates.length">
           <div class="arena-table-row arena-table-head">
@@ -309,7 +320,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -328,6 +339,7 @@ const agents = ref<ArenaAgentConfig[]>(defaultAgents.map((agent) => ({ ...agent 
 const sourceHealth = ref<MarketSourceHealthPayload | null>(null)
 const candidates = ref<QuantCandidate[]>([])
 const quantDataset = ref<QuantDatasetPayload | null>(null)
+const aiMarketContext = ref<AIMarketContextPayload | null>(null)
 const arenaResult = ref<ArenaRunPayload | null>(null)
 const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
 const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
@@ -411,6 +423,22 @@ async function loadQuantDataset(): Promise<void> {
     candidates.value = payload.items
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '量化数据集构建失败。'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadAIMarketContext(): Promise<void> {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    aiMarketContext.value = await api.buildAIMarketContext({
+      symbols: parseSymbols(),
+      limit: 10,
+      lookback_days: 20,
+    })
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'AI 上下文构建失败。'
   } finally {
     loading.value = false
   }
@@ -636,6 +664,30 @@ onMounted(async () => {
 .arena-dataset-summary span {
   color: #9cb2cf;
   font-size: 12px;
+}
+
+.arena-ai-context {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(7, 14, 27, 0.7);
+  padding: 12px;
+}
+
+.arena-ai-context strong {
+  color: #f7fbff;
+}
+
+.arena-ai-context pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  color: #b7c8e3;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .arena-field {

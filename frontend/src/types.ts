@@ -238,6 +238,11 @@ export interface MarketDataMaintenancePayload {
   dataset: QuantDatasetPayload
 }
 
+export interface AIMarketContextPayload {
+  context: string
+  context_length: number
+}
+
 export interface DailyRefreshPayload {
   trade_date: string
   source: string

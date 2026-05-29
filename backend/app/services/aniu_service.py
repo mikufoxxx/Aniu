@@ -66,6 +66,7 @@ from app.services.automation_session_service import (
 )
 from app.services.llm_service import LLMStreamCancelled, llm_service
 from app.services.account_service import account_service
+from app.services.ai_market_context_service import ai_market_context_service
 from app.services.run_service import run_service
 from app.services.run_service import RunInvocationError
 from app.services.run_query_service import run_query_service
@@ -1476,6 +1477,7 @@ class AniuService:
         trigger_source: str,
         schedule_id: int | None,
     ) -> PersistentRunSessionContext:
+        settings.prefetched_context = ai_market_context_service.build_context(db)
         return automation_session_service.prepare_persistent_session_context(
             db=db,
             run_id=run_id,

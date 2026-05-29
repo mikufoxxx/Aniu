@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.db.database import get_db
 from app.schemas.aniu import (
+    AIMarketContextRequest,
+    AIMarketContextResponse,
     ArenaRunRequest,
     ArenaRunResponse,
     ArenaLeaderboardResponse,
@@ -25,6 +27,7 @@ from app.schemas.aniu import (
     QuantDatasetRequest,
     QuantDatasetResponse,
 )
+from app.services.ai_market_context_service import ai_market_context_service
 from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_maintenance_service import market_data_maintenance_service
@@ -73,6 +76,24 @@ def build_quant_dataset(
             prefer_realtime=payload.prefer_realtime,
             lookback_days=payload.lookback_days,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/market/ai-context", response_model=AIMarketContextResponse)
+def build_ai_market_context(
+    payload: AIMarketContextRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> AIMarketContextResponse:
+    try:
+        context = ai_market_context_service.build_context(
+            db,
+            symbols=payload.symbols,
+            limit=payload.limit,
+            lookback_days=payload.lookback_days,
+        )
+        return {"context": context, "context_length": len(context)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

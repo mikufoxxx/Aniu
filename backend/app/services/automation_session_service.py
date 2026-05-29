@@ -158,7 +158,7 @@ class AutomationSessionService:
             schedule_name=getattr(settings, "schedule_name", None),
             run_type=str(getattr(settings, "run_type", "analysis") or "analysis"),
             task_prompt=str(getattr(settings, "task_prompt", "") or ""),
-            prefetched_context=None,
+            prefetched_context=getattr(settings, "prefetched_context", None),
         )
         user_message = self.persist_persistent_session_user_message(
             db=db,
@@ -293,7 +293,10 @@ class AutomationSessionService:
             "本轮任务:",
             str(task_prompt or "").strip() or "--",
         ]
-        del settings, schedule_id, schedule_name, prefetched_context
+        context_text = str(prefetched_context or "").strip()
+        if context_text:
+            lines.extend(["", "预取市场上下文:", context_text])
+        del settings, schedule_id, schedule_name
         return "\n".join(lines).strip()
 
     def build_persistent_session_assistant_content(

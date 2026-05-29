@@ -1,4 +1,4 @@
-import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -379,6 +379,13 @@ export const api = {
   },
   buildQuantDataset(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean; lookback_days?: number }) {
     return request<QuantDatasetPayload>(`${API_PREFIX}/quant/dataset`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  buildAIMarketContext(payload: { symbols?: string[]; limit?: number; lookback_days?: number }) {
+    return request<AIMarketContextPayload>(`${API_PREFIX}/market/ai-context`, {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 60000,

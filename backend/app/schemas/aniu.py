@@ -336,6 +336,17 @@ class QuantDatasetResponse(BaseModel):
     items: list[QuantCandidateRead]
 
 
+class AIMarketContextRequest(BaseModel):
+    symbols: list[str] | None = None
+    limit: int = Field(default=10, ge=1, le=50)
+    lookback_days: int = Field(default=20, ge=1, le=120)
+
+
+class AIMarketContextResponse(BaseModel):
+    context: str
+    context_length: int
+
+
 class DailyRefreshRequest(BaseModel):
     trade_date: str = Field(min_length=8, max_length=10)
     symbols: list[str] | None = None

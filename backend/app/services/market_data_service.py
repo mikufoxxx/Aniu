@@ -27,6 +27,7 @@ DEFAULT_UNIVERSE = [
 ]
 
 _TENCENT_QUOTE_BATCH_SIZE = 60
+_EASTMONEY_QUOTE_BATCH_SIZE = 80
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -53,6 +54,13 @@ def symbol_to_easy_tdx(symbol: str) -> str:
     normalized = normalize_symbol(symbol)
     code, suffix = normalized.split(".", 1)
     return f"{suffix} {code}"
+
+
+def symbol_to_eastmoney_secid(symbol: str) -> str:
+    normalized = normalize_symbol(symbol)
+    code, suffix = normalized.split(".", 1)
+    market = "1" if suffix == "SH" else "0"
+    return f"{market}.{code}"
 
 
 def _parse_float(value: Any) -> float | None:
@@ -160,6 +168,19 @@ class MarketDataService:
             for quote in self._get_tencent_quotes(missing_symbols):
                 symbol = normalize_symbol(str(quote.get("symbol") or ""))
                 quote_by_symbol[symbol] = quote
+        missing_symbols = [
+            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
+        ]
+        if missing_symbols:
+            for quote in self._get_eastmoney_quotes(missing_symbols):
+                symbol = normalize_symbol(str(quote.get("symbol") or ""))
+                quote_by_symbol[symbol] = quote
+
+        missing_symbols = [
+            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
+        ]
+        for quote in self._fallback_quotes(missing_symbols):
+            quote_by_symbol[quote["symbol"]] = quote
 
         quotes = [
             quote_by_symbol[symbol]
@@ -290,6 +311,65 @@ class MarketDataService:
                     "volume_ratio": None,
                     "source": "tencent",
                     "timestamp": fields[30] if len(fields) > 30 else None,
+                }
+            )
+        return results
+
+    def _get_eastmoney_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for start in range(0, len(symbols), _EASTMONEY_QUOTE_BATCH_SIZE):
+            batch = symbols[start : start + _EASTMONEY_QUOTE_BATCH_SIZE]
+            results.extend(self._request_eastmoney_quote_batch(batch))
+        return results
+
+    def _request_eastmoney_quote_batch(self, symbols: list[str]) -> list[dict[str, Any]]:
+        if not symbols:
+            return []
+        params = {
+            "fltt": "2",
+            "invt": "2",
+            "fields": "f12,f13,f14,f2,f3,f4,f5,f6,f8,f10,f17,f18,f20,f21",
+            "secids": ",".join(symbol_to_eastmoney_secid(symbol) for symbol in symbols),
+        }
+        try:
+            response = httpx.get(
+                "https://push2.eastmoney.com/api/qt/ulist.np/get",
+                params=params,
+                timeout=8.0,
+                headers={"User-Agent": "Aniu/1.0"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return []
+
+        data = payload.get("data") if isinstance(payload, dict) else None
+        diff = data.get("diff") if isinstance(data, dict) else None
+        if not isinstance(diff, list):
+            return []
+
+        results: list[dict[str, Any]] = []
+        for item in diff:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("f12") or "").zfill(6)
+            market = int(_parse_float(item.get("f13")) or 0)
+            suffix = "SH" if market == 1 else "SZ"
+            price = _parse_float(item.get("f2"))
+            change_pct = _parse_float(item.get("f3"))
+            amount = _parse_float(item.get("f6"))
+            turnover = _parse_float(item.get("f8"))
+            results.append(
+                {
+                    "symbol": f"{code}.{suffix}",
+                    "name": str(item.get("f14") or code),
+                    "price": price,
+                    "change_pct": change_pct,
+                    "amount": amount,
+                    "turnover": turnover,
+                    "volume_ratio": _parse_float(item.get("f10")),
+                    "source": "eastmoney",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
         return results

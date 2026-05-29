@@ -117,3 +117,105 @@ def test_tencent_quotes_fill_partial_batch_gaps_with_fallback(monkeypatch) -> No
 
     assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
     assert [item["source"] for item in quotes] == ["tencent", "fallback", "fallback"]
+
+
+def test_realtime_quotes_fill_tencent_gaps_with_eastmoney_before_fallback(monkeypatch) -> None:
+    from app.services.market_data_service import market_data_service
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_easy_tdx(symbols: list[str]):
+        return []
+
+    def fake_tencent(symbols: list[str]):
+        captured["tencent"] = symbols
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 1000,
+                "turnover": 1.0,
+                "volume_ratio": 1.0,
+                "source": "tencent",
+                "timestamp": "2026-05-29 15:00:00",
+            }
+        ]
+
+    def fake_eastmoney(symbols: list[str]):
+        captured["eastmoney"] = symbols
+        return [
+            {
+                "symbol": "000002.SZ",
+                "name": "万科A",
+                "price": 9.5,
+                "change_pct": 0.8,
+                "amount": 900,
+                "turnover": 0.7,
+                "volume_ratio": None,
+                "source": "eastmoney",
+                "timestamp": "2026-05-29 15:00:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "_get_easy_tdx_quotes", fake_easy_tdx)
+    monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
+    monkeypatch.setattr(market_data_service, "_get_eastmoney_quotes", fake_eastmoney)
+    market_data_service._quote_cache = None
+
+    quotes = market_data_service.get_quotes(["000001.SZ", "000002.SZ", "000003.SZ"])
+
+    assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert [item["source"] for item in quotes] == ["tencent", "eastmoney", "fallback"]
+    assert captured["tencent"] == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert captured["eastmoney"] == ["000002.SZ", "000003.SZ"]
+
+
+def test_eastmoney_quotes_parse_push2_batches(monkeypatch) -> None:
+    from app.services import market_data_service as module
+    from app.services.market_data_service import market_data_service
+
+    calls: list[str] = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    def fake_get(url: str, **kwargs):
+        secids = kwargs["params"]["secids"]
+        calls.append(secids)
+        diff = []
+        for secid in secids.split(","):
+            market, code = secid.split(".", 1)
+            diff.append(
+                {
+                    "f12": code,
+                    "f13": int(market),
+                    "f14": code,
+                    "f2": 10.5,
+                    "f3": 1.23,
+                    "f6": 123456789,
+                    "f8": 0.88,
+                    "f10": 1.15,
+                }
+            )
+        return FakeResponse({"data": {"diff": diff}})
+
+    monkeypatch.setattr(module.httpx, "get", fake_get)
+
+    symbols = [f"{index:06d}.SZ" for index in range(1, 83)]
+    quotes = market_data_service._get_eastmoney_quotes(symbols)
+
+    assert len(quotes) == 82
+    assert quotes[0]["symbol"] == "000001.SZ"
+    assert quotes[0]["price"] == 10.5
+    assert quotes[0]["source"] == "eastmoney"
+    assert len(calls) == 2
+    assert all(len(item.split(",")) <= 80 for item in calls)

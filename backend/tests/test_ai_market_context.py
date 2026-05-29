@@ -15,6 +15,7 @@ from app.db.models import (
     DailyBar,
     FinancialIndicator,
     IndexBar,
+    LimitEvent,
     MarketDataMaintenanceRun,
     MarketReport,
     SectorBar,
@@ -181,6 +182,19 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     assets_turn=0.48,
                     current_ratio=4.2,
                 ),
+                LimitEvent(
+                    symbol="600519.SH",
+                    trade_date="20260528",
+                    limit_type="U",
+                    name="贵州茅台",
+                    industry="白酒",
+                    close=1326,
+                    pct_chg=10.0,
+                    open_times=1,
+                    up_stat="2/3",
+                    limit_times=2,
+                    fd_amount=120000000,
+                ),
             ]
         )
         db.flush()
@@ -195,7 +209,7 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert (
         "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, "
         "tushare_sector_member, tushare_stock_basic, tushare_fina_indicator, "
-        "tushare_index, tushare_sector"
+        "tushare_limit_list_d, tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -207,6 +221,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "毛利 91.20%" in context
     assert "净利同比 +18.50%" in context
     assert "负债率 18.00%" in context
+    assert "涨停 2连板" in context
+    assert "开板 1次" in context
     assert "PE 23.50" in context
     assert "PB 7.80" in context
     assert "行业 白酒" in context

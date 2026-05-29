@@ -266,6 +266,18 @@ export interface QuantCandidate {
     momentum_pct?: number
     avg_amount?: number
     volatility_pct?: number
+    limit_event?: {
+      trade_date?: string | null
+      limit_type?: string | null
+      name?: string | null
+      industry?: string | null
+      pct_chg?: number
+      open_times?: number
+      up_stat?: string | null
+      limit_times?: number
+      fd_amount?: number
+      turnover_ratio?: number
+    } | null
   }
   rationale: string
 }

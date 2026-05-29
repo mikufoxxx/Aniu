@@ -314,6 +314,44 @@ class FinancialIndicator(Base):
     )
 
 
+class LimitEvent(Base):
+    __tablename__ = "limit_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "trade_date",
+            "limit_type",
+            name="uq_limit_events_symbol_trade_date_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    trade_date: Mapped[str] = mapped_column(String(8), index=True)
+    limit_type: Mapped[str] = mapped_column(String(8), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pct_chg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    limit_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    float_mv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_mv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    turnover_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fd_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    first_time: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_time: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    open_times: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    up_stat: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    limit_times: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_limit_list_d")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

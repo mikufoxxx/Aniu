@@ -162,7 +162,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
         with session_scope() as db:
-            from app.db.models import FinancialIndicator
+            from app.db.models import FinancialIndicator, LimitEvent
 
             db.add_all(
                 [
@@ -229,6 +229,19 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         assets_turn=0.48,
                         current_ratio=4.2,
                     ),
+                    LimitEvent(
+                        symbol="600519.SH",
+                        trade_date="20260528",
+                        limit_type="U",
+                        name="贵州茅台",
+                        industry="白酒",
+                        close=1326,
+                        pct_chg=10.0,
+                        open_times=1,
+                        up_stat="2/3",
+                        limit_times=2,
+                        fd_amount=120000000,
+                    ),
                 ]
             )
 
@@ -256,6 +269,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         "tushare_sector_member",
         "tushare_stock_basic",
         "tushare_fina_indicator",
+        "tushare_limit_list_d",
     } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
@@ -270,10 +284,13 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["moneyflow_buy_lg_amount_rate"] == 6.2
     assert payload["items"][0]["daily_factors"]["sector_heat"][0]["name"] == "白酒概念"
     assert payload["items"][0]["daily_factors"]["sector_heat"][0]["pct_chg"] == 3.21
+    assert payload["items"][0]["daily_factors"]["limit_event"]["limit_type"] == "U"
+    assert payload["items"][0]["daily_factors"]["limit_event"]["limit_times"] == 2
     assert payload["items"][0]["profile"]["industry"] == "白酒"
     assert payload["items"][0]["profile"]["area"] == "贵州"
     assert payload["coverage"]["profile_symbols"] == 1
     assert payload["coverage"]["financial_symbols"] == 1
+    assert payload["coverage"]["limit_event_symbols"] == 1
     assert payload["items"][0]["financial_factors"]["roe"] == 31.2
     assert payload["items"][0]["financial_factors"]["grossprofit_margin"] == 91.2
     assert payload["items"][0]["financial_factors"]["netprofit_yoy"] == 18.5
@@ -285,6 +302,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert "moneyflow_net" in payload["items"][0]["factor_scores"]
     assert "moneyflow_large" in payload["items"][0]["factor_scores"]
     assert "sector_heat" in payload["items"][0]["factor_scores"]
+    assert "limit_sentiment" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

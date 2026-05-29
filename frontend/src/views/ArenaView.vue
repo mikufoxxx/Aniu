@@ -335,6 +335,7 @@
               <span class="position-symbol">{{ item.symbol }}</span>
               <span v-if="profileText(item)" class="position-symbol">{{ profileText(item) }}</span>
               <span v-if="financialText(item)" class="position-symbol">{{ financialText(item) }}</span>
+              <span v-if="limitEventText(item)" class="position-symbol">{{ limitEventText(item) }}</span>
             </div>
             <div>{{ item.score.toFixed(2) }}</div>
             <div>
@@ -857,6 +858,7 @@ function sourceCountsText(counts: Record<string, number> | undefined): string {
     ['指数', counts.tushare_index_daily],
     ['板块', counts.tushare_sector],
     ['成分', counts.tushare_sector_member],
+    ['涨跌停', counts.tushare_limit_list_d],
   ].filter(([, value]) => typeof value === 'number' && value > 0)
   if (!items.length) return '--'
   return items.map(([label, value]) => `${label}${formatInteger(value as number)}`).join(' / ')
@@ -877,6 +879,24 @@ function financialText(item: QuantCandidate): string {
   }
   if (typeof financial.netprofit_yoy === 'number' && financial.netprofit_yoy !== 0) {
     parts.push(`净利 ${formatSignedPercent(financial.netprofit_yoy)}`)
+  }
+  return parts.join(' · ')
+}
+
+function limitEventText(item: QuantCandidate): string {
+  const event = item.daily_factors?.limit_event
+  if (!event?.limit_type) return ''
+  const label = {
+    U: '涨停',
+    D: '跌停',
+    Z: '炸板',
+  }[event.limit_type] ?? event.limit_type
+  const parts = [label]
+  if (typeof event.limit_times === 'number' && event.limit_times > 0) {
+    parts.push(`${event.limit_times}连板`)
+  }
+  if (typeof event.open_times === 'number' && event.open_times > 0) {
+    parts.push(`开${event.open_times}`)
   }
   return parts.join(' · ')
 }

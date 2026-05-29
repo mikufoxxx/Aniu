@@ -715,6 +715,109 @@ def test_refresh_financial_indicators_stores_tushare_fina_indicator_rows(monkeyp
     _reset_state()
 
 
+def test_refresh_daily_bars_stores_tushare_limit_events(monkeypatch, tmp_path) -> None:
+    from app.db.models import LimitEvent
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date, symbols=None):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": trade_date,
+                "open": 100,
+                "high": 110,
+                "low": 99,
+                "close": 110,
+                "amount": 9000,
+            },
+            {
+                "ts_code": "000001.SZ",
+                "trade_date": trade_date,
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.5,
+                "amount": 1000,
+            },
+        ]
+
+    def fake_fetch_limit_rows(trade_date):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": trade_date,
+                "industry": "白酒",
+                "name": "贵州茅台",
+                "close": 110,
+                "pct_chg": 10.0,
+                "amount": 9000,
+                "turnover_ratio": 3.2,
+                "fd_amount": 120000000,
+                "first_time": "093100",
+                "last_time": "145700",
+                "open_times": 1,
+                "up_stat": "2/3",
+                "limit_times": 2,
+                "limit": "U",
+            },
+            {
+                "ts_code": "000001.SZ",
+                "trade_date": trade_date,
+                "industry": "银行",
+                "name": "平安银行",
+                "close": 9,
+                "pct_chg": -10.0,
+                "open_times": 3,
+                "limit": "Z",
+            },
+            {
+                "ts_code": "300750.SZ",
+                "trade_date": trade_date,
+                "name": "宁德时代",
+                "close": 200,
+                "pct_chg": -20.0,
+                "limit": "D",
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_index_rows", lambda *args: [])
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_limit_list_rows",
+        fake_fetch_limit_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_daily_bars(
+                db,
+                trade_date="20260528",
+                symbols=["600519.SH", "000001.SZ"],
+            )
+            events = db.query(LimitEvent).order_by(LimitEvent.symbol).all()
+
+    assert result["limit_event_count"] == 2
+    assert result["limit_event_error"] is None
+    assert [(item.symbol, item.limit_type) for item in events] == [
+        ("000001.SZ", "Z"),
+        ("600519.SH", "U"),
+    ]
+    assert events[1].name == "贵州茅台"
+    assert events[1].industry == "白酒"
+    assert events[1].limit_times == 2
+    assert events[1].open_times == 1
+    assert events[1].fd_amount == 120000000
+    assert events[1].source == "tushare_limit_list_d"
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 
@@ -776,6 +879,7 @@ def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_p
         "tushare_index_daily": 10,
         "tushare_sector": 3016,
         "tushare_sector_member": 210000,
+        "tushare_limit_list_d": 0,
     }
     assert payload["data_source_errors"] == {
         "tushare_moneyflow_ths": ["20260528: moneyflow partial"],

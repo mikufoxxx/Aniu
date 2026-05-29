@@ -128,6 +128,7 @@ class AIMarketContextService:
             profile_parts = self._profile_parts(profile)
             daily_basic_parts = self._daily_basic_parts(daily)
             financial_parts = self._financial_parts(financial)
+            limit_parts = self._limit_event_parts(daily.get("limit_event") or {})
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -139,6 +140,7 @@ class AIMarketContextService:
                     f"{profile_parts}"
                     f"{daily_basic_parts}"
                     f"{financial_parts}"
+                    f"{limit_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -365,6 +367,23 @@ class AIMarketContextService:
         if not parts:
             return ""
         return "; ".join(parts) + "; "
+
+    def _limit_event_parts(self, event: dict[str, Any]) -> str:
+        limit_type = str(event.get("limit_type") or "").upper()
+        if not limit_type:
+            return ""
+        label = {"U": "涨停", "D": "跌停", "Z": "炸板"}.get(limit_type, limit_type)
+        parts = [label]
+        limit_times = int(event.get("limit_times") or 0)
+        open_times = int(event.get("open_times") or 0)
+        if limit_times > 0:
+            parts.append(f"{limit_times}连板")
+        if open_times > 0:
+            parts.append(f"开板 {open_times}次")
+        up_stat = event.get("up_stat")
+        if up_stat:
+            parts.append(f"统计 {up_stat}")
+        return " ".join(parts) + "; "
 
     def _profile_parts(self, profile: dict[str, Any]) -> str:
         parts: list[str] = []

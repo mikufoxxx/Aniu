@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+import json
+import subprocess
 from typing import Any
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,7 +16,8 @@ from app.services.market_data_service import normalize_symbol
 _TUSHARE_DAILY_FIELDS = (
     "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
 )
-_TUSHARE_HTTP_TIMEOUT_SECONDS = 20.0
+_TUSHARE_HTTP_TIMEOUT_SECONDS = 20
+_TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
 
 
@@ -70,18 +72,40 @@ class HistoricalDataService:
             "params": params,
             "fields": _TUSHARE_DAILY_FIELDS,
         }
+        command = [
+            "curl",
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--max-time",
+            str(_TUSHARE_HTTP_TIMEOUT_SECONDS),
+            "--connect-timeout",
+            "5",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            json.dumps(payload),
+            url,
+        ]
         try:
-            response = httpx.post(
-                url,
-                json=payload,
-                timeout=_TUSHARE_HTTP_TIMEOUT_SECONDS,
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=_TUSHARE_CURL_TIMEOUT_SECONDS,
+                check=False,
             )
-            response.raise_for_status()
-            body = response.json()
-        except httpx.TimeoutException as exc:
+        except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"Tushare 日线请求超时: {params}") from exc
-        except httpx.HTTPError as exc:
-            raise RuntimeError(f"Tushare 日线请求失败: {exc}") from exc
+
+        if completed.returncode != 0:
+            message = (completed.stderr or completed.stdout or "unknown error").strip()
+            if completed.returncode == 28:
+                raise RuntimeError(f"Tushare 日线请求超时: {params}")
+            raise RuntimeError(f"Tushare 日线请求失败: {message}")
+
+        try:
+            body = json.loads(completed.stdout)
         except ValueError as exc:
             raise RuntimeError("Tushare 日线响应不是合法 JSON。") from exc
 

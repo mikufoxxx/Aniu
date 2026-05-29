@@ -56,26 +56,24 @@ def test_fetch_daily_rows_uses_tushare_http_protocol_with_timeout(monkeypatch) -
     get_settings.cache_clear()
     captured: dict[str, object] = {}
 
-    class FakeResponse:
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> dict[str, object]:
-            return {
-                "code": 0,
-                "data": {
-                    "fields": ["ts_code", "trade_date", "close", "amount"],
-                    "items": [["600519.SH", "20260528", 1326.0, 10037388.288]],
-                },
-            }
-
-    def fake_post(url, *, json, timeout):
-        captured["url"] = url
-        captured["json"] = json
+    def fake_run(command, *, capture_output, text, timeout, check):
+        captured["command"] = command
+        captured["capture_output"] = capture_output
+        captured["text"] = text
         captured["timeout"] = timeout
-        return FakeResponse()
+        captured["check"] = check
 
-    monkeypatch.setattr("app.services.historical_data_service.httpx.post", fake_post)
+        class Completed:
+            returncode = 0
+            stdout = (
+                '{"code":0,"data":{"fields":["ts_code","trade_date","close","amount"],'
+                '"items":[["600519.SH","20260528",1326.0,10037388.288]]}}'
+            )
+            stderr = ""
+
+        return Completed()
+
+    monkeypatch.setattr("app.services.historical_data_service.subprocess.run", fake_run)
 
     rows = historical_data_service.fetch_daily_rows("20260528")
 
@@ -87,14 +85,25 @@ def test_fetch_daily_rows_uses_tushare_http_protocol_with_timeout(monkeypatch) -
             "amount": 10037388.288,
         }
     ]
-    assert captured["url"] == "http://tushare-proxy.test"
-    assert captured["timeout"] == 20.0
-    assert captured["json"] == {
-        "api_name": "daily",
-        "token": "test-token",
-        "params": {"trade_date": "20260528"},
-        "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
-    }
+    command = captured["command"]
+    assert command[:8] == [
+        "curl",
+        "--silent",
+        "--show-error",
+        "--fail",
+        "--max-time",
+        "20",
+        "--connect-timeout",
+        "5",
+    ]
+    assert command[-1] == "http://tushare-proxy.test"
+    assert captured["timeout"] == 25
+    assert captured["capture_output"] is True
+    assert captured["text"] is True
+    assert captured["check"] is False
+    assert '"api_name": "daily"' in command[-2]
+    assert '"token": "test-token"' in command[-2]
+    assert '"trade_date": "20260528"' in command[-2]
 
     _reset_state()
 

@@ -277,6 +277,7 @@ export interface ArenaLeaderboardItem {
   total_assets: number
   return_ratio: number
   order_count: number
+  realized_pnl: number
   positions?: Array<{
     symbol: string
     name: string

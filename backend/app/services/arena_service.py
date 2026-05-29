@@ -15,6 +15,12 @@ DEFAULT_AGENTS = [
     {"id": "risk_ai", "name": "风控 AI", "style": "risk_control"},
 ]
 
+STOP_LOSS_BY_STYLE = {
+    "momentum": 0.07,
+    "balanced": 0.06,
+    "risk_control": 0.05,
+}
+
 
 class ArenaService:
     def run_once(
@@ -50,20 +56,24 @@ class ArenaService:
                 initial_cash=initial_cash,
             )
             self._mark_positions(account, candidates)
-            decision = self._decide_for_agent(
+            sell_decision = self._stop_loss_decision(account)
+            decision = sell_decision or self._decide_for_agent(
                 agent=agent,
                 candidates=candidates,
                 agent_index=index,
                 available_cash=account.cash,
             )
             if decision is not None:
-                self._apply_buy(account, decision)
+                if decision["action"] == "SELL":
+                    self._apply_sell(account, decision)
+                else:
+                    self._apply_buy(account, decision)
                 order = ArenaOrder(
                     arena_run_id=arena_run.id,
                     agent_id=decision["agent_id"],
                     agent_name=decision["agent_name"],
                     style=decision["style"],
-                    action="BUY",
+                    action=decision["action"],
                     symbol=decision["symbol"],
                     name=decision["name"],
                     quantity=decision["quantity"],
@@ -141,6 +151,7 @@ class ArenaService:
             "agent_id": str(agent.get("id") or f"agent_{agent_index + 1}"),
             "agent_name": str(agent.get("name") or f"AI {agent_index + 1}"),
             "style": style,
+            "action": "BUY",
             "symbol": candidate["symbol"],
             "name": candidate.get("name") or candidate["symbol"],
             "quantity": quantity,
@@ -149,6 +160,32 @@ class ArenaService:
             "remaining_cash": round(available_cash - amount, 2),
             "reason": f"{style} 根据候选评分 {candidate['score']} 执行模拟买入。",
         }
+
+    def _stop_loss_decision(self, account: ArenaAccount) -> dict[str, Any] | None:
+        stop_loss = STOP_LOSS_BY_STYLE.get(account.style, 0.06)
+        for position in account.positions:
+            if position.quantity <= 0 or position.avg_cost <= 0 or position.last_price <= 0:
+                continue
+            drawdown = (position.last_price - position.avg_cost) / position.avg_cost
+            if drawdown > -stop_loss:
+                continue
+            amount = round(position.quantity * position.last_price, 2)
+            return {
+                "agent_id": account.agent_id,
+                "agent_name": account.agent_name,
+                "style": account.style,
+                "action": "SELL",
+                "symbol": position.symbol,
+                "name": position.name or position.symbol,
+                "quantity": position.quantity,
+                "price": position.last_price,
+                "amount": amount,
+                "remaining_cash": round(account.cash + amount, 2),
+                "reason": (
+                    f"{account.style} 触发止损，当前价较成本回撤 {abs(drawdown) * 100:.2f}%。"
+                ),
+            }
+        return None
 
     def _get_or_create_account(
         self,
@@ -217,6 +254,27 @@ class ArenaService:
         account.cash = round(account.cash - amount, 2)
         account.order_count += 1
 
+    def _apply_sell(self, account: ArenaAccount, decision: dict[str, Any]) -> None:
+        symbol = str(decision["symbol"])
+        quantity = int(decision["quantity"])
+        price = float(decision["price"])
+        amount = float(decision["amount"])
+        position = next(
+            (item for item in account.positions if item.symbol == symbol),
+            None,
+        )
+        if position is None or position.quantity <= 0:
+            return
+        sell_quantity = min(quantity, position.quantity)
+        realized = (price - position.avg_cost) * sell_quantity
+        position.quantity -= sell_quantity
+        position.last_price = price
+        if position.quantity <= 0:
+            position.quantity = 0
+        account.cash = round(account.cash + amount, 2)
+        account.realized_pnl = round(account.realized_pnl + realized, 2)
+        account.order_count += 1
+
     def _leaderboard_item(
         self,
         account: ArenaAccount,
@@ -255,6 +313,7 @@ class ArenaService:
             if account.initial_cash
             else 0.0,
             "order_count": account.order_count,
+            "realized_pnl": round(account.realized_pnl, 2),
         }
         if include_positions:
             payload["positions"] = position_payloads

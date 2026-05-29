@@ -183,6 +183,7 @@
             <p>
               现金 {{ formatAmount(rank.cash) }} ·
               持仓 {{ formatAmount(rank.position_value) }} ·
+              已实现 {{ formatAmount(rank.realized_pnl) }} ·
               订单 {{ rank.order_count }}
             </p>
           </div>

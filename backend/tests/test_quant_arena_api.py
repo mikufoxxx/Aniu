@@ -224,3 +224,51 @@ def test_arena_accounts_persist_cash_and_positions_across_runs(monkeypatch, tmp_
     assert leaderboard["items"][0]["positions"][0]["quantity"] > 9000
 
     _reset_state()
+
+
+def test_arena_stop_loss_sells_position_and_records_realized_pnl(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+
+    call_count = {"value": 0}
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        call_count["value"] += 1
+        price = 10.0 if call_count["value"] == 1 else 9.0
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": price,
+                "change_pct": -5.0 if price < 10 else 3.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        payload = {
+            "symbols": ["000001.SZ"],
+            "initial_cash": 200000,
+            "agents": [
+                {"id": "risk_agent", "name": "风控AI", "style": "risk_control"},
+            ],
+        }
+        first = client.post("/api/aniu/arena/run", headers=headers, json=payload).json()
+        second = client.post("/api/aniu/arena/run", headers=headers, json=payload).json()
+        leaderboard = client.get("/api/aniu/arena/leaderboard", headers=headers).json()
+
+    assert first["orders"][0]["action"] == "BUY"
+    assert second["orders"][0]["action"] == "SELL"
+    item = [row for row in leaderboard["items"] if row["agent_id"] == "risk_agent"][0]
+    assert item["order_count"] == 2
+    assert item["positions"] == []
+    assert item["realized_pnl"] < 0
+    assert item["cash"] < 200000
+
+    _reset_state()

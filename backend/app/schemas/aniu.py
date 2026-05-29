@@ -411,6 +411,7 @@ class ArenaLeaderboardItemRead(BaseModel):
     total_assets: float
     return_ratio: float
     order_count: int
+    realized_pnl: float = 0.0
     positions: list[ArenaPositionRead] = Field(default_factory=list)
 
 

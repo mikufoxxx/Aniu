@@ -11,6 +11,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.core import rate_limit as rate_limit_module
 from app.core.config import get_settings
+from app.db.database import session_scope
+from app.db.models import DailyBar
 from app.db import database as database_module
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
@@ -326,6 +328,48 @@ def test_market_data_maintenance_job_exposes_progress_updates(monkeypatch, tmp_p
         "stored_count": 100,
         "skipped_count": 0,
         "error_count": 0,
+    }
+
+    _reset_state()
+
+
+def test_market_data_coverage_endpoint_summarizes_daily_inventory(monkeypatch, tmp_path) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="000001.SZ", trade_date="20260527", close=10, source="tushare"),
+                    DailyBar(symbol="600519.SH", trade_date="20260527", close=1000, source="tushare"),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=11, source="tushare"),
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=1005, source="tushare"),
+                    DailyBar(symbol="300750.SZ", trade_date="20260528", close=210, source="tushare"),
+                    DailyBar(symbol="000001.SZ", trade_date="20260529", close=12, source="tushare"),
+                ]
+            )
+
+        response = client.get("/api/aniu/market/data/coverage", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_rows"] == 6
+    assert payload["unique_symbols"] == 3
+    assert payload["first_trade_date"] == "20260527"
+    assert payload["latest_trade_date"] == "20260529"
+    assert payload["latest_trade_date_symbols"] == 1
+    assert payload["most_complete_trade_date"] == "20260528"
+    assert payload["most_complete_trade_date_symbols"] == 3
+    assert payload["recent_trade_dates"] == [
+        {"trade_date": "20260529", "symbol_count": 1, "row_count": 1},
+        {"trade_date": "20260528", "symbol_count": 3, "row_count": 3},
+        {"trade_date": "20260527", "symbol_count": 2, "row_count": 2},
+    ]
+    assert payload["source_counts"] == [{"source": "tushare", "row_count": 6}]
+    assert payload["readiness"] == {
+        "has_daily_history": True,
+        "has_broad_universe": False,
+        "latest_day_complete": False,
+        "backtest_ready": True,
     }
 
     _reset_state()

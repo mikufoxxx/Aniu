@@ -193,6 +193,30 @@ export interface MarketSourceHealthPayload {
   recommended_usage: Record<string, string>
 }
 
+export interface MarketDataCoverageDate {
+  trade_date: string
+  symbol_count: number
+  row_count: number
+}
+
+export interface MarketDataCoverageSource {
+  source: string
+  row_count: number
+}
+
+export interface MarketDataCoveragePayload {
+  total_rows: number
+  unique_symbols: number
+  first_trade_date: string | null
+  latest_trade_date: string | null
+  latest_trade_date_symbols: number
+  most_complete_trade_date: string | null
+  most_complete_trade_date_symbols: number
+  recent_trade_dates: MarketDataCoverageDate[]
+  source_counts: MarketDataCoverageSource[]
+  readiness: Record<string, boolean>
+}
+
 export interface QuantCandidate {
   symbol: string
   name: string

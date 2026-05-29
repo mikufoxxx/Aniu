@@ -293,6 +293,30 @@ class MarketSourceHealthResponse(BaseModel):
     recommended_usage: dict[str, str]
 
 
+class MarketDataCoverageDateRead(BaseModel):
+    trade_date: str
+    symbol_count: int
+    row_count: int
+
+
+class MarketDataCoverageSourceRead(BaseModel):
+    source: str
+    row_count: int
+
+
+class MarketDataCoverageResponse(BaseModel):
+    total_rows: int
+    unique_symbols: int
+    first_trade_date: str | None = None
+    latest_trade_date: str | None = None
+    latest_trade_date_symbols: int
+    most_complete_trade_date: str | None = None
+    most_complete_trade_date_symbols: int
+    recent_trade_dates: list[MarketDataCoverageDateRead] = Field(default_factory=list)
+    source_counts: list[MarketDataCoverageSourceRead] = Field(default_factory=list)
+    readiness: dict[str, bool]
+
+
 class QuantCandidatesRequest(BaseModel):
     symbols: list[str] | None = None
     limit: int = Field(default=200, ge=1, le=200)

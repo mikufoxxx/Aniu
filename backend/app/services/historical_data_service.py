@@ -6,7 +6,7 @@ import json
 import subprocess
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -38,6 +38,96 @@ def _normalize_trade_date(value: str) -> str:
 
 
 class HistoricalDataService:
+    def summarize_daily_coverage(self, db: Session) -> dict[str, Any]:
+        total_rows = int(db.scalar(select(func.count(DailyBar.id))) or 0)
+        unique_symbols = int(db.scalar(select(func.count(func.distinct(DailyBar.symbol)))) or 0)
+        first_trade_date = db.scalar(select(func.min(DailyBar.trade_date)))
+        latest_trade_date = db.scalar(select(func.max(DailyBar.trade_date)))
+        trade_day_count = int(
+            db.scalar(select(func.count(func.distinct(DailyBar.trade_date)))) or 0
+        )
+
+        recent_rows = db.execute(
+            select(
+                DailyBar.trade_date,
+                func.count(func.distinct(DailyBar.symbol)).label("symbol_count"),
+                func.count(DailyBar.id).label("row_count"),
+            )
+            .group_by(DailyBar.trade_date)
+            .order_by(desc(DailyBar.trade_date))
+            .limit(10)
+        ).all()
+        recent_trade_dates = [
+            {
+                "trade_date": trade_date,
+                "symbol_count": int(symbol_count or 0),
+                "row_count": int(row_count or 0),
+            }
+            for trade_date, symbol_count, row_count in recent_rows
+        ]
+
+        most_complete_row = db.execute(
+            select(
+                DailyBar.trade_date,
+                func.count(func.distinct(DailyBar.symbol)).label("symbol_count"),
+            )
+            .group_by(DailyBar.trade_date)
+            .order_by(desc("symbol_count"), desc(DailyBar.trade_date))
+            .limit(1)
+        ).first()
+        most_complete_trade_date = most_complete_row[0] if most_complete_row else None
+        most_complete_trade_date_symbols = (
+            int(most_complete_row[1] or 0) if most_complete_row else 0
+        )
+
+        latest_trade_date_symbols = 0
+        if latest_trade_date:
+            latest_trade_date_symbols = int(
+                db.scalar(
+                    select(func.count(func.distinct(DailyBar.symbol))).where(
+                        DailyBar.trade_date == latest_trade_date
+                    )
+                )
+                or 0
+            )
+
+        source_rows = db.execute(
+            select(
+                DailyBar.source,
+                func.count(DailyBar.id).label("row_count"),
+            )
+            .group_by(DailyBar.source)
+            .order_by(desc("row_count"), DailyBar.source)
+        ).all()
+        source_counts = [
+            {"source": source or "unknown", "row_count": int(row_count or 0)}
+            for source, row_count in source_rows
+        ]
+
+        latest_day_complete = (
+            most_complete_trade_date_symbols > 0
+            and latest_trade_date_symbols >= int(most_complete_trade_date_symbols * 0.8)
+        )
+        readiness = {
+            "has_daily_history": total_rows > 0,
+            "has_broad_universe": unique_symbols >= 500,
+            "latest_day_complete": latest_day_complete,
+            "backtest_ready": unique_symbols > 0 and trade_day_count >= 2,
+        }
+
+        return {
+            "total_rows": total_rows,
+            "unique_symbols": unique_symbols,
+            "first_trade_date": first_trade_date,
+            "latest_trade_date": latest_trade_date,
+            "latest_trade_date_symbols": latest_trade_date_symbols,
+            "most_complete_trade_date": most_complete_trade_date,
+            "most_complete_trade_date_symbols": most_complete_trade_date_symbols,
+            "recent_trade_dates": recent_trade_dates,
+            "source_counts": source_counts,
+            "readiness": readiness,
+        }
+
     def fetch_daily_rows(
         self,
         trade_date: str,

@@ -149,6 +149,43 @@
           </label>
         </div>
 
+        <div v-if="dataCoverage" class="arena-coverage-summary">
+          <div>
+            <strong>{{ formatInteger(dataCoverage.total_rows) }}</strong>
+            <span>日线行数</span>
+          </div>
+          <div>
+            <strong>{{ formatInteger(dataCoverage.unique_symbols) }}</strong>
+            <span>覆盖股票</span>
+          </div>
+          <div>
+            <strong>{{ dataCoverage.latest_trade_date ?? '--' }}</strong>
+            <span>最新日期 · {{ formatInteger(dataCoverage.latest_trade_date_symbols) }}只</span>
+          </div>
+          <div>
+            <strong>{{ dataCoverage.most_complete_trade_date ?? '--' }}</strong>
+            <span>最完整 · {{ formatInteger(dataCoverage.most_complete_trade_date_symbols) }}只</span>
+          </div>
+          <div>
+            <strong :class="dataCoverage.readiness.backtest_ready ? 'profit-up' : 'profit-down'">
+              {{ readinessText(dataCoverage.readiness.backtest_ready) }}
+            </strong>
+            <span>回测可用</span>
+          </div>
+          <div>
+            <strong :class="dataCoverage.readiness.latest_day_complete ? 'profit-up' : 'profit-down'">
+              {{ readinessText(dataCoverage.readiness.latest_day_complete) }}
+            </strong>
+            <span>最新日完整</span>
+          </div>
+        </div>
+
+        <div v-if="dataCoverage?.recent_trade_dates.length" class="arena-coverage-days">
+          <span v-for="item in dataCoverage.recent_trade_dates.slice(0, 5)" :key="item.trade_date">
+            {{ item.trade_date }} · {{ formatInteger(item.symbol_count) }}只
+          </span>
+        </div>
+
         <div v-if="dailyRefreshResult" class="arena-history-result">
           <strong>日线入库</strong>
           <span>
@@ -401,7 +438,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -419,6 +456,7 @@ const agentSaving = ref(false)
 const errorMessage = ref('')
 const agents = ref<ArenaAgentConfig[]>(defaultAgents.map((agent) => ({ ...agent })))
 const sourceHealth = ref<MarketSourceHealthPayload | null>(null)
+const dataCoverage = ref<MarketDataCoveragePayload | null>(null)
 const candidates = ref<QuantCandidate[]>([])
 const quantDataset = ref<QuantDatasetPayload | null>(null)
 const aiMarketContext = ref<AIMarketContextPayload | null>(null)
@@ -455,6 +493,10 @@ function selectedSymbols(): string[] | undefined {
 
 async function loadSources(): Promise<void> {
   sourceHealth.value = await api.getMarketSourceHealth()
+}
+
+async function loadDataCoverage(): Promise<void> {
+  dataCoverage.value = await api.getMarketDataCoverage()
 }
 
 async function loadAgents(): Promise<void> {
@@ -601,6 +643,7 @@ async function refreshDaily(): Promise<void> {
       end_date: refreshEndDate.value,
       symbols: selectedSymbols(),
     })
+    await loadDataCoverage()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '日线刷新失败。'
   } finally {
@@ -655,6 +698,7 @@ async function applyMaintenanceResult(payload: MarketDataMaintenancePayload): Pr
   dailyRefreshResult.value = payload.refresh
   quantDataset.value = payload.dataset
   candidates.value = payload.dataset.items
+  await loadDataCoverage()
   if (payload.report) {
     marketReports.value = [
       payload.report,
@@ -711,6 +755,10 @@ function progressText(phase: string | undefined): string {
   return phase ? mapping[phase] ?? phase : '--'
 }
 
+function readinessText(value: boolean | undefined): string {
+  return value ? '是' : '否'
+}
+
 function styleText(style: string): string {
   const mapping: Record<string, string> = {
     momentum: '动量型',
@@ -741,6 +789,11 @@ function formatAmount(value: number | null | undefined): string {
   return value.toFixed(2)
 }
 
+function formatInteger(value: number | null | undefined): string {
+  if (typeof value !== 'number') return '--'
+  return Math.round(value).toLocaleString('zh-CN')
+}
+
 function formatPercent(value: number | null | undefined): string {
   if (typeof value !== 'number') return '--'
   return `${(value * 100).toFixed(2)}%`
@@ -760,7 +813,14 @@ function formatDateTime(value: string | null | undefined): string {
 
 onMounted(async () => {
   try {
-    await Promise.all([loadSources(), loadAgents(), loadCandidates(), loadLeaderboard(), loadMarketReports()])
+    await Promise.all([
+      loadSources(),
+      loadDataCoverage(),
+      loadAgents(),
+      loadCandidates(),
+      loadLeaderboard(),
+      loadMarketReports(),
+    ])
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '页面初始化失败。'
   }
@@ -832,6 +892,55 @@ onMounted(async () => {
 .arena-history-result span {
   color: #b7c8e3;
   font-size: 13px;
+}
+
+.arena-coverage-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.arena-coverage-summary div {
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px 12px;
+}
+
+.arena-coverage-summary strong {
+  display: block;
+  color: #f7fbff;
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.arena-coverage-summary strong.profit-up {
+  color: #57d68d;
+}
+
+.arena-coverage-summary strong.profit-down {
+  color: #ff7b7b;
+}
+
+.arena-coverage-summary span,
+.arena-coverage-days span {
+  color: #9cb2cf;
+  font-size: 12px;
+}
+
+.arena-coverage-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.arena-coverage-days span {
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(7, 14, 27, 0.62);
+  padding: 6px 8px;
 }
 
 .arena-dataset-summary {
@@ -1054,6 +1163,7 @@ onMounted(async () => {
   .arena-grid,
   .arena-form-grid,
   .arena-history-grid,
+  .arena-coverage-summary,
   .arena-dataset-summary,
   .arena-report-list,
   .arena-agent-grid {

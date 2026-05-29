@@ -19,6 +19,7 @@ from app.schemas.aniu import (
     DailyRangeRefreshResponse,
     DailyRefreshRequest,
     DailyRefreshResponse,
+    MarketDataCoverageResponse,
     MarketDataMaintenanceJobResponse,
     MarketDataMaintenanceRunRequest,
     MarketDataMaintenanceRunResponse,
@@ -48,6 +49,14 @@ def get_market_source_health(
     _user: str = Depends(get_current_user),
 ) -> MarketSourceHealthResponse:
     return market_data_service.source_health()
+
+
+@router.get("/market/data/coverage", response_model=MarketDataCoverageResponse)
+def get_market_data_coverage(
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> MarketDataCoverageResponse:
+    return historical_data_service.summarize_daily_coverage(db)
 
 
 @router.post("/quant/candidates", response_model=QuantCandidatesResponse)

@@ -662,6 +662,15 @@ def test_refresh_financial_indicators_stores_tushare_fina_indicator_rows(monkeyp
                 "current_ratio": 4.2,
             },
             {
+                "ts_code": "600519.SH",
+                "ann_date": "20260402",
+                "end_date": "20251231",
+                "roe": 31.8,
+                "grossprofit_margin": 91.6,
+                "netprofit_yoy": 19.1,
+                "debt_to_assets": 17.8,
+            },
+            {
                 "ts_code": "000001.SZ",
                 "ann_date": "20260420",
                 "end_date": "20251231",
@@ -696,10 +705,10 @@ def test_refresh_financial_indicators_stores_tushare_fina_indicator_rows(monkeyp
     assert [row.symbol for row in rows] == ["000001.SZ", "600519.SH"]
     assert rows[1].ann_date == "20260402"
     assert rows[1].end_date == "20251231"
-    assert rows[1].roe == 31.2
-    assert rows[1].grossprofit_margin == 91.2
-    assert rows[1].netprofit_yoy == 18.5
-    assert rows[1].debt_to_assets == 18.0
+    assert rows[1].roe == 31.8
+    assert rows[1].grossprofit_margin == 91.6
+    assert rows[1].netprofit_yoy == 19.1
+    assert rows[1].debt_to_assets == 17.8
     assert rows[1].source == "tushare_fina_indicator"
     assert rows[1].raw_payload["ts_code"] == "600519.SH"
 

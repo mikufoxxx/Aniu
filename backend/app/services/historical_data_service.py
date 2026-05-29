@@ -700,12 +700,20 @@ class HistoricalDataService:
     ) -> dict[str, Any]:
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols]
         rows = self.fetch_financial_indicator_rows(normalized_symbols)
-        stored_count = 0
+        rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
         for row in rows:
             symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
             end_date = str(row.get("end_date") or "").strip().replace("-", "")
             if not symbol or len(end_date) != 8:
                 continue
+            key = (symbol, end_date)
+            merged = rows_by_key.setdefault(key, {})
+            for field, value in row.items():
+                if value not in (None, ""):
+                    merged[field] = value
+        stored_count = 0
+        for symbol, end_date in rows_by_key:
+            row = rows_by_key[(symbol, end_date)]
             existing = db.scalar(
                 select(FinancialIndicator).where(
                     FinancialIndicator.symbol == symbol,

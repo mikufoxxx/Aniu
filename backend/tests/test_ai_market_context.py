@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
@@ -9,7 +10,7 @@ from app.core import rate_limit as rate_limit_module
 from app.core.config import get_settings
 from app.db import database as database_module
 from app.db.database import init_db, session_scope
-from app.db.models import DailyBar
+from app.db.models import DailyBar, MarketReport
 from app.services.automation_session_service import automation_session_service
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -113,6 +114,73 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "600519.SH 贵州茅台" in context
     assert "日线动量 +10.50%" in context
     assert "000001.SZ 平安银行" in context
+
+    _reset_state()
+
+
+def test_ai_market_context_includes_recent_report_performance(monkeypatch, tmp_path) -> None:
+    from app.services.ai_market_context_service import ai_market_context_service
+    from app.services.market_data_service import market_data_service
+
+    _use_temp_db(monkeypatch, tmp_path)
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 1.0,
+                "amount": 10_000_000,
+                "turnover": 0.5,
+                "volume_ratio": 1.2,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:30:03",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with session_scope() as db:
+        db.add_all(
+            [
+                DailyBar(symbol="600519.SH", trade_date="20260528", close=95, amount=9500),
+                DailyBar(symbol="600519.SH", trade_date="20260529", close=100, amount=10000),
+                DailyBar(symbol="600519.SH", trade_date="20260601", close=110, amount=11000),
+                MarketReport(
+                    report_type="morning",
+                    title="早盘推荐",
+                    symbols_json=["600519.SH"],
+                    lookback_days=3,
+                    data_sources_json=["easy_tdx", "tushare_daily"],
+                    coverage_payload={"realtime_symbols": 1, "daily_history_symbols": 1},
+                    recommendations_payload=[
+                        {
+                            "symbol": "600519.SH",
+                            "name": "贵州茅台",
+                            "action": "WATCH",
+                            "score": 88.0,
+                        }
+                    ],
+                    dataset_payload={},
+                    context_text="",
+                    summary="早盘推荐已生成。",
+                    created_at=datetime(2026, 5, 29, 8, 45, 0),
+                ),
+            ]
+        )
+        db.flush()
+        context = ai_market_context_service.build_context(
+            db,
+            symbols=["600519.SH"],
+            limit=1,
+            lookback_days=3,
+        )
+
+    assert "历史推荐表现:" in context
+    assert "早盘推荐" in context
+    assert "1日均值 +10.00%" in context
+    assert "600519.SH +10.00%" in context
 
     _reset_state()
 

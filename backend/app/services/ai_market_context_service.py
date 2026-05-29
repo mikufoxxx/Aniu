@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.models import DailyBar, MarketReport
 from app.services.market_data_service import DEFAULT_UNIVERSE, normalize_symbol
 from app.services.quant_service import quant_service
 
@@ -37,9 +39,13 @@ class AIMarketContextService:
             )
         except Exception as exc:
             return f"AI量化市场上下文\n- 数据集构建失败: {exc}"
-        return self._format_dataset(dataset)
+        return self._format_dataset(dataset, self._recent_report_performance(db))
 
-    def _format_dataset(self, dataset: dict[str, Any]) -> str:
+    def _format_dataset(
+        self,
+        dataset: dict[str, Any],
+        report_performance: list[dict[str, Any]] | None = None,
+    ) -> str:
         sources = ", ".join(dataset.get("data_sources") or []) or "--"
         coverage = dataset.get("coverage") or {}
         items = dataset.get("items") or []
@@ -67,7 +73,66 @@ class AIMarketContextService:
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
+        if report_performance:
+            lines.append("历史推荐表现:")
+            for item in report_performance:
+                lines.append(
+                    (
+                        f"- {item['title']} {item['created_date']} "
+                        f"1日均值 {item['average_return_pct']:+.2f}% "
+                        f"已评估 {item['evaluated_count']}只; "
+                        f"{item['top_symbol']} {item['top_return_pct']:+.2f}%"
+                    ).strip()
+                )
         return "\n".join(lines).strip()
+
+    def _recent_report_performance(self, db: Session) -> list[dict[str, Any]]:
+        reports = db.scalars(
+            select(MarketReport).order_by(MarketReport.id.desc()).limit(3)
+        ).all()
+        rows: list[dict[str, Any]] = []
+        for report in reports:
+            evaluated = self._report_return_items(db, report)
+            if not evaluated:
+                continue
+            returns = [item["return_pct"] for item in evaluated]
+            top = max(evaluated, key=lambda item: item["return_pct"])
+            rows.append(
+                {
+                    "title": report.title,
+                    "created_date": report.created_at.strftime("%Y%m%d"),
+                    "evaluated_count": len(evaluated),
+                    "average_return_pct": round(sum(returns) / len(returns), 4),
+                    "top_symbol": top["symbol"],
+                    "top_return_pct": top["return_pct"],
+                }
+            )
+        return rows
+
+    def _report_return_items(self, db: Session, report: MarketReport) -> list[dict[str, Any]]:
+        report_date = report.created_at.strftime("%Y%m%d")
+        items: list[dict[str, Any]] = []
+        for recommendation in report.recommendations_payload or []:
+            symbol = str(recommendation.get("symbol") or "").strip()
+            if not symbol:
+                continue
+            bars = db.scalars(
+                select(DailyBar)
+                .where(
+                    DailyBar.symbol == symbol,
+                    DailyBar.trade_date >= report_date,
+                    DailyBar.close.is_not(None),
+                )
+                .order_by(DailyBar.trade_date)
+                .limit(2)
+            ).all()
+            if len(bars) < 2 or not bars[0].close:
+                continue
+            entry_close = float(bars[0].close)
+            evaluation_close = float(bars[1].close or 0)
+            return_pct = ((evaluation_close - entry_close) / entry_close) * 100
+            items.append({"symbol": symbol, "return_pct": round(return_pct, 4)})
+        return items
 
     def _format_optional_float(self, value: Any) -> str:
         try:

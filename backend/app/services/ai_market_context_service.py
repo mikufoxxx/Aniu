@@ -96,6 +96,7 @@ class AIMarketContextService:
         lines.append("候选信号:")
         for index, item in enumerate(items[:10], start=1):
             daily = item.get("daily_factors") or {}
+            daily_basic_parts = self._daily_basic_parts(daily)
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -104,6 +105,7 @@ class AIMarketContextService:
                     f"涨幅 {float(item.get('change_pct') or 0):+.2f}%; "
                     f"日线动量 {float(daily.get('momentum_pct') or 0):+.2f}%; "
                     f"日线覆盖 {int(daily.get('bars_used') or 0)}日; "
+                    f"{daily_basic_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -227,6 +229,26 @@ class AIMarketContextService:
 
     def _compact_payload(self, value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))[:800]
+
+    def _daily_basic_parts(self, daily: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key, label, suffix in (
+            ("turnover_rate", "换手", "%"),
+            ("volume_ratio", "量比", ""),
+            ("pe_ttm", "PE", ""),
+            ("pb", "PB", ""),
+        ):
+            value = daily.get(key)
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if numeric <= 0:
+                continue
+            parts.append(f"{label} {numeric:.2f}{suffix}")
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
 
 
 ai_market_context_service = AIMarketContextService()

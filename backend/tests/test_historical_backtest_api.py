@@ -166,6 +166,70 @@ def test_refresh_daily_bars_stores_normalized_tushare_rows(monkeypatch, tmp_path
     _reset_state()
 
 
+def test_refresh_daily_bars_merges_tushare_daily_basic_rows(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        assert trade_date == "20260528"
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "close": 1326.0,
+                "amount": 10037388.288,
+            }
+        ]
+
+    def fake_fetch_daily_basic_rows(trade_date: str, symbols: list[str] | None = None):
+        assert trade_date == "20260528"
+        assert symbols is None
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "turnover_rate": 0.72,
+                "volume_ratio": 1.34,
+                "pe_ttm": 23.5,
+                "pb": 7.8,
+                "total_mv": 166500000.0,
+                "circ_mv": 166500000.0,
+            }
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_daily_basic_rows",
+        fake_fetch_daily_basic_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh",
+            headers=headers,
+            json={"trade_date": "20260528", "symbols": None},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["stored_count"] == 1
+        assert payload["daily_basic_count"] == 1
+
+        with session_scope() as db:
+            bar = db.query(DailyBar).one()
+            assert bar.turnover_rate == 0.72
+            assert bar.volume_ratio == 1.34
+            assert bar.pe_ttm == 23.5
+            assert bar.pb == 7.8
+            assert bar.total_mv == 166500000.0
+            assert bar.circ_mv == 166500000.0
+            assert bar.raw_payload["daily_basic"]["volume_ratio"] == 1.34
+
+    _reset_state()
+
+
 def test_refresh_daily_range_processes_each_date_and_summarizes_coverage(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

@@ -48,6 +48,7 @@ def init_db() -> None:
     _ensure_strategy_run_columns(engine)
     _ensure_run_event_columns(engine)
     _ensure_arena_order_columns(engine)
+    _ensure_daily_bar_columns(engine)
     _ensure_chat_session_indexes(engine)
     _ensure_chat_message_indexes(engine)
     _ensure_strategy_run_indexes(engine)
@@ -116,6 +117,31 @@ def _ensure_app_settings_columns(engine) -> None:
                 "automation_context_source = COALESCE(NULLIF(trim(automation_context_source), ''), 'default')"
             )
         )
+
+
+def _ensure_daily_bar_columns(engine) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "daily_bars" not in table_names:
+        return
+
+    required_columns = {
+        "turnover_rate": "ALTER TABLE daily_bars ADD COLUMN turnover_rate FLOAT",
+        "volume_ratio": "ALTER TABLE daily_bars ADD COLUMN volume_ratio FLOAT",
+        "pe_ttm": "ALTER TABLE daily_bars ADD COLUMN pe_ttm FLOAT",
+        "pb": "ALTER TABLE daily_bars ADD COLUMN pb FLOAT",
+        "total_mv": "ALTER TABLE daily_bars ADD COLUMN total_mv FLOAT",
+        "circ_mv": "ALTER TABLE daily_bars ADD COLUMN circ_mv FLOAT",
+    }
+    with engine.begin() as connection:
+        for column_name, statement in required_columns.items():
+            current_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("daily_bars")
+            }
+            if column_name in current_columns:
+                continue
+            connection.execute(text(statement))
 
 
 def _ensure_chat_session_columns(engine) -> None:

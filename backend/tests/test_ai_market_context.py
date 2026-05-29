@@ -94,7 +94,16 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
             [
                 DailyBar(symbol="600519.SH", trade_date="20260526", close=1200, amount=9000),
                 DailyBar(symbol="600519.SH", trade_date="20260527", close=1260, amount=9500),
-                DailyBar(symbol="600519.SH", trade_date="20260528", close=1326, amount=10000),
+                DailyBar(
+                    symbol="600519.SH",
+                    trade_date="20260528",
+                    close=1326,
+                    amount=10000,
+                    turnover_rate=0.72,
+                    volume_ratio=1.34,
+                    pe_ttm=23.5,
+                    pb=7.8,
+                ),
                 DailyBar(symbol="000001.SZ", trade_date="20260526", close=10.0, amount=1000),
                 DailyBar(symbol="000001.SZ", trade_date="20260527", close=10.1, amount=1100),
                 DailyBar(symbol="000001.SZ", trade_date="20260528", close=10.0, amount=900),
@@ -113,6 +122,10 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "覆盖: 实时 2/2, 日线 2/2" in context
     assert "600519.SH 贵州茅台" in context
     assert "日线动量 +10.50%" in context
+    assert "换手 0.72%" in context
+    assert "量比 1.34" in context
+    assert "PE 23.50" in context
+    assert "PB 7.80" in context
     assert "000001.SZ 平安银行" in context
 
     _reset_state()

@@ -143,6 +143,10 @@ class QuantService:
                 -1.0,
             ),
             "daily_liquidity": min(math.log10(max(_number(daily.get("avg_amount")), 0.0) + 1) / 8.0, 1.0),
+            "daily_turnover": min(max(_number(daily.get("turnover_rate")), 0.0) / 5.0, 1.0),
+            "daily_volume_ratio": min(max(_number(daily.get("volume_ratio"), 1.0), 0.0) / 3.0, 1.0),
+            "valuation_sanity": self._valuation_sanity_score(daily),
+            "market_cap": min(math.log10(max(_number(daily.get("total_mv")), 0.0) + 1) / 9.0, 1.0),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
         return {
@@ -173,14 +177,30 @@ class QuantService:
             )
         else:
             score = (
-                factor_scores["momentum"] * 30
-                + factor_scores["amount"] * 25
-                + factor_scores["turnover"] * 10
-                + factor_scores["volume_ratio"] * 10
-                + factor_scores["daily_momentum"] * 20
+                factor_scores["momentum"] * 25
+                + factor_scores["amount"] * 20
+                + factor_scores["turnover"] * 8
+                + factor_scores["volume_ratio"] * 8
+                + factor_scores["daily_momentum"] * 18
                 + factor_scores["daily_liquidity"] * 5
+                + factor_scores["daily_turnover"] * 6
+                + factor_scores["daily_volume_ratio"] * 5
+                + factor_scores["valuation_sanity"] * 3
+                + factor_scores["market_cap"] * 2
             )
         return round(score, 4)
+
+    def _valuation_sanity_score(self, daily: dict[str, Any]) -> float:
+        pe_ttm = _number(daily.get("pe_ttm"))
+        pb = _number(daily.get("pb"))
+        scores: list[float] = []
+        if pe_ttm > 0:
+            scores.append(max(0.0, min(1.0, 1.0 - abs(pe_ttm - 25.0) / 50.0)))
+        if pb > 0:
+            scores.append(max(0.0, min(1.0, 1.0 - pb / 20.0)))
+        if not scores:
+            return 0.0
+        return sum(scores) / len(scores)
 
     def _daily_factors_by_symbol(
         self,
@@ -231,6 +251,12 @@ class QuantService:
             "momentum_pct": round(momentum_pct, 4),
             "avg_amount": round(avg_amount, 4),
             "volatility_pct": round(volatility_pct, 4),
+            "turnover_rate": _number(latest.turnover_rate),
+            "volume_ratio": _number(latest.volume_ratio),
+            "pe_ttm": _number(latest.pe_ttm),
+            "pb": _number(latest.pb),
+            "total_mv": _number(latest.total_mv),
+            "circ_mv": _number(latest.circ_mv),
         }
 
     def _empty_daily_factors(self) -> dict[str, Any]:
@@ -241,6 +267,12 @@ class QuantService:
             "momentum_pct": 0.0,
             "avg_amount": 0.0,
             "volatility_pct": 0.0,
+            "turnover_rate": 0.0,
+            "volume_ratio": 0.0,
+            "pe_ttm": 0.0,
+            "pb": 0.0,
+            "total_mv": 0.0,
+            "circ_mv": 0.0,
         }
 
     def _stddev(self, values: list[float]) -> float:

@@ -16,6 +16,9 @@ from app.services.market_data_service import normalize_symbol
 _TUSHARE_DAILY_FIELDS = (
     "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
 )
+_TUSHARE_DAILY_BASIC_FIELDS = (
+    "ts_code,trade_date,turnover_rate,volume_ratio,pe_ttm,pb,total_mv,circ_mv"
+)
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -204,14 +207,61 @@ class HistoricalDataService:
             return rows
         return self._request_tushare_daily({"trade_date": normalized_date})
 
+    def fetch_daily_basic_rows(
+        self,
+        trade_date: str,
+        symbols: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare daily_basic 数据。")
+
+        normalized_date = _normalize_trade_date(trade_date)
+        if symbols:
+            rows: list[dict[str, Any]] = []
+            for symbol in symbols:
+                rows.extend(
+                    self._request_tushare_daily_basic(
+                        {
+                            "ts_code": normalize_symbol(symbol),
+                            "trade_date": normalized_date,
+                        }
+                    )
+                )
+            return rows
+        return self._request_tushare_daily_basic({"trade_date": normalized_date})
+
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="daily",
+            params=params,
+            fields=_TUSHARE_DAILY_FIELDS,
+            label="日线",
+        )
+
+    def _request_tushare_daily_basic(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="daily_basic",
+            params=params,
+            fields=_TUSHARE_DAILY_BASIC_FIELDS,
+            label="daily_basic",
+        )
+
+    def _request_tushare_api(
+        self,
+        *,
+        api_name: str,
+        params: dict[str, Any],
+        fields: str,
+        label: str,
+    ) -> list[dict[str, Any]]:
         settings = get_settings()
         url = settings.tushare_api_url or "http://api.tushare.pro"
         payload = {
-            "api_name": "daily",
+            "api_name": api_name,
             "token": settings.tushare_token,
             "params": params,
-            "fields": _TUSHARE_DAILY_FIELDS,
+            "fields": fields,
         }
         command = [
             "curl",
@@ -237,29 +287,29 @@ class HistoricalDataService:
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"Tushare 日线请求超时: {params}") from exc
+            raise RuntimeError(f"Tushare {label} 请求超时: {params}") from exc
 
         if completed.returncode != 0:
             message = (completed.stderr or completed.stdout or "unknown error").strip()
             if completed.returncode == 28:
-                raise RuntimeError(f"Tushare 日线请求超时: {params}")
-            raise RuntimeError(f"Tushare 日线请求失败: {message}")
+                raise RuntimeError(f"Tushare {label} 请求超时: {params}")
+            raise RuntimeError(f"Tushare {label} 请求失败: {message}")
 
         try:
             body = json.loads(completed.stdout)
         except ValueError as exc:
-            raise RuntimeError("Tushare 日线响应不是合法 JSON。") from exc
+            raise RuntimeError(f"Tushare {label} 响应不是合法 JSON。") from exc
 
         code = int(body.get("code") or 0)
         if code != 0:
             message = str(body.get("msg") or "unknown error")
-            raise RuntimeError(f"Tushare 日线接口错误: {message}")
+            raise RuntimeError(f"Tushare {label} 接口错误: {message}")
 
         data = body.get("data") or {}
         fields = data.get("fields") or []
         items = data.get("items") or []
         if not isinstance(fields, list) or not isinstance(items, list):
-            raise RuntimeError("Tushare 日线响应结构不正确。")
+            raise RuntimeError(f"Tushare {label} 响应结构不正确。")
 
         rows: list[dict[str, Any]] = []
         for item in items:
@@ -278,6 +328,18 @@ class HistoricalDataService:
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
         normalized_date = _normalize_trade_date(trade_date)
         rows = self.fetch_daily_rows(normalized_date, normalized_symbols)
+        daily_basic_rows: list[dict[str, Any]] = []
+        daily_basic_error = None
+        try:
+            daily_basic_rows = self.fetch_daily_basic_rows(normalized_date, normalized_symbols)
+        except RuntimeError as exc:
+            daily_basic_error = str(exc)
+        daily_basic_by_symbol = {
+            normalize_symbol(str(row.get("ts_code") or row.get("symbol") or "")): row
+            for row in daily_basic_rows
+            if _normalize_trade_date(str(row.get("trade_date") or normalized_date))
+            == normalized_date
+        }
 
         stored_count = 0
         skipped_count = 0
@@ -302,8 +364,19 @@ class HistoricalDataService:
             bar.pct_chg = _to_float(row.get("pct_chg"))
             bar.vol = _to_float(row.get("vol"))
             bar.amount = _to_float(row.get("amount"))
+            daily_basic = daily_basic_by_symbol.get(symbol) or {}
+            if daily_basic:
+                bar.turnover_rate = _to_float(daily_basic.get("turnover_rate"))
+                bar.volume_ratio = _to_float(daily_basic.get("volume_ratio"))
+                bar.pe_ttm = _to_float(daily_basic.get("pe_ttm"))
+                bar.pb = _to_float(daily_basic.get("pb"))
+                bar.total_mv = _to_float(daily_basic.get("total_mv"))
+                bar.circ_mv = _to_float(daily_basic.get("circ_mv"))
             bar.source = "tushare"
-            bar.raw_payload = dict(row)
+            bar.raw_payload = {
+                **dict(row),
+                **({"daily_basic": dict(daily_basic)} if daily_basic else {}),
+            }
             db.add(bar)
             stored_count += 1
 
@@ -313,6 +386,8 @@ class HistoricalDataService:
             "source": "tushare",
             "stored_count": stored_count,
             "skipped_count": skipped_count,
+            "daily_basic_count": len(daily_basic_by_symbol),
+            "daily_basic_error": daily_basic_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -349,6 +424,8 @@ class HistoricalDataService:
                     "source": "tushare",
                     "stored_count": 0,
                     "skipped_count": 1,
+                    "daily_basic_count": 0,
+                    "daily_basic_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -383,6 +460,8 @@ class HistoricalDataService:
                             "source": "tushare",
                             "stored_count": 0,
                             "skipped_count": 1,
+                            "daily_basic_count": 0,
+                            "daily_basic_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"

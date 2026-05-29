@@ -163,7 +163,18 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                 [
                     DailyBar(symbol="600519.SH", trade_date="20260526", close=1200, amount=9000),
                     DailyBar(symbol="600519.SH", trade_date="20260527", close=1260, amount=9500),
-                    DailyBar(symbol="600519.SH", trade_date="20260528", close=1326, amount=10000),
+                    DailyBar(
+                        symbol="600519.SH",
+                        trade_date="20260528",
+                        close=1326,
+                        amount=10000,
+                        turnover_rate=0.72,
+                        volume_ratio=1.34,
+                        pe_ttm=23.5,
+                        pb=7.8,
+                        total_mv=166500000.0,
+                        circ_mv=166500000.0,
+                    ),
                     DailyBar(symbol="000001.SZ", trade_date="20260526", close=10.0, amount=1000),
                     DailyBar(symbol="000001.SZ", trade_date="20260527", close=10.1, amount=1100),
                     DailyBar(symbol="000001.SZ", trade_date="20260528", close=10.0, amount=900),
@@ -191,7 +202,14 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
     assert payload["items"][0]["daily_factors"]["bars_used"] == 3
     assert payload["items"][0]["daily_factors"]["momentum_pct"] > 10
+    assert payload["items"][0]["daily_factors"]["turnover_rate"] == 0.72
+    assert payload["items"][0]["daily_factors"]["volume_ratio"] == 1.34
+    assert payload["items"][0]["daily_factors"]["pe_ttm"] == 23.5
+    assert payload["items"][0]["daily_factors"]["pb"] == 7.8
+    assert payload["items"][0]["daily_factors"]["total_mv"] == 166500000.0
     assert "daily_momentum" in payload["items"][0]["factor_scores"]
+    assert "daily_turnover" in payload["items"][0]["factor_scores"]
+    assert "valuation_sanity" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

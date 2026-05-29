@@ -484,6 +484,8 @@ class DailyRefreshResponse(BaseModel):
     source: str
     stored_count: int
     skipped_count: int = 0
+    daily_basic_count: int = 0
+    daily_basic_error: str | None = None
     requested_symbols: list[str] = Field(default_factory=list)
     error: str | None = None
 

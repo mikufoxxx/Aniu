@@ -64,6 +64,7 @@ class MarketDataMaintenanceService:
         symbols: list[str] | None = None,
         dataset_limit: int | None = None,
         report_type: str | None = None,
+        progress_callback=None,
     ) -> dict[str, Any]:
         settings = get_settings()
         normalized_lookback = max(
@@ -85,7 +86,22 @@ class MarketDataMaintenanceService:
             start_date=start_date,
             end_date=normalized_end,
             symbols=normalized_symbols,
+            progress_callback=progress_callback,
         )
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "building_dataset",
+                    "total_days": refresh.get("processed_days"),
+                    "processed_days": refresh.get("processed_days"),
+                    "current_trade_date": refresh.get("end_date"),
+                    "stored_count": refresh.get("stored_count"),
+                    "skipped_count": refresh.get("skipped_count"),
+                    "error_count": sum(
+                        1 for item in refresh.get("daily_results", []) if item.get("error")
+                    ),
+                }
+            )
         dataset_symbols = normalized_symbols or DEFAULT_UNIVERSE
         dataset = quant_service.build_dataset(
             db,
@@ -129,6 +145,7 @@ class MarketDataMaintenanceService:
                 "status": "queued",
                 "submitted_at": datetime.now(ZoneInfo("Asia/Shanghai")),
                 "completed_at": None,
+                "progress": None,
                 "result": None,
                 "error": None,
             }
@@ -184,11 +201,16 @@ class MarketDataMaintenanceService:
                     symbols=symbols,
                     dataset_limit=dataset_limit,
                     report_type=report_type,
+                    progress_callback=lambda progress: self._update_job_progress(
+                        job_id,
+                        progress,
+                    ),
                 )
             with self._job_lock:
                 job = self._jobs[job_id]
                 job["status"] = "completed"
                 job["completed_at"] = datetime.now(ZoneInfo("Asia/Shanghai"))
+                job["progress"] = self._completed_progress(result)
                 job["result"] = result
         except Exception as exc:
             with self._job_lock:
@@ -196,6 +218,27 @@ class MarketDataMaintenanceService:
                 job["status"] = "failed"
                 job["completed_at"] = datetime.now(ZoneInfo("Asia/Shanghai"))
                 job["error"] = str(exc)
+
+    def _update_job_progress(self, job_id: str, progress: dict[str, Any]) -> None:
+        with self._job_lock:
+            job = self._jobs.get(job_id)
+            if job is not None:
+                job["progress"] = dict(progress)
+
+    def _completed_progress(self, result: dict[str, Any]) -> dict[str, Any] | None:
+        refresh = result.get("refresh") or {}
+        if not refresh:
+            return None
+        daily_results = refresh.get("daily_results") or []
+        return {
+            "phase": "completed",
+            "total_days": refresh.get("processed_days"),
+            "processed_days": refresh.get("processed_days"),
+            "current_trade_date": refresh.get("end_date"),
+            "stored_count": refresh.get("stored_count"),
+            "skipped_count": refresh.get("skipped_count"),
+            "error_count": sum(1 for item in daily_results if item.get("error")),
+        }
 
     def _normalize_end_date(self, end_date: str | None) -> str:
         if not end_date:

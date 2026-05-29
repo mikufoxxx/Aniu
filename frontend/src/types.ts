@@ -244,6 +244,15 @@ export interface MarketDataMaintenanceJobPayload {
   status: 'queued' | 'running' | 'completed' | 'failed'
   submitted_at: string
   completed_at?: string | null
+  progress?: {
+    phase?: string
+    total_days?: number
+    processed_days?: number
+    current_trade_date?: string
+    stored_count?: number
+    skipped_count?: number
+    error_count?: number
+  } | null
   result?: MarketDataMaintenancePayload | null
   error?: string | null
 }

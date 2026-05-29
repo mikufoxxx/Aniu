@@ -75,7 +75,14 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
 
     captured: dict[str, object] = {}
 
-    def fake_refresh_range(db, *, start_date: str, end_date: str, symbols=None):
+    def fake_refresh_range(
+        db,
+        *,
+        start_date: str,
+        end_date: str,
+        symbols=None,
+        progress_callback=None,
+    ):
         captured["range"] = (start_date, end_date, symbols)
         return {
             "start_date": start_date,
@@ -264,6 +271,62 @@ def test_market_data_maintenance_job_reuses_running_job(monkeypatch, tmp_path) -
     assert second.json()["job_id"] == first.json()["job_id"]
     assert second.json()["status"] in {"queued", "running"}
     assert calls == 1
+
+    _reset_state()
+
+
+def test_market_data_maintenance_job_exposes_progress_updates(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_maintenance_service import market_data_maintenance_service
+
+    progress_sent = threading.Event()
+    release = threading.Event()
+
+    def fake_run(db, **kwargs):
+        kwargs["progress_callback"](
+            {
+                "phase": "refreshing_daily",
+                "total_days": 3,
+                "processed_days": 1,
+                "current_trade_date": "20260526",
+                "stored_count": 100,
+                "skipped_count": 0,
+                "error_count": 0,
+            }
+        )
+        progress_sent.set()
+        release.wait(timeout=2)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(market_data_maintenance_service, "run_now", fake_run)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        created = client.post(
+            "/api/aniu/market/maintenance/jobs",
+            headers=headers,
+            json={"end_date": "20260528"},
+        )
+        assert created.status_code == 200
+        assert progress_sent.wait(timeout=2)
+
+        running = client.get(
+            f"/api/aniu/market/maintenance/jobs/{created.json()['job_id']}",
+            headers=headers,
+        )
+        release.set()
+
+    assert running.status_code == 200
+    payload = running.json()
+    assert payload["status"] == "running"
+    assert payload["progress"] == {
+        "phase": "refreshing_daily",
+        "total_days": 3,
+        "processed_days": 1,
+        "current_trade_date": "20260526",
+        "stored_count": 100,
+        "skipped_count": 0,
+        "error_count": 0,
+    }
 
     _reset_state()
 

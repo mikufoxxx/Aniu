@@ -462,6 +462,7 @@ class MarketDataMaintenanceJobResponse(BaseModel):
     status: Literal["queued", "running", "completed", "failed"]
     submitted_at: datetime
     completed_at: datetime | None = None
+    progress: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     error: str | None = None
 

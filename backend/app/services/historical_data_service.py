@@ -182,6 +182,7 @@ class HistoricalDataService:
         start_date: str,
         end_date: str,
         symbols: list[str] | None = None,
+        progress_callback=None,
     ) -> dict[str, Any]:
         dates = self._date_range(start_date, end_date)
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
@@ -190,6 +191,7 @@ class HistoricalDataService:
         total_stored = 0
         total_skipped = 0
         consecutive_failures = 0
+        total_days = len(dates)
 
         for index, trade_date in enumerate(dates):
             try:
@@ -212,6 +214,18 @@ class HistoricalDataService:
             daily_results.append(result)
             total_stored += int(result["stored_count"])
             total_skipped += int(result["skipped_count"])
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "refreshing_daily",
+                        "total_days": total_days,
+                        "processed_days": index + 1,
+                        "current_trade_date": trade_date,
+                        "stored_count": total_stored,
+                        "skipped_count": total_skipped,
+                        "error_count": sum(1 for item in daily_results if item.get("error")),
+                    }
+                )
             stored_symbols.update(
                 db.scalars(
                     select(DailyBar.symbol)
@@ -236,6 +250,20 @@ class HistoricalDataService:
                         }
                     )
                 total_skipped += len(remaining_dates)
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "refreshing_daily",
+                            "total_days": total_days,
+                            "processed_days": total_days,
+                            "current_trade_date": dates[-1],
+                            "stored_count": total_stored,
+                            "skipped_count": total_skipped,
+                            "error_count": sum(
+                                1 for item in daily_results if item.get("error")
+                            ),
+                        }
+                    )
                 break
 
         return {

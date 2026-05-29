@@ -164,6 +164,14 @@
           <strong>维护任务</strong>
           <span>
             {{ maintenanceJob.status }} ·
+            <template v-if="maintenanceJob.progress">
+              {{ progressText(maintenanceJob.progress.phase) }} ·
+              {{ maintenanceJob.progress.processed_days ?? 0 }}/{{ maintenanceJob.progress.total_days ?? 0 }} 天 ·
+              当前 {{ maintenanceJob.progress.current_trade_date ?? '--' }} ·
+              入库 {{ maintenanceJob.progress.stored_count ?? 0 }} ·
+              跳过 {{ maintenanceJob.progress.skipped_count ?? 0 }} ·
+              错误 {{ maintenanceJob.progress.error_count ?? 0 }} ·
+            </template>
             {{ formatDateTime(maintenanceJob.submitted_at) }}
             <template v-if="maintenanceJob.completed_at">
               - {{ formatDateTime(maintenanceJob.completed_at) }}
@@ -692,6 +700,15 @@ function tierText(tier: string): string {
     supplemental: '补充',
   }
   return mapping[tier] ?? tier
+}
+
+function progressText(phase: string | undefined): string {
+  const mapping: Record<string, string> = {
+    refreshing_daily: '刷新日线',
+    building_dataset: '构建数据集',
+    completed: '已完成',
+  }
+  return phase ? mapping[phase] ?? phase : '--'
 }
 
 function styleText(style: string): string {

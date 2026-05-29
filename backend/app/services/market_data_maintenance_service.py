@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.database import session_scope
 from app.services.historical_data_service import historical_data_service
-from app.services.market_data_service import DEFAULT_UNIVERSE, normalize_symbol
+from app.services.market_data_service import normalize_symbol
 from app.services.market_report_service import market_report_service
 from app.services.quant_service import quant_service
 
@@ -81,6 +81,12 @@ class MarketDataMaintenanceService:
             - timedelta(days=normalized_lookback - 1)
         ).strftime("%Y%m%d")
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
+        if normalized_symbols is None:
+            coverage = historical_data_service.summarize_daily_coverage(db)
+            suggestion = coverage.get("refresh_suggestion") or {}
+            if suggestion.get("needed") and suggestion.get("start_date") and suggestion.get("end_date"):
+                start_date = str(suggestion["start_date"])
+                normalized_end = str(suggestion["end_date"])
         refresh = historical_data_service.refresh_daily_range(
             db,
             start_date=start_date,
@@ -102,10 +108,9 @@ class MarketDataMaintenanceService:
                     ),
                 }
             )
-        dataset_symbols = normalized_symbols or DEFAULT_UNIVERSE
         dataset = quant_service.build_dataset(
             db,
-            symbols=dataset_symbols,
+            symbols=normalized_symbols,
             limit=normalized_limit,
             prefer_realtime=True,
             lookback_days=normalized_lookback,
@@ -119,7 +124,7 @@ class MarketDataMaintenanceService:
             result["report"] = market_report_service.generate_report(
                 db,
                 report_type=report_type,
-                symbols=dataset_symbols,
+                symbols=normalized_symbols,
                 limit=min(50, normalized_limit),
                 lookback_days=normalized_lookback,
             )

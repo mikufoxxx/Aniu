@@ -161,6 +161,107 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
     _reset_state()
 
 
+def test_market_data_maintenance_uses_coverage_gap_when_symbols_are_omitted(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.historical_data_service import historical_data_service
+    from app.services.market_report_service import market_report_service
+    from app.services.quant_service import quant_service
+
+    captured: dict[str, object] = {}
+
+    def fake_coverage(db):
+        return {
+            "refresh_suggestion": {
+                "needed": True,
+                "start_date": "20260520",
+                "end_date": "20260528",
+                "reason": "最新交易日覆盖不足",
+            }
+        }
+
+    def fake_refresh_range(
+        db,
+        *,
+        start_date: str,
+        end_date: str,
+        symbols=None,
+        progress_callback=None,
+    ):
+        captured["range"] = (start_date, end_date, symbols)
+        return {
+            "start_date": start_date,
+            "end_date": end_date,
+            "source": "tushare",
+            "processed_days": 9,
+            "stored_count": 900,
+            "skipped_count": 0,
+            "unique_symbols": 300,
+            "requested_symbols": symbols or [],
+            "daily_results": [],
+        }
+
+    def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=20):
+        captured["dataset"] = (symbols, limit, prefer_realtime, lookback_days)
+        return {
+            "universe_size": 500,
+            "item_count": 50,
+            "lookback_days": lookback_days,
+            "data_sources": ["tushare_daily"],
+            "coverage": {
+                "realtime_symbols": 50,
+                "daily_history_symbols": 50,
+                "symbols_with_price": 50,
+            },
+            "items": [],
+        }
+
+    def fake_generate_report(db, *, report_type: str, symbols=None, limit=10, lookback_days=20):
+        captured["report"] = (report_type, symbols, limit, lookback_days)
+        return {
+            "id": 8,
+            "report_type": report_type,
+            "title": "早盘推荐",
+            "symbols": symbols or [],
+            "lookback_days": lookback_days,
+            "data_sources": ["tushare_daily"],
+            "coverage": {"daily_history_symbols": 50},
+            "recommendations": [],
+            "dataset": {},
+            "context": "context",
+            "summary": "summary",
+            "created_at": "2026-05-29T08:45:00",
+        }
+
+    monkeypatch.setattr(historical_data_service, "summarize_daily_coverage", fake_coverage)
+    monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
+    monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+    monkeypatch.setattr(market_report_service, "generate_report", fake_generate_report)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/maintenance/run",
+            headers=headers,
+            json={
+                "end_date": "20260528",
+                "lookback_days": 120,
+                "dataset_limit": 50,
+                "report_type": "morning",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refresh"]["start_date"] == "20260520"
+    assert captured["range"] == ("20260520", "20260528", None)
+    assert captured["dataset"] == (None, 50, True, 120)
+    assert captured["report"] == ("morning", None, 50, 120)
+
+    _reset_state()
+
+
 def test_market_data_maintenance_job_starts_and_can_be_polled(
     monkeypatch,
     tmp_path,

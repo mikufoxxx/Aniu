@@ -447,6 +447,7 @@
             <div>数量 / 价格</div>
             <div>金额</div>
             <div>现金</div>
+            <div>依据</div>
           </div>
           <div v-for="order in arenaResult.orders" :key="order.id" class="arena-order-row">
             <div>{{ order.agent_name }}</div>
@@ -454,6 +455,10 @@
             <div>{{ order.quantity }} / {{ formatPrice(order.price) }}</div>
             <div>{{ formatAmount(order.amount) }}</div>
             <div>{{ formatAmount(order.remaining_cash) }}</div>
+            <div class="arena-order-reason">
+              <span>{{ order.reason }}</span>
+              <small>快照 {{ orderSnapshotId(order.decision_context) }}</small>
+            </div>
           </div>
         </div>
         <div v-else class="empty-state">
@@ -809,6 +814,11 @@ function styleText(style: string): string {
     risk_control: '风控型',
   }
   return mapping[style] ?? style
+}
+
+function orderSnapshotId(decisionContext: Record<string, unknown> | undefined): string {
+  const snapshotId = decisionContext?.snapshot_id
+  return typeof snapshotId === 'string' && snapshotId ? snapshotId : '--'
 }
 
 function sourceStatusClass(status: string): string {
@@ -1228,7 +1238,24 @@ onMounted(async () => {
 }
 
 .arena-order-row {
-  grid-template-columns: 1fr 1.5fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1.4fr 0.95fr 0.9fr 0.9fr minmax(180px, 1.4fr);
+}
+
+.arena-order-reason {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.arena-order-reason span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arena-order-reason small {
+  color: #8fa3c4;
+  font-size: 12px;
 }
 
 .arena-table-head {

@@ -445,6 +445,7 @@ export interface ArenaOrder {
   amount: number
   remaining_cash: number
   reason: string
+  decision_context?: Record<string, unknown>
 }
 
 export interface ArenaLeaderboardItem {

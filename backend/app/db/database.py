@@ -47,6 +47,7 @@ def init_db() -> None:
     _ensure_strategy_schedule_columns(engine)
     _ensure_strategy_run_columns(engine)
     _ensure_run_event_columns(engine)
+    _ensure_arena_order_columns(engine)
     _ensure_chat_session_indexes(engine)
     _ensure_chat_message_indexes(engine)
     _ensure_strategy_run_indexes(engine)
@@ -385,6 +386,20 @@ def _ensure_run_event_columns(engine) -> None:
                 ")"
             )
         )
+
+
+def _ensure_arena_order_columns(engine) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "arena_orders" not in table_names:
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("arena_orders")}
+    if "decision_payload" in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE arena_orders ADD COLUMN decision_payload JSON"))
 
 
 def _ensure_run_event_indexes(engine) -> None:

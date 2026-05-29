@@ -47,6 +47,8 @@ class ArenaService:
         )
         db.add(arena_run)
         db.flush()
+        snapshot_id = f"arena-{arena_run.id}"
+        data_sources = list(candidate_payload.get("data_sources") or [])
 
         leaderboard: list[dict[str, Any]] = []
         orders: list[dict[str, Any]] = []
@@ -63,6 +65,8 @@ class ArenaService:
                 candidates=candidates,
                 agent_index=index,
                 available_cash=account.cash,
+                snapshot_id=snapshot_id,
+                data_sources=data_sources,
             )
             if decision is not None:
                 if decision["action"] == "SELL":
@@ -82,6 +86,7 @@ class ArenaService:
                     amount=decision["amount"],
                     remaining_cash=decision["remaining_cash"],
                     reason=decision["reason"],
+                    decision_payload=decision.get("decision_context"),
                 )
                 db.add(order)
                 db.flush()
@@ -210,6 +215,8 @@ class ArenaService:
         candidates: list[dict[str, Any]],
         agent_index: int,
         available_cash: float,
+        snapshot_id: str,
+        data_sources: list[str],
     ) -> dict[str, Any] | None:
         if not candidates:
             return None
@@ -249,6 +256,13 @@ class ArenaService:
             "amount": amount,
             "remaining_cash": round(available_cash - amount, 2),
             "reason": f"{style} 根据候选评分 {candidate['score']} 执行模拟买入。",
+            "decision_context": self._decision_context(
+                snapshot_id=snapshot_id,
+                agent=agent,
+                data_sources=data_sources,
+                candidate=candidate,
+                action="BUY",
+            ),
         }
 
     def _stop_loss_decision(self, account: ArenaAccount) -> dict[str, Any] | None:
@@ -274,8 +288,56 @@ class ArenaService:
                 "reason": (
                     f"{account.style} 触发止损，当前价较成本回撤 {abs(drawdown) * 100:.2f}%。"
                 ),
+                "decision_context": {
+                    "snapshot_id": None,
+                    "agent": {
+                        "id": account.agent_id,
+                        "name": account.agent_name,
+                        "style": account.style,
+                    },
+                    "action": "SELL",
+                    "risk": {"drawdown_pct": round(drawdown * 100, 4)},
+                    "selected_candidate": {},
+                    "data_sources": [],
+                },
             }
         return None
+
+    def _decision_context(
+        self,
+        *,
+        snapshot_id: str,
+        agent: dict[str, str],
+        data_sources: list[str],
+        candidate: dict[str, Any],
+        action: str,
+    ) -> dict[str, Any]:
+        return {
+            "snapshot_id": snapshot_id,
+            "agent": {
+                "id": str(agent.get("id") or ""),
+                "name": str(agent.get("name") or ""),
+                "style": str(agent.get("style") or "balanced"),
+                "provider": str(agent.get("provider") or "openai-compatible"),
+                "model": str(agent.get("model") or ""),
+                "prompt": str(agent.get("prompt") or ""),
+            },
+            "action": action,
+            "data_sources": data_sources,
+            "selected_candidate": {
+                "symbol": candidate.get("symbol"),
+                "name": candidate.get("name"),
+                "score": candidate.get("score"),
+                "price": candidate.get("price"),
+                "change_pct": candidate.get("change_pct"),
+                "amount": candidate.get("amount"),
+                "turnover": candidate.get("turnover"),
+                "volume_ratio": candidate.get("volume_ratio"),
+                "factor_scores": candidate.get("factor_scores") or {},
+                "daily_factors": candidate.get("daily_factors") or {},
+                "rationale": candidate.get("rationale"),
+            },
+        }
 
     def _get_or_create_account(
         self,
@@ -437,6 +499,7 @@ class ArenaService:
             "amount": order.amount,
             "remaining_cash": order.remaining_cash,
             "reason": order.reason,
+            "decision_context": order.decision_payload or {},
         }
 
 

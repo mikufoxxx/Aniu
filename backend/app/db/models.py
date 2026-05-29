@@ -351,6 +351,7 @@ class ArenaOrder(Base):
     amount: Mapped[float] = mapped_column(Float)
     remaining_cash: Mapped[float] = mapped_column(Float)
     reason: Mapped[str] = mapped_column(Text, default="")
+    decision_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     arena_run: Mapped[ArenaRun] = relationship(back_populates="orders")

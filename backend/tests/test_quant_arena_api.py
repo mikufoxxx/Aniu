@@ -359,6 +359,93 @@ def test_arena_run_keeps_each_ai_account_independent(monkeypatch, tmp_path) -> N
     _reset_state()
 
 
+def test_arena_orders_store_shared_snapshot_and_agent_decision_context(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 3.0,
+                "amount": 10_000_000,
+                "turnover": 0.6,
+                "volume_ratio": 1.4,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            },
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 5_000_000,
+                "turnover": 0.4,
+                "volume_ratio": 1.1,
+                "source": "tencent",
+                "timestamp": "2026-05-29 15:00:03",
+            },
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "symbols": ["600519.SH", "000001.SZ"],
+                "initial_cash": 200000,
+                "agents": [
+                    {
+                        "id": "deepseek",
+                        "name": "DeepSeek",
+                        "style": "momentum",
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "prompt": "偏动量突破",
+                    },
+                    {
+                        "id": "gpt",
+                        "name": "GPT",
+                        "style": "risk_control",
+                        "provider": "openai-compatible",
+                        "model": "gpt-4o-mini",
+                        "prompt": "偏回撤控制",
+                    },
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["orders"]) == 2
+    snapshot_ids = {order["decision_context"]["snapshot_id"] for order in payload["orders"]}
+    assert snapshot_ids == {f"arena-{payload['run_id']}"}
+    for order in payload["orders"]:
+        context = order["decision_context"]
+        assert context["agent"]["id"] == order["agent_id"]
+        assert context["agent"]["prompt"]
+        assert context["data_sources"] == payload["data_sources"]
+        assert context["selected_candidate"]["symbol"] == order["symbol"]
+        assert "factor_scores" in context["selected_candidate"]
+        assert "daily_factors" in context["selected_candidate"]
+
+    _reset_state()
+
+
 def test_arena_accounts_persist_cash_and_positions_across_runs(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 

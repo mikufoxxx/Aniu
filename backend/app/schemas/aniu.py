@@ -593,6 +593,7 @@ class ArenaOrderRead(BaseModel):
     amount: float
     remaining_cash: float
     reason: str
+    decision_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class ArenaPositionRead(BaseModel):

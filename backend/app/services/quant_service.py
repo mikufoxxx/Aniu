@@ -72,13 +72,18 @@ class QuantService:
     def _stored_universe(self, db: Session | None, *, limit: int) -> list[str]:
         if db is None:
             return []
-        latest_trade_date = db.scalar(select(func.max(DailyBar.trade_date)))
-        if not latest_trade_date:
+        trade_date = db.scalar(
+            select(DailyBar.trade_date)
+            .group_by(DailyBar.trade_date)
+            .order_by(func.count(DailyBar.symbol).desc(), DailyBar.trade_date.desc())
+            .limit(1)
+        )
+        if not trade_date:
             return []
         return list(
             db.scalars(
                 select(DailyBar.symbol)
-                .where(DailyBar.trade_date == latest_trade_date)
+                .where(DailyBar.trade_date == trade_date)
                 .order_by(DailyBar.amount.desc(), DailyBar.symbol)
                 .limit(max(1, min(self._AUTO_UNIVERSE_LIMIT, int(limit))))
             ).all()

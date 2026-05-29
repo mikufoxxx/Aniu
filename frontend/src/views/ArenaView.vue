@@ -186,6 +186,20 @@
           </span>
         </div>
 
+        <div v-if="dataCoverage?.refresh_suggestion.needed" class="arena-history-result">
+          <strong>补数建议</strong>
+          <span>
+            {{ dataCoverage.refresh_suggestion.reason }} ·
+            {{ dataCoverage.refresh_suggestion.start_date }}-{{ dataCoverage.refresh_suggestion.end_date }}
+          </span>
+          <button
+            class="button ghost small soft-header-button overview-refresh-button arena-inline-action"
+            @click="applyRefreshSuggestion"
+          >
+            填入区间
+          </button>
+        </div>
+
         <div v-if="dailyRefreshResult" class="arena-history-result">
           <strong>日线入库</strong>
           <span>
@@ -497,6 +511,14 @@ async function loadSources(): Promise<void> {
 
 async function loadDataCoverage(): Promise<void> {
   dataCoverage.value = await api.getMarketDataCoverage()
+}
+
+function applyRefreshSuggestion(): void {
+  const suggestion = dataCoverage.value?.refresh_suggestion
+  if (!suggestion?.needed || !suggestion.start_date || !suggestion.end_date) return
+  refreshStartDate.value = suggestion.start_date
+  refreshEndDate.value = suggestion.end_date
+  refreshFullMarket.value = true
 }
 
 async function loadAgents(): Promise<void> {
@@ -892,6 +914,11 @@ onMounted(async () => {
 .arena-history-result span {
   color: #b7c8e3;
   font-size: 13px;
+}
+
+.arena-inline-action {
+  justify-self: start;
+  margin-top: 2px;
 }
 
 .arena-coverage-summary {

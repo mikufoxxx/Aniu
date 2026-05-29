@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DailyBar, MarketReport
 from app.services.ai_market_context_service import ai_market_context_service
-from app.services.market_data_service import DEFAULT_UNIVERSE, normalize_symbol
+from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
 
 
@@ -28,7 +28,7 @@ class MarketReportService:
         lookback_days: int = 20,
     ) -> dict[str, Any]:
         normalized_type = self._normalize_report_type(report_type)
-        normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else DEFAULT_UNIVERSE
+        normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
         normalized_limit = max(1, min(50, int(limit)))
         normalized_lookback = max(1, min(120, int(lookback_days)))
         dataset = quant_service.build_dataset(
@@ -54,7 +54,7 @@ class MarketReportService:
         record = MarketReport(
             report_type=normalized_type,
             title=REPORT_TITLES[normalized_type],
-            symbols_json=normalized_symbols,
+            symbols_json=normalized_symbols or [],
             lookback_days=normalized_lookback,
             data_sources_json=list(dataset.get("data_sources") or []),
             coverage_payload=dict(dataset.get("coverage") or {}),

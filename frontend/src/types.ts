@@ -214,6 +214,12 @@ export interface MarketDataCoveragePayload {
   most_complete_trade_date_symbols: number
   recent_trade_dates: MarketDataCoverageDate[]
   source_counts: MarketDataCoverageSource[]
+  refresh_suggestion: {
+    needed: boolean
+    start_date: string | null
+    end_date: string | null
+    reason: string
+  }
   readiness: Record<string, boolean>
 }
 

@@ -108,6 +108,21 @@ class HistoricalDataService:
             most_complete_trade_date_symbols > 0
             and latest_trade_date_symbols >= int(most_complete_trade_date_symbols * 0.8)
         )
+        completeness_threshold = max(1, int(most_complete_trade_date_symbols * 0.8))
+        latest_complete_trade_date = None
+        if most_complete_trade_date_symbols > 0:
+            latest_complete_trade_date = db.scalar(
+                select(DailyBar.trade_date)
+                .group_by(DailyBar.trade_date)
+                .having(func.count(func.distinct(DailyBar.symbol)) >= completeness_threshold)
+                .order_by(desc(DailyBar.trade_date))
+                .limit(1)
+            )
+        refresh_suggestion = self._refresh_suggestion(
+            latest_trade_date=latest_trade_date,
+            latest_day_complete=latest_day_complete,
+            latest_complete_trade_date=latest_complete_trade_date,
+        )
         readiness = {
             "has_daily_history": total_rows > 0,
             "has_broad_universe": unique_symbols >= 500,
@@ -125,7 +140,42 @@ class HistoricalDataService:
             "most_complete_trade_date_symbols": most_complete_trade_date_symbols,
             "recent_trade_dates": recent_trade_dates,
             "source_counts": source_counts,
+            "refresh_suggestion": refresh_suggestion,
             "readiness": readiness,
+        }
+
+    def _refresh_suggestion(
+        self,
+        *,
+        latest_trade_date: str | None,
+        latest_day_complete: bool,
+        latest_complete_trade_date: str | None,
+    ) -> dict[str, Any]:
+        if not latest_trade_date:
+            return {
+                "needed": False,
+                "start_date": None,
+                "end_date": None,
+                "reason": "暂无日线库存",
+            }
+        if latest_day_complete:
+            return {
+                "needed": False,
+                "start_date": None,
+                "end_date": None,
+                "reason": "最新交易日覆盖充足",
+            }
+        start_date = latest_trade_date
+        if latest_complete_trade_date:
+            start_date = (
+                datetime.strptime(latest_complete_trade_date, "%Y%m%d").date()
+                + timedelta(days=1)
+            ).strftime("%Y%m%d")
+        return {
+            "needed": True,
+            "start_date": start_date,
+            "end_date": latest_trade_date,
+            "reason": "最新交易日覆盖不足",
         }
 
     def fetch_daily_rows(

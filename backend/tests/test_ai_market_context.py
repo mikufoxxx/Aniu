@@ -118,6 +118,58 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     _reset_state()
 
 
+def test_ai_market_context_uses_stored_universe_when_symbols_are_omitted(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_market_context_service import ai_market_context_service
+    from app.services.market_data_service import market_data_service
+
+    _use_temp_db(monkeypatch, tmp_path)
+    captured: dict[str, list[str]] = {}
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        captured["symbols"] = symbols
+        return [
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 1000.0,
+                "turnover": 1.0,
+                "volume_ratio": 1.0,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:30:03",
+            }
+            for symbol in symbols
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with session_scope() as db:
+        db.add_all(
+            [
+                DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900),
+                DailyBar(symbol="688001.SH", trade_date="20260527", close=80, amount=3000),
+                DailyBar(symbol="002001.SZ", trade_date="20260527", close=20, amount=1000),
+            ]
+        )
+        db.flush()
+        context = ai_market_context_service.build_context(
+            db,
+            symbols=None,
+            limit=2,
+            lookback_days=3,
+        )
+
+    assert captured["symbols"] == ["688001.SH", "002001.SZ"]
+    assert "688001.SH" in context
+    assert "002001.SZ" in context
+
+    _reset_state()
+
+
 def test_ai_market_context_includes_recent_report_performance(monkeypatch, tmp_path) -> None:
     from app.services.ai_market_context_service import ai_market_context_service
     from app.services.market_data_service import market_data_service

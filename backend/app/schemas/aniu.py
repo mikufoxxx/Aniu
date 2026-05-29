@@ -304,6 +304,13 @@ class MarketDataCoverageSourceRead(BaseModel):
     row_count: int
 
 
+class MarketDataCoverageRefreshSuggestionRead(BaseModel):
+    needed: bool
+    start_date: str | None = None
+    end_date: str | None = None
+    reason: str
+
+
 class MarketDataCoverageResponse(BaseModel):
     total_rows: int
     unique_symbols: int
@@ -314,6 +321,7 @@ class MarketDataCoverageResponse(BaseModel):
     most_complete_trade_date_symbols: int
     recent_trade_dates: list[MarketDataCoverageDateRead] = Field(default_factory=list)
     source_counts: list[MarketDataCoverageSourceRead] = Field(default_factory=list)
+    refresh_suggestion: MarketDataCoverageRefreshSuggestionRead
     readiness: dict[str, bool]
 
 

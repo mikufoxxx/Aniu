@@ -365,6 +365,12 @@ def test_market_data_coverage_endpoint_summarizes_daily_inventory(monkeypatch, t
         {"trade_date": "20260527", "symbol_count": 2, "row_count": 2},
     ]
     assert payload["source_counts"] == [{"source": "tushare", "row_count": 6}]
+    assert payload["refresh_suggestion"] == {
+        "needed": True,
+        "start_date": "20260529",
+        "end_date": "20260529",
+        "reason": "最新交易日覆盖不足",
+    }
     assert payload["readiness"] == {
         "has_daily_history": True,
         "has_broad_universe": False,

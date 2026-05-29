@@ -124,6 +124,63 @@ def test_market_report_generation_persists_structured_morning_report(monkeypatch
     _reset_state()
 
 
+def test_market_report_uses_stored_universe_when_symbols_are_omitted(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    captured_calls: list[list[str]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        captured_calls.append(symbols)
+        return [
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 1000.0,
+                "turnover": 1.0,
+                "volume_ratio": 1.0,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 09:25:00",
+            }
+            for symbol in symbols
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900),
+                    DailyBar(symbol="688001.SH", trade_date="20260527", close=80, amount=3000),
+                    DailyBar(symbol="002001.SZ", trade_date="20260527", close=20, amount=1000),
+                ]
+            )
+
+        response = client.post(
+            "/api/aniu/market/reports",
+            headers=headers,
+            json={
+                "report_type": "morning",
+                "limit": 2,
+                "lookback_days": 3,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert captured_calls[0] == ["688001.SH", "002001.SZ"]
+    assert payload["recommendations"][0]["symbol"] == "688001.SH"
+    assert payload["coverage"]["daily_history_symbols"] == 2
+
+    _reset_state()
+
+
 def test_market_report_performance_evaluates_recommendation_forward_returns(
     monkeypatch,
     tmp_path,

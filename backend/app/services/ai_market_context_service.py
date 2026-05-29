@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import DailyBar, MarketReport
-from app.services.market_data_service import DEFAULT_UNIVERSE, normalize_symbol
+from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
 
 
@@ -23,7 +23,7 @@ class AIMarketContextService:
         settings = get_settings()
         if not settings.ai_market_context_enabled:
             return ""
-        normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else DEFAULT_UNIVERSE
+        normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
         normalized_limit = max(1, min(50, int(limit or settings.ai_market_context_limit)))
         normalized_lookback = max(
             1,

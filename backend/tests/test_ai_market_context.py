@@ -10,7 +10,7 @@ from app.core import rate_limit as rate_limit_module
 from app.core.config import get_settings
 from app.db import database as database_module
 from app.db.database import init_db, session_scope
-from app.db.models import DailyBar, MarketReport
+from app.db.models import DailyBar, MarketDataMaintenanceRun, MarketReport
 from app.services.automation_session_service import automation_session_service
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -233,6 +233,81 @@ def test_ai_market_context_includes_recent_report_performance(monkeypatch, tmp_p
     assert "早盘推荐" in context
     assert "1日均值 +10.00%" in context
     assert "600519.SH +10.00%" in context
+
+    _reset_state()
+
+
+def test_ai_market_context_includes_latest_data_quality_snapshot(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_market_context_service import ai_market_context_service
+    from app.services.market_data_service import market_data_service
+
+    _use_temp_db(monkeypatch, tmp_path)
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 1.0,
+                "amount": 10_000_000,
+                "turnover": 0.5,
+                "volume_ratio": 1.2,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:30:03",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with session_scope() as db:
+        db.add_all(
+            [
+                DailyBar(symbol="600519.SH", trade_date="20260528", close=95, amount=9500),
+                MarketDataMaintenanceRun(
+                    status="completed",
+                    refresh_start_date="20260520",
+                    refresh_end_date="20260528",
+                    processed_days=9,
+                    stored_count=49500,
+                    skipped_count=0,
+                    refresh_unique_symbols=5500,
+                    dataset_universe_size=500,
+                    dataset_item_count=50,
+                    latest_trade_date="20260528",
+                    latest_trade_date_symbols=5506,
+                    most_complete_trade_date="20260528",
+                    most_complete_trade_date_symbols=5506,
+                    refresh_needed=False,
+                    refresh_reason="最新交易日覆盖充足",
+                    coverage_payload={
+                        "readiness": {
+                            "latest_day_complete": True,
+                            "backtest_ready": True,
+                        }
+                    },
+                    result_payload={},
+                    created_at=datetime(2026, 5, 29, 8, 50, 0),
+                ),
+            ]
+        )
+        db.flush()
+        context = ai_market_context_service.build_context(
+            db,
+            symbols=["600519.SH"],
+            limit=1,
+            lookback_days=3,
+        )
+
+    assert "数据质量:" in context
+    assert "最近维护 20260529 08:50" in context
+    assert "刷新 20260520-20260528" in context
+    assert "入库 49500 条" in context
+    assert "最新日 20260528 覆盖 5506 只" in context
+    assert "补数状态 覆盖充足" in context
 
     _reset_state()
 

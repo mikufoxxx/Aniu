@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import DailyBar, MarketReport
+from app.db.models import DailyBar, MarketDataMaintenanceRun, MarketReport
 from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
 
@@ -39,12 +39,17 @@ class AIMarketContextService:
             )
         except Exception as exc:
             return f"AI量化市场上下文\n- 数据集构建失败: {exc}"
-        return self._format_dataset(dataset, self._recent_report_performance(db))
+        return self._format_dataset(
+            dataset,
+            self._recent_report_performance(db),
+            self._latest_data_quality(db),
+        )
 
     def _format_dataset(
         self,
         dataset: dict[str, Any],
         report_performance: list[dict[str, Any]] | None = None,
+        data_quality: dict[str, Any] | None = None,
     ) -> str:
         sources = ", ".join(dataset.get("data_sources") or []) or "--"
         coverage = dataset.get("coverage") or {}
@@ -58,8 +63,22 @@ class AIMarketContextService:
                 f"实时 {int(coverage.get('realtime_symbols') or 0)}/{universe_size}, "
                 f"日线 {int(coverage.get('daily_history_symbols') or 0)}/{universe_size}"
             ),
-            "候选信号:",
         ]
+        if data_quality:
+            lines.extend(
+                [
+                    "数据质量:",
+                    (
+                        f"- 最近维护 {data_quality['created_at']}；"
+                        f"刷新 {data_quality['refresh_range']}；"
+                        f"入库 {data_quality['stored_count']} 条；"
+                        f"最新日 {data_quality['latest_trade_date']} "
+                        f"覆盖 {data_quality['latest_trade_date_symbols']} 只；"
+                        f"补数状态 {data_quality['refresh_status']}"
+                    ),
+                ]
+            )
+        lines.append("候选信号:")
         for index, item in enumerate(items[:10], start=1):
             daily = item.get("daily_factors") or {}
             lines.append(
@@ -85,6 +104,25 @@ class AIMarketContextService:
                     ).strip()
                 )
         return "\n".join(lines).strip()
+
+    def _latest_data_quality(self, db: Session) -> dict[str, Any] | None:
+        row = db.scalar(
+            select(MarketDataMaintenanceRun)
+            .order_by(MarketDataMaintenanceRun.id.desc())
+            .limit(1)
+        )
+        if row is None:
+            return None
+        return {
+            "created_at": row.created_at.strftime("%Y%m%d %H:%M"),
+            "refresh_range": (
+                f"{row.refresh_start_date or '--'}-{row.refresh_end_date or '--'}"
+            ),
+            "stored_count": int(row.stored_count or 0),
+            "latest_trade_date": row.latest_trade_date or "--",
+            "latest_trade_date_symbols": int(row.latest_trade_date_symbols or 0),
+            "refresh_status": row.refresh_reason if row.refresh_needed else "覆盖充足",
+        }
 
     def _recent_report_performance(self, db: Session) -> list[dict[str, Any]]:
         reports = db.scalars(

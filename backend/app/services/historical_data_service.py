@@ -19,6 +19,10 @@ _TUSHARE_DAILY_FIELDS = (
 _TUSHARE_DAILY_BASIC_FIELDS = (
     "ts_code,trade_date,turnover_rate,volume_ratio,pe_ttm,pb,total_mv,circ_mv"
 )
+_TUSHARE_MONEYFLOW_THS_FIELDS = (
+    "ts_code,trade_date,net_amount,net_d5_amount,buy_lg_amount,buy_lg_amount_rate,"
+    "buy_md_amount,buy_md_amount_rate,buy_sm_amount,buy_sm_amount_rate"
+)
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -231,6 +235,30 @@ class HistoricalDataService:
             return rows
         return self._request_tushare_daily_basic({"trade_date": normalized_date})
 
+    def fetch_moneyflow_rows(
+        self,
+        trade_date: str,
+        symbols: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare moneyflow_ths 数据。")
+
+        normalized_date = _normalize_trade_date(trade_date)
+        if symbols:
+            rows: list[dict[str, Any]] = []
+            for symbol in symbols:
+                rows.extend(
+                    self._request_tushare_moneyflow_ths(
+                        {
+                            "ts_code": normalize_symbol(symbol),
+                            "trade_date": normalized_date,
+                        }
+                    )
+                )
+            return rows
+        return self._request_tushare_moneyflow_ths({"trade_date": normalized_date})
+
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return self._request_tushare_api(
             api_name="daily",
@@ -245,6 +273,14 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_DAILY_BASIC_FIELDS,
             label="daily_basic",
+        )
+
+    def _request_tushare_moneyflow_ths(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="moneyflow_ths",
+            params=params,
+            fields=_TUSHARE_MONEYFLOW_THS_FIELDS,
+            label="moneyflow_ths",
         )
 
     def _request_tushare_api(
@@ -340,6 +376,18 @@ class HistoricalDataService:
             if _normalize_trade_date(str(row.get("trade_date") or normalized_date))
             == normalized_date
         }
+        moneyflow_rows: list[dict[str, Any]] = []
+        moneyflow_error = None
+        try:
+            moneyflow_rows = self.fetch_moneyflow_rows(normalized_date, normalized_symbols)
+        except RuntimeError as exc:
+            moneyflow_error = str(exc)
+        moneyflow_by_symbol = {
+            normalize_symbol(str(row.get("ts_code") or row.get("symbol") or "")): row
+            for row in moneyflow_rows
+            if _normalize_trade_date(str(row.get("trade_date") or normalized_date))
+            == normalized_date
+        }
 
         stored_count = 0
         skipped_count = 0
@@ -372,10 +420,27 @@ class HistoricalDataService:
                 bar.pb = _to_float(daily_basic.get("pb"))
                 bar.total_mv = _to_float(daily_basic.get("total_mv"))
                 bar.circ_mv = _to_float(daily_basic.get("circ_mv"))
+            moneyflow = moneyflow_by_symbol.get(symbol) or {}
+            if moneyflow:
+                bar.moneyflow_net_amount = _to_float(moneyflow.get("net_amount"))
+                bar.moneyflow_net_d5_amount = _to_float(moneyflow.get("net_d5_amount"))
+                bar.moneyflow_buy_lg_amount = _to_float(moneyflow.get("buy_lg_amount"))
+                bar.moneyflow_buy_lg_amount_rate = _to_float(
+                    moneyflow.get("buy_lg_amount_rate")
+                )
+                bar.moneyflow_buy_md_amount = _to_float(moneyflow.get("buy_md_amount"))
+                bar.moneyflow_buy_md_amount_rate = _to_float(
+                    moneyflow.get("buy_md_amount_rate")
+                )
+                bar.moneyflow_buy_sm_amount = _to_float(moneyflow.get("buy_sm_amount"))
+                bar.moneyflow_buy_sm_amount_rate = _to_float(
+                    moneyflow.get("buy_sm_amount_rate")
+                )
             bar.source = "tushare"
             bar.raw_payload = {
                 **dict(row),
                 **({"daily_basic": dict(daily_basic)} if daily_basic else {}),
+                **({"moneyflow": dict(moneyflow)} if moneyflow else {}),
             }
             db.add(bar)
             stored_count += 1
@@ -388,6 +453,8 @@ class HistoricalDataService:
             "skipped_count": skipped_count,
             "daily_basic_count": len(daily_basic_by_symbol),
             "daily_basic_error": daily_basic_error,
+            "moneyflow_count": len(moneyflow_by_symbol),
+            "moneyflow_error": moneyflow_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -426,6 +493,8 @@ class HistoricalDataService:
                     "skipped_count": 1,
                     "daily_basic_count": 0,
                     "daily_basic_error": None,
+                    "moneyflow_count": 0,
+                    "moneyflow_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -462,6 +531,8 @@ class HistoricalDataService:
                             "skipped_count": 1,
                             "daily_basic_count": 0,
                             "daily_basic_error": None,
+                            "moneyflow_count": 0,
+                            "moneyflow_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"

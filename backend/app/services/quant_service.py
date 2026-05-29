@@ -50,6 +50,11 @@ class QuantService:
         )
         if any(item.get("daily_factors", {}).get("bars_used", 0) > 0 for item in selected):
             data_sources.append("tushare_daily")
+        if any(
+            item.get("daily_factors", {}).get("moneyflow_net_amount", 0) != 0
+            for item in selected
+        ):
+            data_sources.append("tushare_moneyflow")
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -147,6 +152,14 @@ class QuantService:
             "daily_volume_ratio": min(max(_number(daily.get("volume_ratio"), 1.0), 0.0) / 3.0, 1.0),
             "valuation_sanity": self._valuation_sanity_score(daily),
             "market_cap": min(math.log10(max(_number(daily.get("total_mv")), 0.0) + 1) / 9.0, 1.0),
+            "moneyflow_net": max(
+                min(_number(daily.get("moneyflow_net_amount")) / 10000.0, 1.0),
+                -1.0,
+            ),
+            "moneyflow_large": max(
+                min(_number(daily.get("moneyflow_buy_lg_amount_rate")) / 10.0, 1.0),
+                -1.0,
+            ),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
         return {
@@ -187,6 +200,8 @@ class QuantService:
                 + factor_scores["daily_volume_ratio"] * 5
                 + factor_scores["valuation_sanity"] * 3
                 + factor_scores["market_cap"] * 2
+                + factor_scores["moneyflow_net"] * 4
+                + factor_scores["moneyflow_large"] * 2
             )
         return round(score, 4)
 
@@ -257,6 +272,20 @@ class QuantService:
             "pb": _number(latest.pb),
             "total_mv": _number(latest.total_mv),
             "circ_mv": _number(latest.circ_mv),
+            "moneyflow_net_amount": _number(latest.moneyflow_net_amount),
+            "moneyflow_net_d5_amount": _number(latest.moneyflow_net_d5_amount),
+            "moneyflow_buy_lg_amount": _number(latest.moneyflow_buy_lg_amount),
+            "moneyflow_buy_lg_amount_rate": _number(
+                latest.moneyflow_buy_lg_amount_rate
+            ),
+            "moneyflow_buy_md_amount": _number(latest.moneyflow_buy_md_amount),
+            "moneyflow_buy_md_amount_rate": _number(
+                latest.moneyflow_buy_md_amount_rate
+            ),
+            "moneyflow_buy_sm_amount": _number(latest.moneyflow_buy_sm_amount),
+            "moneyflow_buy_sm_amount_rate": _number(
+                latest.moneyflow_buy_sm_amount_rate
+            ),
         }
 
     def _empty_daily_factors(self) -> dict[str, Any]:
@@ -273,6 +302,14 @@ class QuantService:
             "pb": 0.0,
             "total_mv": 0.0,
             "circ_mv": 0.0,
+            "moneyflow_net_amount": 0.0,
+            "moneyflow_net_d5_amount": 0.0,
+            "moneyflow_buy_lg_amount": 0.0,
+            "moneyflow_buy_lg_amount_rate": 0.0,
+            "moneyflow_buy_md_amount": 0.0,
+            "moneyflow_buy_md_amount_rate": 0.0,
+            "moneyflow_buy_sm_amount": 0.0,
+            "moneyflow_buy_sm_amount_rate": 0.0,
         }
 
     def _stddev(self, values: list[float]) -> float:

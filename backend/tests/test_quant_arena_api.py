@@ -174,6 +174,14 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         pb=7.8,
                         total_mv=166500000.0,
                         circ_mv=166500000.0,
+                        moneyflow_net_amount=8123.4,
+                        moneyflow_net_d5_amount=15231.5,
+                        moneyflow_buy_lg_amount=5100.0,
+                        moneyflow_buy_lg_amount_rate=6.2,
+                        moneyflow_buy_md_amount=1800.0,
+                        moneyflow_buy_md_amount_rate=2.1,
+                        moneyflow_buy_sm_amount=-900.0,
+                        moneyflow_buy_sm_amount_rate=-1.1,
                     ),
                     DailyBar(symbol="000001.SZ", trade_date="20260526", close=10.0, amount=1000),
                     DailyBar(symbol="000001.SZ", trade_date="20260527", close=10.1, amount=1100),
@@ -197,7 +205,9 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["universe_size"] == 2
     assert payload["coverage"]["realtime_symbols"] == 2
     assert payload["coverage"]["daily_history_symbols"] == 2
-    assert {"easy_tdx", "tencent", "tushare_daily"} <= set(payload["data_sources"])
+    assert {"easy_tdx", "tencent", "tushare_daily", "tushare_moneyflow"} <= set(
+        payload["data_sources"]
+    )
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
     assert payload["items"][0]["daily_factors"]["bars_used"] == 3
@@ -207,9 +217,13 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["pe_ttm"] == 23.5
     assert payload["items"][0]["daily_factors"]["pb"] == 7.8
     assert payload["items"][0]["daily_factors"]["total_mv"] == 166500000.0
+    assert payload["items"][0]["daily_factors"]["moneyflow_net_amount"] == 8123.4
+    assert payload["items"][0]["daily_factors"]["moneyflow_buy_lg_amount_rate"] == 6.2
     assert "daily_momentum" in payload["items"][0]["factor_scores"]
     assert "daily_turnover" in payload["items"][0]["factor_scores"]
     assert "valuation_sanity" in payload["items"][0]["factor_scores"]
+    assert "moneyflow_net" in payload["items"][0]["factor_scores"]
+    assert "moneyflow_large" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

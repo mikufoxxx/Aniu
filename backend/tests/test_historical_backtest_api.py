@@ -230,6 +230,80 @@ def test_refresh_daily_bars_merges_tushare_daily_basic_rows(monkeypatch, tmp_pat
     _reset_state()
 
 
+def test_refresh_daily_bars_merges_tushare_moneyflow_rows(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        assert trade_date == "20260528"
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "close": 1326.0,
+                "amount": 10037388.288,
+            }
+        ]
+
+    def fake_fetch_daily_basic_rows(trade_date: str, symbols: list[str] | None = None):
+        return []
+
+    def fake_fetch_moneyflow_rows(trade_date: str, symbols: list[str] | None = None):
+        assert trade_date == "20260528"
+        assert symbols is None
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "net_amount": 8123.4,
+                "net_d5_amount": 15231.5,
+                "buy_lg_amount": 5100.0,
+                "buy_lg_amount_rate": 6.2,
+                "buy_md_amount": 1800.0,
+                "buy_md_amount_rate": 2.1,
+                "buy_sm_amount": -900.0,
+                "buy_sm_amount_rate": -1.1,
+            }
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_daily_basic_rows",
+        fake_fetch_daily_basic_rows,
+    )
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_moneyflow_rows",
+        fake_fetch_moneyflow_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh",
+            headers=headers,
+            json={"trade_date": "20260528", "symbols": None},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["stored_count"] == 1
+        assert payload["moneyflow_count"] == 1
+
+        with session_scope() as db:
+            bar = db.query(DailyBar).one()
+            assert bar.moneyflow_net_amount == 8123.4
+            assert bar.moneyflow_net_d5_amount == 15231.5
+            assert bar.moneyflow_buy_lg_amount == 5100.0
+            assert bar.moneyflow_buy_lg_amount_rate == 6.2
+            assert bar.moneyflow_buy_md_amount == 1800.0
+            assert bar.moneyflow_buy_sm_amount == -900.0
+            assert bar.raw_payload["moneyflow"]["net_amount"] == 8123.4
+
+    _reset_state()
+
+
 def test_refresh_daily_range_processes_each_date_and_summarizes_coverage(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

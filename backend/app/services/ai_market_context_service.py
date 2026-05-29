@@ -237,6 +237,8 @@ class AIMarketContextService:
             ("volume_ratio", "量比", ""),
             ("pe_ttm", "PE", ""),
             ("pb", "PB", ""),
+            ("moneyflow_net_amount", "净流入", "万"),
+            ("moneyflow_buy_lg_amount_rate", "大单", "%"),
         ):
             value = daily.get(key)
             try:

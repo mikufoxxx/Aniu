@@ -132,6 +132,14 @@ def _ensure_daily_bar_columns(engine) -> None:
         "pb": "ALTER TABLE daily_bars ADD COLUMN pb FLOAT",
         "total_mv": "ALTER TABLE daily_bars ADD COLUMN total_mv FLOAT",
         "circ_mv": "ALTER TABLE daily_bars ADD COLUMN circ_mv FLOAT",
+        "moneyflow_net_amount": "ALTER TABLE daily_bars ADD COLUMN moneyflow_net_amount FLOAT",
+        "moneyflow_net_d5_amount": "ALTER TABLE daily_bars ADD COLUMN moneyflow_net_d5_amount FLOAT",
+        "moneyflow_buy_lg_amount": "ALTER TABLE daily_bars ADD COLUMN moneyflow_buy_lg_amount FLOAT",
+        "moneyflow_buy_lg_amount_rate": "ALTER TABLE daily_bars ADD COLUMN moneyflow_buy_lg_amount_rate FLOAT",
+        "moneyflow_buy_md_amount": "ALTER TABLE daily_bars ADD COLUMN moneyflow_buy_md_amount FLOAT",
+        "moneyflow_buy_md_amount_rate": "ALTER TABLE daily_bars ADD COLUMN moneyflow_buy_md_amount_rate FLOAT",
+        "moneyflow_buy_sm_amount": "ALTER TABLE daily_bars ADD COLUMN moneyflow_buy_sm_amount FLOAT",
+        "moneyflow_buy_sm_amount_rate": "ALTER TABLE daily_bars ADD COLUMN moneyflow_buy_sm_amount_rate FLOAT",
     }
     with engine.begin() as connection:
         for column_name, statement in required_columns.items():

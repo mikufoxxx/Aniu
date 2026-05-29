@@ -287,6 +287,13 @@
             >
               AI上下文
             </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="loading"
+              @click="loadAIStockPicks"
+            >
+              AI自主选股
+            </button>
           </div>
         </div>
         <div v-if="quantDataset" class="arena-dataset-summary">
@@ -620,6 +627,29 @@ async function loadAIMarketContext(): Promise<void> {
     })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'AI 上下文构建失败。'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadAIStockPicks(): Promise<void> {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const payload = await api.buildAIStockPicks({
+      symbols: selectedSymbols(),
+      limit: 200,
+      prefer_realtime: true,
+      lookback_days: 120,
+    })
+    quantDataset.value = payload.dataset
+    candidates.value = payload.recommendations
+    aiMarketContext.value = {
+      context: payload.context,
+      context_length: payload.context_length,
+    }
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'AI 自主选股失败。'
   } finally {
     loading.value = false
   }

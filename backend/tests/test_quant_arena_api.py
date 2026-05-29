@@ -258,6 +258,66 @@ def test_quant_dataset_uses_stored_market_universe_when_symbols_are_omitted(
     _reset_state()
 
 
+def test_ai_stock_picker_builds_autonomous_snapshot_from_stored_universe(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        captured["symbols"] = symbols
+        return [
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "price": 10.0 + index,
+                "change_pct": 3.0 - index,
+                "amount": 10_000_000 - index * 100_000,
+                "turnover": 0.5 + index * 0.1,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:30:03",
+            }
+            for index, symbol in enumerate(symbols)
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=3000),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=2000),
+                    DailyBar(symbol="300750.SZ", trade_date="20260528", close=200, amount=1000),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/ai/picks",
+            headers=headers,
+            json={"limit": 3, "lookback_days": 20, "prefer_realtime": True},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["snapshot_id"].startswith("ai-picks-")
+    assert payload["selection_mode"] == "auto_universe"
+    assert captured["symbols"] == ["600519.SH", "000001.SZ", "300750.SZ"]
+    assert payload["dataset"]["universe_size"] == 3
+    assert payload["dataset"]["item_count"] == 3
+    assert len(payload["recommendations"]) == 3
+    assert {"easy_tdx", "tushare_daily"} <= set(payload["data_sources"])
+    assert payload["coverage"]["latest_trade_date"] == "20260528"
+    assert payload["coverage"]["latest_trade_date_symbols"] == 3
+    assert "AI量化市场上下文" in payload["context"]
+    assert "600519.SH" in payload["context"]
+
+    _reset_state()
+
+
 def test_quant_dataset_uses_most_complete_stored_trade_date(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 

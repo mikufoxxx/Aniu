@@ -105,6 +105,13 @@ class AIMarketContextService:
                 )
         return "\n".join(lines).strip()
 
+    def format_dataset_context(self, db: Session, dataset: dict[str, Any]) -> str:
+        return self._format_dataset(
+            dataset,
+            self._recent_report_performance(db),
+            self._latest_data_quality(db),
+        )
+
     def _latest_data_quality(self, db: Session) -> dict[str, Any] | None:
         row = db.scalar(
             select(MarketDataMaintenanceRun)

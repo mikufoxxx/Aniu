@@ -396,6 +396,21 @@ class AIMarketContextResponse(BaseModel):
     context_length: int
 
 
+class AIStockPicksRequest(QuantDatasetRequest):
+    pass
+
+
+class AIStockPicksResponse(BaseModel):
+    snapshot_id: str
+    selection_mode: Literal["auto_universe", "custom_symbols"]
+    data_sources: list[str]
+    coverage: dict[str, Any]
+    dataset: QuantDatasetResponse
+    recommendations: list[QuantCandidateRead]
+    context: str
+    context_length: int
+
+
 class MarketReportRequest(BaseModel):
     report_type: Literal["morning", "closing"]
     symbols: list[str] | None = None

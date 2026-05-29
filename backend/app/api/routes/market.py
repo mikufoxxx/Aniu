@@ -8,6 +8,8 @@ from app.db.database import get_db
 from app.schemas.aniu import (
     AIMarketContextRequest,
     AIMarketContextResponse,
+    AIStockPicksRequest,
+    AIStockPicksResponse,
     ArenaRunRequest,
     ArenaRunResponse,
     ArenaLeaderboardResponse,
@@ -35,6 +37,7 @@ from app.schemas.aniu import (
     QuantDatasetResponse,
 )
 from app.services.ai_market_context_service import ai_market_context_service
+from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_maintenance_service import market_data_maintenance_service
@@ -110,6 +113,24 @@ def build_ai_market_context(
             lookback_days=payload.lookback_days,
         )
         return {"context": context, "context_length": len(context)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/ai/picks", response_model=AIStockPicksResponse)
+def build_ai_stock_picks(
+    payload: AIStockPicksRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> AIStockPicksResponse:
+    try:
+        return ai_stock_picker_service.build_snapshot(
+            db,
+            symbols=payload.symbols,
+            limit=payload.limit,
+            prefer_realtime=payload.prefer_realtime,
+            lookback_days=payload.lookback_days,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

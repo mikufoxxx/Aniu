@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -389,6 +389,13 @@ export const api = {
   },
   buildAIMarketContext(payload: { symbols?: string[]; limit?: number; lookback_days?: number }) {
     return request<AIMarketContextPayload>(`${API_PREFIX}/market/ai-context`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  buildAIStockPicks(payload: { symbols?: string[]; limit?: number; lookback_days?: number; prefer_realtime?: boolean }) {
+    return request<AIStockPicksPayload>(`${API_PREFIX}/ai/picks`, {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 60000,

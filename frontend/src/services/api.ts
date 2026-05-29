@@ -1,4 +1,4 @@
-import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaRunPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -372,6 +372,20 @@ export const api = {
   },
   generateQuantCandidates(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean }) {
     return request<QuantCandidatesPayload>(`${API_PREFIX}/quant/candidates`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  refreshDailyBars(payload: { trade_date: string; symbols?: string[] }) {
+    return request<DailyRefreshPayload>(`${API_PREFIX}/market/daily/refresh`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 120000,
+    })
+  },
+  runBacktest(payload: { symbols: string[]; start_date: string; end_date: string; initial_cash?: number }) {
+    return request<BacktestPayload>(`${API_PREFIX}/quant/backtest`, {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 60000,

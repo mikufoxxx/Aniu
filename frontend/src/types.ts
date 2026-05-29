@@ -215,6 +215,38 @@ export interface QuantCandidatesPayload {
   candidates: QuantCandidate[]
 }
 
+export interface DailyRefreshPayload {
+  trade_date: string
+  source: string
+  stored_count: number
+  skipped_count: number
+  requested_symbols: string[]
+}
+
+export interface BacktestTrade {
+  action: string
+  symbol: string
+  trade_date: string
+  price: number
+  quantity: number
+  amount: number
+}
+
+export interface BacktestPayload {
+  run_id: number
+  strategy_name: string
+  selected_symbol: string
+  start_date: string
+  end_date: string
+  initial_cash: number
+  final_assets: number
+  return_ratio: number
+  max_drawdown: number
+  trade_count: number
+  metrics: Record<string, unknown>
+  trades: BacktestTrade[]
+}
+
 export interface ArenaAgentConfig {
   id: string
   name: string

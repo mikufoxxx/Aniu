@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -150,6 +150,52 @@ class TradeOrder(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     run: Mapped[StrategyRun] = relationship(back_populates="trade_orders")
+
+
+class DailyBar(Base):
+    __tablename__ = "daily_bars"
+    __table_args__ = (
+        UniqueConstraint("symbol", "trade_date", name="uq_daily_bars_symbol_trade_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    trade_date: Mapped[str] = mapped_column(String(8), index=True)
+    open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pre_close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pct_chg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vol: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BacktestRun(Base):
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    strategy_name: Mapped[str] = mapped_column(String(64), default="daily_momentum")
+    symbols_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    start_date: Mapped[str] = mapped_column(String(8), index=True)
+    end_date: Mapped[str] = mapped_column(String(8), index=True)
+    initial_cash: Mapped[float] = mapped_column(Float, default=200000.0)
+    final_assets: Mapped[float] = mapped_column(Float, default=0.0)
+    return_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    max_drawdown: Mapped[float] = mapped_column(Float, default=0.0)
+    trade_count: Mapped[int] = mapped_column(Integer, default=0)
+    selected_symbol: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    metrics_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    trades_payload: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
 
 
 class ArenaRun(Base):

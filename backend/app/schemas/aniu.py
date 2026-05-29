@@ -321,6 +321,50 @@ class QuantCandidatesResponse(BaseModel):
     candidates: list[QuantCandidateRead]
 
 
+class DailyRefreshRequest(BaseModel):
+    trade_date: str = Field(min_length=8, max_length=10)
+    symbols: list[str] | None = None
+
+
+class DailyRefreshResponse(BaseModel):
+    trade_date: str
+    source: str
+    stored_count: int
+    skipped_count: int = 0
+    requested_symbols: list[str] = Field(default_factory=list)
+
+
+class BacktestRequest(BaseModel):
+    symbols: list[str] = Field(min_length=1, max_length=200)
+    start_date: str = Field(min_length=8, max_length=10)
+    end_date: str = Field(min_length=8, max_length=10)
+    initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
+
+
+class BacktestTradeRead(BaseModel):
+    action: str
+    symbol: str
+    trade_date: str
+    price: float
+    quantity: int
+    amount: float
+
+
+class BacktestResponse(BaseModel):
+    run_id: int
+    strategy_name: str
+    selected_symbol: str
+    start_date: str
+    end_date: str
+    initial_cash: float
+    final_assets: float
+    return_ratio: float
+    max_drawdown: float
+    trade_count: int
+    metrics: dict[str, Any]
+    trades: list[BacktestTradeRead]
+
+
 class ArenaAgentRequest(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=120)

@@ -8,11 +8,16 @@ from app.db.database import get_db
 from app.schemas.aniu import (
     ArenaRunRequest,
     ArenaRunResponse,
+    BacktestRequest,
+    BacktestResponse,
+    DailyRefreshRequest,
+    DailyRefreshResponse,
     MarketSourceHealthResponse,
     QuantCandidatesRequest,
     QuantCandidatesResponse,
 )
 from app.services.arena_service import arena_service
+from app.services.historical_data_service import historical_data_service
 from app.services.market_data_service import market_data_service
 from app.services.quant_service import quant_service
 
@@ -36,6 +41,42 @@ def generate_quant_candidates(
             symbols=payload.symbols,
             limit=payload.limit,
             prefer_realtime=payload.prefer_realtime,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/market/daily/refresh", response_model=DailyRefreshResponse)
+def refresh_daily_bars(
+    payload: DailyRefreshRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> DailyRefreshResponse:
+    try:
+        return historical_data_service.refresh_daily_bars(
+            db,
+            trade_date=payload.trade_date,
+            symbols=payload.symbols,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/quant/backtest", response_model=BacktestResponse)
+def run_quant_backtest(
+    payload: BacktestRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> BacktestResponse:
+    try:
+        return historical_data_service.run_daily_momentum_backtest(
+            db,
+            symbols=payload.symbols,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            initial_cash=payload.initial_cash,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

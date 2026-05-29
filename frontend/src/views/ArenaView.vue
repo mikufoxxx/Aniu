@@ -59,6 +59,61 @@
         </div>
       </section>
 
+      <section class="panel arena-history-panel">
+        <div class="panel-head">
+          <div class="head-main">
+            <h2>历史数据与回测</h2>
+            <p class="section-kicker">Backtest</p>
+          </div>
+          <div class="panel-head-actions">
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="historyLoading"
+              @click="refreshDaily"
+            >
+              {{ historyLoading ? '刷新中…' : '刷新日线' }}
+            </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="historyLoading"
+              @click="runBacktest"
+            >
+              {{ historyLoading ? '回测中…' : '运行回测' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="arena-history-grid">
+          <label class="arena-field">
+            <span>交易日</span>
+            <input v-model="tradeDate" type="text" placeholder="20260528" />
+          </label>
+          <label class="arena-field">
+            <span>开始日期</span>
+            <input v-model="backtestStartDate" type="text" placeholder="20260526" />
+          </label>
+          <label class="arena-field">
+            <span>结束日期</span>
+            <input v-model="backtestEndDate" type="text" placeholder="20260528" />
+          </label>
+        </div>
+
+        <div v-if="dailyRefreshResult" class="arena-history-result">
+          <strong>日线入库</strong>
+          <span>{{ dailyRefreshResult.trade_date }} · {{ dailyRefreshResult.stored_count }} 条 · {{ dailyRefreshResult.source }}</span>
+        </div>
+
+        <div v-if="backtestResult" class="arena-history-result">
+          <strong>回测结果</strong>
+          <span>
+            {{ backtestResult.selected_symbol }} ·
+            总资产 {{ formatAmount(backtestResult.final_assets) }} ·
+            收益率 {{ formatPercent(backtestResult.return_ratio) }} ·
+            最大回撤 {{ formatPercent(backtestResult.max_drawdown) }}
+          </span>
+        </div>
+      </section>
+
       <section class="panel arena-candidates-panel">
         <div class="panel-head">
           <div class="head-main">
@@ -160,7 +215,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { ArenaAgentConfig, ArenaRunPayload, MarketSourceHealthPayload, QuantCandidate } from '@/types'
+import type { ArenaAgentConfig, ArenaRunPayload, BacktestPayload, DailyRefreshPayload, MarketSourceHealthPayload, QuantCandidate } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const agents: ArenaAgentConfig[] = [
@@ -172,10 +227,16 @@ const agents: ArenaAgentConfig[] = [
 const symbolsText = ref(defaultSymbols.join('\n'))
 const initialCash = ref(200000)
 const loading = ref(false)
+const historyLoading = ref(false)
 const errorMessage = ref('')
 const sourceHealth = ref<MarketSourceHealthPayload | null>(null)
 const candidates = ref<QuantCandidate[]>([])
 const arenaResult = ref<ArenaRunPayload | null>(null)
+const dailyRefreshResult = ref<DailyRefreshPayload | null>(null)
+const backtestResult = ref<BacktestPayload | null>(null)
+const tradeDate = ref('20260528')
+const backtestStartDate = ref('20260526')
+const backtestEndDate = ref('20260528')
 
 function parseSymbols(): string[] {
   return symbolsText.value
@@ -220,6 +281,38 @@ async function runArena(): Promise<void> {
   }
 }
 
+async function refreshDaily(): Promise<void> {
+  historyLoading.value = true
+  errorMessage.value = ''
+  try {
+    dailyRefreshResult.value = await api.refreshDailyBars({
+      trade_date: tradeDate.value,
+      symbols: parseSymbols(),
+    })
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '日线刷新失败。'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+async function runBacktest(): Promise<void> {
+  historyLoading.value = true
+  errorMessage.value = ''
+  try {
+    backtestResult.value = await api.runBacktest({
+      symbols: parseSymbols(),
+      start_date: backtestStartDate.value,
+      end_date: backtestEndDate.value,
+      initial_cash: initialCash.value,
+    })
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '回测运行失败，请先刷新对应日期的日线数据。'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 function tierText(tier: string): string {
   const mapping: Record<string, string> = {
     daily: '日频',
@@ -260,6 +353,11 @@ function formatAmount(value: number | null | undefined): string {
   return value.toFixed(2)
 }
 
+function formatPercent(value: number | null | undefined): string {
+  if (typeof value !== 'number') return '--'
+  return `${(value * 100).toFixed(2)}%`
+}
+
 onMounted(async () => {
   try {
     await Promise.all([loadSources(), loadCandidates()])
@@ -283,6 +381,31 @@ onMounted(async () => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 180px;
   gap: 14px;
+}
+
+.arena-history-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.arena-history-result {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.arena-history-result strong {
+  color: #f7fbff;
+}
+
+.arena-history-result span {
+  color: #b7c8e3;
+  font-size: 13px;
 }
 
 .arena-field {
@@ -379,6 +502,7 @@ onMounted(async () => {
 @media (max-width: 900px) {
   .arena-grid,
   .arena-form-grid,
+  .arena-history-grid,
   .arena-agent-grid {
     grid-template-columns: 1fr;
   }

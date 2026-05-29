@@ -421,6 +421,7 @@ class DailyRefreshResponse(BaseModel):
     stored_count: int
     skipped_count: int = 0
     requested_symbols: list[str] = Field(default_factory=list)
+    error: str | None = None
 
 
 class DailyRangeRefreshRequest(BaseModel):

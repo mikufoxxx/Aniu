@@ -166,11 +166,21 @@ class HistoricalDataService:
         total_skipped = 0
 
         for trade_date in dates:
-            result = self.refresh_daily_bars(
-                db,
-                trade_date=trade_date,
-                symbols=normalized_symbols,
-            )
+            try:
+                result = self.refresh_daily_bars(
+                    db,
+                    trade_date=trade_date,
+                    symbols=normalized_symbols,
+                )
+            except RuntimeError as exc:
+                result = {
+                    "trade_date": trade_date,
+                    "source": "tushare",
+                    "stored_count": 0,
+                    "skipped_count": 1,
+                    "requested_symbols": normalized_symbols or [],
+                    "error": str(exc),
+                }
             daily_results.append(result)
             total_stored += int(result["stored_count"])
             total_skipped += int(result["skipped_count"])

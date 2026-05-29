@@ -162,7 +162,13 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
         with session_scope() as db:
-            from app.db.models import FinancialIndicator, LimitEvent, MarginDetail
+            from app.db.models import (
+                DragonTigerInstitution,
+                DragonTigerList,
+                FinancialIndicator,
+                LimitEvent,
+                MarginDetail,
+            )
 
             db.add_all(
                 [
@@ -255,6 +261,33 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         rqmcl=22_000,
                         rzrqye=3_242_000_000,
                     ),
+                    DragonTigerList(
+                        symbol="600519.SH",
+                        trade_date="20260528",
+                        name="贵州茅台",
+                        close=1326,
+                        pct_change=7.1,
+                        turnover_rate=8.2,
+                        amount=2_000_000_000,
+                        l_sell=120_000_000,
+                        l_buy=210_000_000,
+                        l_amount=330_000_000,
+                        net_amount=90_000_000,
+                        net_rate=4.5,
+                        amount_rate=16.5,
+                        float_values=1_500_000_000_000,
+                        reason="涨幅偏离值达7%的证券",
+                    ),
+                    DragonTigerInstitution(
+                        symbol="600519.SH",
+                        trade_date="20260528",
+                        exalter="机构专用",
+                        side="0",
+                        buy=60_000_000,
+                        sell=10_000_000,
+                        net_buy=50_000_000,
+                        reason="涨幅偏离值达7%的证券",
+                    ),
                 ]
             )
 
@@ -284,6 +317,8 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         "tushare_fina_indicator",
         "tushare_limit_list_d",
         "tushare_margin_detail",
+        "tushare_top_list",
+        "tushare_top_inst",
     } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
@@ -303,12 +338,15 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["margin_detail"]["rzmre"] == 180000000.0
     assert payload["items"][0]["daily_factors"]["margin_detail"]["rzche"] == 90000000.0
     assert payload["items"][0]["daily_factors"]["margin_detail"]["net_financing_buy"] == 90000000.0
+    assert payload["items"][0]["daily_factors"]["dragon_tiger"]["net_amount"] == 90000000.0
+    assert payload["items"][0]["daily_factors"]["dragon_tiger"]["institution_net_buy"] == 50000000.0
     assert payload["items"][0]["profile"]["industry"] == "白酒"
     assert payload["items"][0]["profile"]["area"] == "贵州"
     assert payload["coverage"]["profile_symbols"] == 1
     assert payload["coverage"]["financial_symbols"] == 1
     assert payload["coverage"]["limit_event_symbols"] == 1
     assert payload["coverage"]["margin_detail_symbols"] == 1
+    assert payload["coverage"]["dragon_tiger_symbols"] == 1
     assert payload["items"][0]["financial_factors"]["roe"] == 31.2
     assert payload["items"][0]["financial_factors"]["grossprofit_margin"] == 91.2
     assert payload["items"][0]["financial_factors"]["netprofit_yoy"] == 18.5
@@ -322,6 +360,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert "sector_heat" in payload["items"][0]["factor_scores"]
     assert "limit_sentiment" in payload["items"][0]["factor_scores"]
     assert "margin_financing" in payload["items"][0]["factor_scores"]
+    assert "dragon_tiger_flow" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

@@ -291,6 +291,17 @@ export interface QuantCandidate {
       rzrqye?: number
       net_financing_buy?: number
     } | null
+    dragon_tiger?: {
+      trade_date?: string | null
+      reason?: string | null
+      net_amount?: number
+      l_buy?: number
+      l_sell?: number
+      net_rate?: number
+      amount_rate?: number
+      institution_net_buy?: number
+      institution_count?: number
+    } | null
   }
   rationale: string
 }

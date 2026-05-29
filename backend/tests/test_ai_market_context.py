@@ -13,6 +13,8 @@ from app.db.database import init_db, session_scope
 from app.db.models import (
     AppSettings,
     DailyBar,
+    DragonTigerInstitution,
+    DragonTigerList,
     FinancialIndicator,
     IndexBar,
     LimitEvent,
@@ -209,6 +211,33 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     rqmcl=22_000,
                     rzrqye=3_242_000_000,
                 ),
+                DragonTigerList(
+                    symbol="600519.SH",
+                    trade_date="20260528",
+                    name="贵州茅台",
+                    close=1326,
+                    pct_change=7.1,
+                    turnover_rate=8.2,
+                    amount=2_000_000_000,
+                    l_sell=120_000_000,
+                    l_buy=210_000_000,
+                    l_amount=330_000_000,
+                    net_amount=90_000_000,
+                    net_rate=4.5,
+                    amount_rate=16.5,
+                    float_values=1_500_000_000_000,
+                    reason="涨幅偏离值达7%的证券",
+                ),
+                DragonTigerInstitution(
+                    symbol="600519.SH",
+                    trade_date="20260528",
+                    exalter="机构专用",
+                    side="0",
+                    buy=60_000_000,
+                    sell=10_000_000,
+                    net_buy=50_000_000,
+                    reason="涨幅偏离值达7%的证券",
+                ),
             ]
         )
         db.flush()
@@ -223,7 +252,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert (
         "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, "
         "tushare_sector_member, tushare_stock_basic, tushare_fina_indicator, "
-        "tushare_limit_list_d, tushare_margin_detail, tushare_index, tushare_sector"
+        "tushare_limit_list_d, tushare_margin_detail, tushare_top_list, "
+        "tushare_top_inst, tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -239,6 +269,9 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "开板 1次" in context
     assert "融资净买 9000.00万" in context
     assert "两融余额 324200.00万" in context
+    assert "龙虎榜净买 9000.00万" in context
+    assert "机构净买 5000.00万" in context
+    assert "上榜 涨幅偏离值达7%的证券" in context
     assert "PE 23.50" in context
     assert "PB 7.80" in context
     assert "行业 白酒" in context

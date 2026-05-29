@@ -900,6 +900,125 @@ def test_refresh_daily_bars_stores_tushare_margin_details(monkeypatch, tmp_path)
     _reset_state()
 
 
+def test_refresh_daily_bars_stores_tushare_dragon_tiger_rows(monkeypatch, tmp_path) -> None:
+    from app.db.models import DragonTigerInstitution, DragonTigerList
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date, symbols=None):
+        return [
+            {"ts_code": "600519.SH", "trade_date": trade_date, "close": 100, "amount": 9000},
+            {"ts_code": "000001.SZ", "trade_date": trade_date, "close": 10, "amount": 1000},
+        ]
+
+    def fake_top_list_rows(trade_date):
+        return [
+            {
+                "trade_date": trade_date,
+                "ts_code": "600519.SH",
+                "name": "贵州茅台",
+                "close": 100,
+                "pct_change": 7.1,
+                "turnover_rate": 8.2,
+                "amount": 2_000_000_000,
+                "l_sell": 120_000_000,
+                "l_buy": 210_000_000,
+                "l_amount": 330_000_000,
+                "net_amount": 90_000_000,
+                "net_rate": 4.5,
+                "amount_rate": 16.5,
+                "float_values": 1_500_000_000_000,
+                "reason": "涨幅偏离值达7%的证券",
+            },
+            {
+                "trade_date": trade_date,
+                "ts_code": "300750.SZ",
+                "name": "宁德时代",
+                "reason": "振幅值达15%的证券",
+            },
+        ]
+
+    def fake_top_inst_rows(trade_date):
+        return [
+            {
+                "trade_date": trade_date,
+                "ts_code": "600519.SH",
+                "exalter": "机构专用",
+                "side": "0",
+                "buy": 60_000_000,
+                "buy_rate": 3.0,
+                "sell": 10_000_000,
+                "sell_rate": 0.5,
+                "net_buy": 50_000_000,
+                "reason": "涨幅偏离值达7%的证券",
+            },
+            {
+                "trade_date": trade_date,
+                "ts_code": "600519.SH",
+                "exalter": "机构专用",
+                "side": "1",
+                "buy": 5_000_000,
+                "sell": 20_000_000,
+                "net_buy": -15_000_000,
+                "reason": "涨幅偏离值达7%的证券",
+            },
+            {
+                "trade_date": trade_date,
+                "ts_code": "300750.SZ",
+                "exalter": "机构专用",
+                "side": "0",
+                "buy": 100_000_000,
+                "net_buy": 100_000_000,
+                "reason": "振幅值达15%的证券",
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_index_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_limit_list_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_margin_detail_rows", lambda *args: [])
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_top_list_rows",
+        fake_top_list_rows,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_top_inst_rows",
+        fake_top_inst_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_daily_bars(
+                db,
+                trade_date="20260528",
+                symbols=["600519.SH", "000001.SZ"],
+            )
+            lists = db.query(DragonTigerList).all()
+            institutions = db.query(DragonTigerInstitution).order_by(
+                DragonTigerInstitution.net_buy.desc()
+            ).all()
+
+    assert result["dragon_tiger_count"] == 1
+    assert result["dragon_tiger_inst_count"] == 2
+    assert result["dragon_tiger_error"] is None
+    assert result["dragon_tiger_inst_error"] is None
+    assert lists[0].symbol == "600519.SH"
+    assert lists[0].net_amount == 90_000_000
+    assert lists[0].reason == "涨幅偏离值达7%的证券"
+    assert institutions[0].exalter == "机构专用"
+    assert institutions[0].net_buy == 50_000_000
+    assert institutions[0].source == "tushare_top_inst"
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 
@@ -963,6 +1082,8 @@ def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_p
         "tushare_sector_member": 210000,
         "tushare_limit_list_d": 0,
         "tushare_margin_detail": 0,
+        "tushare_top_list": 0,
+        "tushare_top_inst": 0,
     }
     assert payload["data_source_errors"] == {
         "tushare_moneyflow_ths": ["20260528: moneyflow partial"],

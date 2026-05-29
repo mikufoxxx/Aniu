@@ -378,6 +378,73 @@ class MarginDetail(Base):
     )
 
 
+class DragonTigerList(Base):
+    __tablename__ = "dragon_tiger_lists"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "trade_date",
+            "reason",
+            name="uq_dragon_tiger_lists_symbol_trade_reason",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    trade_date: Mapped[str] = mapped_column(String(8), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pct_change: Mapped[float | None] = mapped_column(Float, nullable=True)
+    turnover_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    l_sell: Mapped[float | None] = mapped_column(Float, nullable=True)
+    l_buy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    l_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    float_values: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str] = mapped_column(String(255), default="")
+    source: Mapped[str] = mapped_column(String(32), default="tushare_top_list")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class DragonTigerInstitution(Base):
+    __tablename__ = "dragon_tiger_institutions"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "trade_date",
+            "exalter",
+            "side",
+            "reason",
+            name="uq_dragon_tiger_inst_symbol_trade_exalter_side_reason",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    trade_date: Mapped[str] = mapped_column(String(8), index=True)
+    exalter: Mapped[str] = mapped_column(String(255), default="")
+    side: Mapped[str] = mapped_column(String(8), default="")
+    buy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    buy_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sell: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sell_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_buy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str] = mapped_column(String(255), default="")
+    source: Mapped[str] = mapped_column(String(32), default="tushare_top_inst")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

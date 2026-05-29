@@ -130,6 +130,7 @@ class AIMarketContextService:
             financial_parts = self._financial_parts(financial)
             limit_parts = self._limit_event_parts(daily.get("limit_event") or {})
             margin_parts = self._margin_parts(daily.get("margin_detail") or {})
+            dragon_tiger_parts = self._dragon_tiger_parts(daily.get("dragon_tiger") or {})
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -143,6 +144,7 @@ class AIMarketContextService:
                     f"{financial_parts}"
                     f"{limit_parts}"
                     f"{margin_parts}"
+                    f"{dragon_tiger_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -403,6 +405,29 @@ class AIMarketContextService:
             parts.append(f"融资净买 {net_buy_number / 10000:.2f}万")
         if balance_number > 0:
             parts.append(f"两融余额 {balance_number / 10000:.2f}万")
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
+
+    def _dragon_tiger_parts(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        net_amount = item.get("net_amount")
+        institution_net_buy = item.get("institution_net_buy")
+        try:
+            net_amount_number = float(net_amount)
+        except (TypeError, ValueError):
+            net_amount_number = 0.0
+        try:
+            inst_number = float(institution_net_buy)
+        except (TypeError, ValueError):
+            inst_number = 0.0
+        if net_amount_number != 0:
+            parts.append(f"龙虎榜净买 {net_amount_number / 10000:.2f}万")
+        if inst_number != 0:
+            parts.append(f"机构净买 {inst_number / 10000:.2f}万")
+        reason = item.get("reason")
+        if reason:
+            parts.append(f"上榜 {reason}")
         if not parts:
             return ""
         return "; ".join(parts) + "; "

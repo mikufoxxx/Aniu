@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     DailyBar,
+    DragonTigerInstitution,
+    DragonTigerList,
     FinancialIndicator,
     LimitEvent,
     MarginDetail,
@@ -80,6 +82,8 @@ class QuantService:
             data_sources.append("tushare_limit_list_d")
         if any(item.get("daily_factors", {}).get("margin_detail") for item in selected):
             data_sources.append("tushare_margin_detail")
+        if any(item.get("daily_factors", {}).get("dragon_tiger") for item in selected):
+            data_sources.extend(["tushare_top_list", "tushare_top_inst"])
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -150,6 +154,9 @@ class QuantService:
             "margin_detail_symbols": sum(
                 1 for item in items if item.get("daily_factors", {}).get("margin_detail")
             ),
+            "dragon_tiger_symbols": sum(
+                1 for item in items if item.get("daily_factors", {}).get("dragon_tiger")
+            ),
         }
         return {
             "universe_size": payload["universe_size"],
@@ -201,6 +208,7 @@ class QuantService:
             "sector_heat": self._sector_heat_score(daily),
             "limit_sentiment": self._limit_sentiment_score(daily),
             "margin_financing": self._margin_financing_score(daily),
+            "dragon_tiger_flow": self._dragon_tiger_flow_score(daily),
             "financial_quality": self._financial_quality_score(financial_payload),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
@@ -249,6 +257,7 @@ class QuantService:
                 + factor_scores["sector_heat"] * 4
                 + factor_scores["limit_sentiment"] * 4
                 + factor_scores["margin_financing"] * 3
+                + factor_scores["dragon_tiger_flow"] * 4
                 + factor_scores["financial_quality"] * 4
             )
         return round(score, 4)
@@ -298,6 +307,14 @@ class QuantService:
             score += min(math.log10(balance + 1) / 20.0, 0.5)
         return max(min(score, 1.0), -1.0)
 
+    def _dragon_tiger_flow_score(self, daily: dict[str, Any]) -> float:
+        item = daily.get("dragon_tiger") or {}
+        if not isinstance(item, dict):
+            return 0.0
+        net_amount = _number(item.get("net_amount"))
+        inst_net_buy = _number(item.get("institution_net_buy"))
+        return max(min((net_amount + inst_net_buy) / 200000000.0, 1.0), -1.0)
+
     def _financial_quality_score(self, financial: dict[str, Any]) -> float:
         if not financial:
             return 0.0
@@ -346,6 +363,9 @@ class QuantService:
         margin_details = self._margin_details_by_symbol(db, symbols)
         for symbol, detail in margin_details.items():
             factors.setdefault(symbol, self._empty_daily_factors())["margin_detail"] = detail
+        dragon_tiger = self._dragon_tiger_by_symbol(db, symbols)
+        for symbol, item in dragon_tiger.items():
+            factors.setdefault(symbol, self._empty_daily_factors())["dragon_tiger"] = item
         return factors
 
     def _profiles_by_symbol(
@@ -479,6 +499,58 @@ class QuantService:
             for symbol, row in latest.items()
         }
 
+    def _dragon_tiger_by_symbol(
+        self,
+        db: Session,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        rows = db.scalars(
+            select(DragonTigerList)
+            .where(DragonTigerList.symbol.in_(symbols))
+            .order_by(
+                DragonTigerList.symbol,
+                desc(DragonTigerList.trade_date),
+                desc(DragonTigerList.net_amount),
+            )
+        ).all()
+        latest: dict[str, DragonTigerList] = {}
+        for row in rows:
+            latest.setdefault(row.symbol, row)
+        if not latest:
+            return {}
+        dates_by_symbol = {symbol: row.trade_date for symbol, row in latest.items()}
+        inst_rows = db.scalars(
+            select(DragonTigerInstitution).where(
+                DragonTigerInstitution.symbol.in_(list(dates_by_symbol))
+            )
+        ).all()
+        inst_summary: dict[str, dict[str, Any]] = {}
+        for row in inst_rows:
+            if row.trade_date != dates_by_symbol.get(row.symbol):
+                continue
+            summary = inst_summary.setdefault(
+                row.symbol,
+                {"institution_net_buy": 0.0, "institution_count": 0},
+            )
+            summary["institution_net_buy"] += _number(row.net_buy)
+            summary["institution_count"] += 1
+        return {
+            symbol: {
+                "trade_date": row.trade_date,
+                "reason": row.reason,
+                "net_amount": _number(row.net_amount),
+                "l_buy": _number(row.l_buy),
+                "l_sell": _number(row.l_sell),
+                "net_rate": _number(row.net_rate),
+                "amount_rate": _number(row.amount_rate),
+                **inst_summary.get(
+                    symbol,
+                    {"institution_net_buy": 0.0, "institution_count": 0},
+                ),
+            }
+            for symbol, row in latest.items()
+        }
+
     def _sector_heat_by_symbol(
         self,
         db: Session,
@@ -564,6 +636,7 @@ class QuantService:
             "sector_heat": [],
             "limit_event": None,
             "margin_detail": None,
+            "dragon_tiger": None,
         }
 
     def _empty_daily_factors(self) -> dict[str, Any]:
@@ -591,6 +664,7 @@ class QuantService:
             "sector_heat": [],
             "limit_event": None,
             "margin_detail": None,
+            "dragon_tiger": None,
         }
 
     def _stddev(self, values: list[float]) -> float:

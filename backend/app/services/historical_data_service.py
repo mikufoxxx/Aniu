@@ -15,6 +15,8 @@ from app.core.config import get_settings
 from app.db.models import (
     BacktestRun,
     DailyBar,
+    DragonTigerInstitution,
+    DragonTigerList,
     FinancialIndicator,
     IndexBar,
     LimitEvent,
@@ -55,6 +57,13 @@ _TUSHARE_LIMIT_LIST_D_FIELDS = (
 )
 _TUSHARE_MARGIN_DETAIL_FIELDS = (
     "trade_date,ts_code,name,rzye,rqye,rzmre,rqyl,rzche,rqchl,rqmcl,rzrqye"
+)
+_TUSHARE_TOP_LIST_FIELDS = (
+    "trade_date,ts_code,name,close,pct_change,turnover_rate,amount,l_sell,l_buy,"
+    "l_amount,net_amount,net_rate,amount_rate,float_values,reason"
+)
+_TUSHARE_TOP_INST_FIELDS = (
+    "trade_date,ts_code,exalter,side,buy,buy_rate,sell,sell_rate,net_buy,reason"
 )
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_THS_MEMBER_WORKERS = 2
@@ -393,6 +402,18 @@ class HistoricalDataService:
             {"trade_date": _normalize_trade_date(trade_date)}
         )
 
+    def fetch_top_list_rows(self, trade_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare top_list 数据。")
+        return self._request_tushare_top_list({"trade_date": _normalize_trade_date(trade_date)})
+
+    def fetch_top_inst_rows(self, trade_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare top_inst 数据。")
+        return self._request_tushare_top_inst({"trade_date": _normalize_trade_date(trade_date)})
+
     def fetch_financial_indicator_rows(self, symbols: list[str]) -> list[dict[str, Any]]:
         settings = get_settings()
         if not settings.tushare_token:
@@ -498,6 +519,22 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_MARGIN_DETAIL_FIELDS,
             label="margin_detail",
+        )
+
+    def _request_tushare_top_list(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="top_list",
+            params=params,
+            fields=_TUSHARE_TOP_LIST_FIELDS,
+            label="top_list",
+        )
+
+    def _request_tushare_top_inst(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="top_inst",
+            params=params,
+            fields=_TUSHARE_TOP_INST_FIELDS,
+            label="top_inst",
         )
 
     def _request_tushare_api(
@@ -667,6 +704,29 @@ class HistoricalDataService:
         except RuntimeError as exc:
             margin_detail_error = str(exc)
 
+        dragon_tiger_error = None
+        dragon_tiger_count = 0
+        try:
+            dragon_tiger_count = self._store_dragon_tiger_rows(
+                db,
+                normalized_date,
+                self.fetch_top_list_rows(normalized_date),
+                normalized_symbols,
+            )
+        except RuntimeError as exc:
+            dragon_tiger_error = str(exc)
+        dragon_tiger_inst_error = None
+        dragon_tiger_inst_count = 0
+        try:
+            dragon_tiger_inst_count = self._store_dragon_tiger_inst_rows(
+                db,
+                normalized_date,
+                self.fetch_top_inst_rows(normalized_date),
+                normalized_symbols,
+            )
+        except RuntimeError as exc:
+            dragon_tiger_inst_error = str(exc)
+
         stored_count = 0
         skipped_count = 0
         for row in rows:
@@ -743,6 +803,10 @@ class HistoricalDataService:
             "limit_event_error": limit_event_error,
             "margin_detail_count": margin_detail_count,
             "margin_detail_error": margin_detail_error,
+            "dragon_tiger_count": dragon_tiger_count,
+            "dragon_tiger_error": dragon_tiger_error,
+            "dragon_tiger_inst_count": dragon_tiger_inst_count,
+            "dragon_tiger_inst_error": dragon_tiger_inst_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -1045,6 +1109,99 @@ class HistoricalDataService:
             stored_count += 1
         return stored_count
 
+    def _store_dragon_tiger_rows(
+        self,
+        db: Session,
+        trade_date: str,
+        rows: list[dict[str, Any]],
+        symbols: list[str] | None,
+    ) -> int:
+        symbol_filter = set(symbols or [])
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            if symbol_filter and symbol not in symbol_filter:
+                continue
+            row_trade_date = _normalize_trade_date(str(row.get("trade_date") or trade_date))
+            if row_trade_date != trade_date:
+                continue
+            reason = str(row.get("reason") or "").strip()
+            existing = db.scalar(
+                select(DragonTigerList).where(
+                    DragonTigerList.symbol == symbol,
+                    DragonTigerList.trade_date == row_trade_date,
+                    DragonTigerList.reason == reason,
+                )
+            )
+            item = existing or DragonTigerList(
+                symbol=symbol,
+                trade_date=row_trade_date,
+                reason=reason,
+            )
+            item.name = str(row.get("name") or item.name or symbol)
+            item.close = _to_float(row.get("close"))
+            item.pct_change = _to_float(row.get("pct_change") or row.get("pct_chg"))
+            item.turnover_rate = _to_float(row.get("turnover_rate"))
+            item.amount = _to_float(row.get("amount"))
+            item.l_sell = _to_float(row.get("l_sell"))
+            item.l_buy = _to_float(row.get("l_buy"))
+            item.l_amount = _to_float(row.get("l_amount"))
+            item.net_amount = _to_float(row.get("net_amount"))
+            item.net_rate = _to_float(row.get("net_rate"))
+            item.amount_rate = _to_float(row.get("amount_rate"))
+            item.float_values = _to_float(row.get("float_values"))
+            item.source = "tushare_top_list"
+            item.raw_payload = dict(row)
+            db.add(item)
+            stored_count += 1
+        return stored_count
+
+    def _store_dragon_tiger_inst_rows(
+        self,
+        db: Session,
+        trade_date: str,
+        rows: list[dict[str, Any]],
+        symbols: list[str] | None,
+    ) -> int:
+        symbol_filter = set(symbols or [])
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            if symbol_filter and symbol not in symbol_filter:
+                continue
+            row_trade_date = _normalize_trade_date(str(row.get("trade_date") or trade_date))
+            if row_trade_date != trade_date:
+                continue
+            exalter = str(row.get("exalter") or "").strip()
+            side = str(row.get("side") or "").strip()
+            reason = str(row.get("reason") or "").strip()
+            existing = db.scalar(
+                select(DragonTigerInstitution).where(
+                    DragonTigerInstitution.symbol == symbol,
+                    DragonTigerInstitution.trade_date == row_trade_date,
+                    DragonTigerInstitution.exalter == exalter,
+                    DragonTigerInstitution.side == side,
+                    DragonTigerInstitution.reason == reason,
+                )
+            )
+            item = existing or DragonTigerInstitution(
+                symbol=symbol,
+                trade_date=row_trade_date,
+                exalter=exalter,
+                side=side,
+                reason=reason,
+            )
+            item.buy = _to_float(row.get("buy"))
+            item.buy_rate = _to_float(row.get("buy_rate"))
+            item.sell = _to_float(row.get("sell"))
+            item.sell_rate = _to_float(row.get("sell_rate"))
+            item.net_buy = _to_float(row.get("net_buy"))
+            item.source = "tushare_top_inst"
+            item.raw_payload = dict(row)
+            db.add(item)
+            stored_count += 1
+        return stored_count
+
     def refresh_daily_range(
         self,
         db: Session,
@@ -1092,6 +1249,10 @@ class HistoricalDataService:
                     "limit_event_error": None,
                     "margin_detail_count": 0,
                     "margin_detail_error": None,
+                    "dragon_tiger_count": 0,
+                    "dragon_tiger_error": None,
+                    "dragon_tiger_inst_count": 0,
+                    "dragon_tiger_inst_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -1146,6 +1307,10 @@ class HistoricalDataService:
                             "limit_event_error": None,
                             "margin_detail_count": 0,
                             "margin_detail_error": None,
+                            "dragon_tiger_count": 0,
+                            "dragon_tiger_error": None,
+                            "dragon_tiger_inst_count": 0,
+                            "dragon_tiger_inst_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"
@@ -1200,6 +1365,8 @@ class HistoricalDataService:
             "tushare_sector_member": 0,
             "tushare_limit_list_d": 0,
             "tushare_margin_detail": 0,
+            "tushare_top_list": 0,
+            "tushare_top_inst": 0,
         }
         errors: dict[str, list[str]] = defaultdict(list)
         for item in daily_results:
@@ -1212,6 +1379,8 @@ class HistoricalDataService:
             counts["tushare_sector_member"] += int(item.get("sector_member_count") or 0)
             counts["tushare_limit_list_d"] += int(item.get("limit_event_count") or 0)
             counts["tushare_margin_detail"] += int(item.get("margin_detail_count") or 0)
+            counts["tushare_top_list"] += int(item.get("dragon_tiger_count") or 0)
+            counts["tushare_top_inst"] += int(item.get("dragon_tiger_inst_count") or 0)
             for key, source in (
                 ("error", "tushare_daily"),
                 ("daily_basic_error", "tushare_daily_basic"),
@@ -1221,6 +1390,8 @@ class HistoricalDataService:
                 ("sector_member_error", "tushare_sector_member"),
                 ("limit_event_error", "tushare_limit_list_d"),
                 ("margin_detail_error", "tushare_margin_detail"),
+                ("dragon_tiger_error", "tushare_top_list"),
+                ("dragon_tiger_inst_error", "tushare_top_inst"),
             ):
                 message = item.get(key)
                 if message:

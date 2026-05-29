@@ -337,6 +337,7 @@
               <span v-if="financialText(item)" class="position-symbol">{{ financialText(item) }}</span>
               <span v-if="limitEventText(item)" class="position-symbol">{{ limitEventText(item) }}</span>
               <span v-if="marginText(item)" class="position-symbol">{{ marginText(item) }}</span>
+              <span v-if="dragonTigerText(item)" class="position-symbol">{{ dragonTigerText(item) }}</span>
             </div>
             <div>{{ item.score.toFixed(2) }}</div>
             <div>
@@ -861,6 +862,8 @@ function sourceCountsText(counts: Record<string, number> | undefined): string {
     ['成分', counts.tushare_sector_member],
     ['涨跌停', counts.tushare_limit_list_d],
     ['两融', counts.tushare_margin_detail],
+    ['龙虎榜', counts.tushare_top_list],
+    ['机构席位', counts.tushare_top_inst],
   ].filter(([, value]) => typeof value === 'number' && value > 0)
   if (!items.length) return '--'
   return items.map(([label, value]) => `${label}${formatInteger(value as number)}`).join(' / ')
@@ -912,6 +915,22 @@ function marginText(item: QuantCandidate): string {
   }
   if (typeof margin.rzrqye === 'number' && margin.rzrqye > 0) {
     parts.push(`两融 ${formatAmount(margin.rzrqye)}`)
+  }
+  return parts.join(' · ')
+}
+
+function dragonTigerText(item: QuantCandidate): string {
+  const dragonTiger = item.daily_factors?.dragon_tiger
+  if (!dragonTiger) return ''
+  const parts: string[] = []
+  if (typeof dragonTiger.net_amount === 'number' && dragonTiger.net_amount !== 0) {
+    parts.push(`榜净 ${formatAmount(dragonTiger.net_amount)}`)
+  }
+  if (
+    typeof dragonTiger.institution_net_buy === 'number' &&
+    dragonTiger.institution_net_buy !== 0
+  ) {
+    parts.push(`机构 ${formatAmount(dragonTiger.institution_net_buy)}`)
   }
   return parts.join(' · ')
 }

@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core import rate_limit as rate_limit_module
 from app.db import database as database_module
 from app.db.database import session_scope
-from app.db.models import DailyBar, IndexBar, SectorBar
+from app.db.models import DailyBar, IndexBar, SectorBar, SectorMember
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -462,6 +462,88 @@ def test_refresh_daily_bars_stores_tushare_sector_rows(monkeypatch, tmp_path) ->
                 ("881155.TI", "半导体", "I", -1.12),
                 ("885001.TI", "白酒概念", "N", 3.21),
             ]
+
+    _reset_state()
+
+
+def test_refresh_daily_bars_stores_hot_sector_members(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "close": 1326.0,
+                "amount": 10037388.288,
+            }
+        ]
+
+    def fake_fetch_daily_basic_rows(trade_date: str, symbols: list[str] | None = None):
+        return []
+
+    def fake_fetch_moneyflow_rows(trade_date: str, symbols: list[str] | None = None):
+        return []
+
+    def fake_fetch_index_daily_rows(trade_date: str):
+        return []
+
+    def fake_fetch_sector_index_rows():
+        return [
+            {"ts_code": "885001.TI", "name": "白酒概念", "type": "N"},
+            {"ts_code": "881155.TI", "name": "半导体", "type": "I"},
+        ]
+
+    def fake_fetch_sector_daily_rows(trade_date: str):
+        return [
+            {"ts_code": "885001.TI", "trade_date": "20260528", "pct_change": 3.21},
+            {"ts_code": "881155.TI", "trade_date": "20260528", "pct_change": -1.12},
+        ]
+
+    def fake_fetch_sector_member_rows(sector_symbols: list[str]):
+        assert sector_symbols == ["885001.TI"]
+        return [
+            {
+                "ts_code": "885001.TI",
+                "con_code": "600519.SH",
+                "con_name": "贵州茅台",
+                "is_new": "Y",
+            }
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", fake_fetch_daily_basic_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", fake_fetch_moneyflow_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", fake_fetch_index_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_sector_index_rows", fake_fetch_sector_index_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_sector_daily_rows", fake_fetch_sector_daily_rows)
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_sector_member_rows",
+        fake_fetch_sector_member_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh",
+            headers=headers,
+            json={"trade_date": "20260528", "symbols": None},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["sector_count"] == 2
+        assert payload["sector_member_count"] == 1
+
+        with session_scope() as db:
+            member = db.query(SectorMember).one()
+            assert member.sector_symbol == "885001.TI"
+            assert member.sector_name == "白酒概念"
+            assert member.stock_symbol == "600519.SH"
+            assert member.stock_name == "贵州茅台"
+            assert member.is_new == "Y"
 
     _reset_state()
 

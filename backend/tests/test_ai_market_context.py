@@ -17,6 +17,7 @@ from app.db.models import (
     MarketDataMaintenanceRun,
     MarketReport,
     SectorBar,
+    SectorMember,
 )
 from app.services.automation_session_service import automation_session_service
 from app.services.scheduler_service import scheduler_service
@@ -148,6 +149,13 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     pct_chg=-1.12,
                     turnover_rate=1.6,
                 ),
+                SectorMember(
+                    sector_symbol="885001.TI",
+                    sector_name="白酒概念",
+                    sector_type="N",
+                    stock_symbol="600519.SH",
+                    stock_name="贵州茅台",
+                ),
             ]
         )
         db.flush()
@@ -161,7 +169,7 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "AI量化市场上下文" in context
     assert (
         "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, "
-        "tushare_index, tushare_sector"
+        "tushare_sector_member, tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -173,6 +181,7 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "PB 7.80" in context
     assert "净流入 -8123.40万" in context
     assert "大单 -6.20%" in context
+    assert "热板块 白酒概念 +3.21%" in context
     assert "指数环境:" in context
     assert "上证指数 3351.23 (+0.78%)" in context
     assert "创业板指 2198.12 (-1.23%)" in context

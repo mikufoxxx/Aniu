@@ -492,6 +492,8 @@ class DailyRefreshResponse(BaseModel):
     index_error: str | None = None
     sector_count: int = 0
     sector_error: str | None = None
+    sector_member_count: int = 0
+    sector_member_error: str | None = None
     requested_symbols: list[str] = Field(default_factory=list)
     error: str | None = None
 

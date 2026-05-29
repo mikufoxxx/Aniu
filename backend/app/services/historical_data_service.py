@@ -10,7 +10,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import BacktestRun, DailyBar, IndexBar, SectorBar
+from app.db.models import BacktestRun, DailyBar, IndexBar, SectorBar, SectorMember
 from app.services.market_data_service import normalize_symbol
 
 _TUSHARE_DAILY_FIELDS = (
@@ -28,7 +28,9 @@ _TUSHARE_THS_INDEX_FIELDS = "ts_code,name,type"
 _TUSHARE_THS_DAILY_FIELDS = (
     "ts_code,trade_date,close,pct_change,turnover_rate,total_mv,float_mv"
 )
+_TUSHARE_THS_MEMBER_FIELDS = "ts_code,con_code,con_name,is_new"
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
+_MAX_SECTOR_MEMBER_REFRESH_SECTORS = 50
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -298,6 +300,15 @@ class HistoricalDataService:
             {"trade_date": _normalize_trade_date(trade_date)}
         )
 
+    def fetch_sector_member_rows(self, sector_symbols: list[str]) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_member 数据。")
+        rows: list[dict[str, Any]] = []
+        for symbol in sector_symbols:
+            rows.extend(self._request_tushare_ths_member({"ts_code": symbol}))
+        return rows
+
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return self._request_tushare_api(
             api_name="daily",
@@ -344,6 +355,14 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_THS_DAILY_FIELDS,
             label="ths_daily",
+        )
+
+    def _request_tushare_ths_member(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="ths_member",
+            params=params,
+            fields=_TUSHARE_THS_MEMBER_FIELDS,
+            label="ths_member",
         )
 
     def _request_tushare_api(
@@ -460,15 +479,33 @@ class HistoricalDataService:
         index_count = self._store_index_rows(db, normalized_date, index_rows)
         sector_error = None
         sector_count = 0
+        sector_member_error = None
+        sector_member_count = 0
+        sector_daily_rows: list[dict[str, Any]] = []
+        sector_index_rows: list[dict[str, Any]] = []
         try:
+            sector_daily_rows = self.fetch_sector_daily_rows(normalized_date)
+            sector_index_rows = self.fetch_sector_index_rows()
             sector_count = self._store_sector_rows(
                 db,
                 normalized_date,
-                self.fetch_sector_daily_rows(normalized_date),
-                self.fetch_sector_index_rows(),
+                sector_daily_rows,
+                sector_index_rows,
             )
         except RuntimeError as exc:
             sector_error = str(exc)
+        if sector_daily_rows and sector_index_rows:
+            try:
+                hot_sector_symbols = self._hot_sector_symbols_for_member_refresh(
+                    sector_daily_rows
+                )
+                sector_member_count = self._store_sector_member_rows(
+                    db,
+                    self.fetch_sector_member_rows(hot_sector_symbols),
+                    sector_index_rows,
+                )
+            except RuntimeError as exc:
+                sector_member_error = str(exc)
 
         stored_count = 0
         skipped_count = 0
@@ -540,6 +577,8 @@ class HistoricalDataService:
             "index_error": index_error,
             "sector_count": sector_count,
             "sector_error": sector_error,
+            "sector_member_count": sector_member_count,
+            "sector_member_error": sector_member_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -568,6 +607,66 @@ class HistoricalDataService:
             bar.source = "tushare_index"
             bar.raw_payload = dict(row)
             db.add(bar)
+            stored_count += 1
+        return stored_count
+
+    def _hot_sector_symbols_for_member_refresh(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> list[str]:
+        ranked = sorted(
+            rows,
+            key=lambda row: _to_float(row.get("pct_change") or row.get("pct_chg")) or 0.0,
+            reverse=True,
+        )
+        symbols: list[str] = []
+        for row in ranked:
+            pct_chg = _to_float(row.get("pct_change") or row.get("pct_chg")) or 0.0
+            if pct_chg <= 0:
+                continue
+            symbol = str(row.get("ts_code") or row.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            symbols.append(symbol)
+            if len(symbols) >= _MAX_SECTOR_MEMBER_REFRESH_SECTORS:
+                break
+        return symbols
+
+    def _store_sector_member_rows(
+        self,
+        db: Session,
+        rows: list[dict[str, Any]],
+        index_rows: list[dict[str, Any]],
+    ) -> int:
+        metadata = {
+            normalize_symbol(str(row.get("ts_code") or row.get("symbol") or "")): row
+            for row in index_rows
+        }
+        stored_count = 0
+        for row in rows:
+            sector_symbol = normalize_symbol(str(row.get("ts_code") or ""))
+            stock_symbol = normalize_symbol(str(row.get("con_code") or ""))
+            info = metadata.get(sector_symbol) or {}
+            existing = db.scalar(
+                select(SectorMember).where(
+                    SectorMember.sector_symbol == sector_symbol,
+                    SectorMember.stock_symbol == stock_symbol,
+                )
+            )
+            member = existing or SectorMember(
+                sector_symbol=sector_symbol,
+                stock_symbol=stock_symbol,
+            )
+            member.sector_name = str(info.get("name") or row.get("name") or sector_symbol)
+            member.sector_type = str(info.get("type") or row.get("type") or "") or None
+            member.stock_name = str(row.get("con_name") or row.get("stock_name") or "")
+            member.is_new = str(row.get("is_new") or "") or None
+            member.source = "tushare_ths_member"
+            member.raw_payload = {
+                **dict(row),
+                **({"index": dict(info)} if info else {}),
+            }
+            db.add(member)
             stored_count += 1
         return stored_count
 
@@ -653,6 +752,8 @@ class HistoricalDataService:
                     "index_error": None,
                     "sector_count": 0,
                     "sector_error": None,
+                    "sector_member_count": 0,
+                    "sector_member_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -695,6 +796,8 @@ class HistoricalDataService:
                             "index_error": None,
                             "sector_count": 0,
                             "sector_error": None,
+                            "sector_member_count": 0,
+                            "sector_member_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"

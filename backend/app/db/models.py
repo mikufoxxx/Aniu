@@ -238,6 +238,31 @@ class SectorBar(Base):
     )
 
 
+class SectorMember(Base):
+    __tablename__ = "sector_members"
+    __table_args__ = (
+        UniqueConstraint(
+            "sector_symbol",
+            "stock_symbol",
+            name="uq_sector_members_sector_stock",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sector_symbol: Mapped[str] = mapped_column(String(16), index=True)
+    sector_name: Mapped[str] = mapped_column(String(120), default="")
+    sector_type: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    stock_symbol: Mapped[str] = mapped_column(String(16), index=True)
+    stock_name: Mapped[str] = mapped_column(String(120), default="")
+    is_new: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_ths_member")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

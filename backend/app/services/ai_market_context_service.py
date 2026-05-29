@@ -329,6 +329,12 @@ class AIMarketContextService:
             if numeric == 0 or (numeric < 0 and not allow_negative):
                 continue
             parts.append(f"{label} {numeric:.2f}{suffix}")
+        sectors = daily.get("sector_heat") or []
+        if sectors and isinstance(sectors[0], dict):
+            sector = sectors[0]
+            parts.append(
+                f"热板块 {sector.get('name')} {float(sector.get('pct_chg') or 0):+.2f}%"
+            )
         if not parts:
             return ""
         return "; ".join(parts) + "; "

@@ -15,6 +15,8 @@ from app.db.models import (
     ArenaAccount,
     ArenaPosition,
     DailyBar,
+    SectorBar,
+    SectorMember,
 )
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
@@ -186,6 +188,21 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                     DailyBar(symbol="000001.SZ", trade_date="20260526", close=10.0, amount=1000),
                     DailyBar(symbol="000001.SZ", trade_date="20260527", close=10.1, amount=1100),
                     DailyBar(symbol="000001.SZ", trade_date="20260528", close=10.0, amount=900),
+                    SectorBar(
+                        symbol="885001.TI",
+                        name="白酒概念",
+                        sector_type="N",
+                        trade_date="20260528",
+                        pct_chg=3.21,
+                        turnover_rate=2.4,
+                    ),
+                    SectorMember(
+                        sector_symbol="885001.TI",
+                        sector_name="白酒概念",
+                        sector_type="N",
+                        stock_symbol="600519.SH",
+                        stock_name="贵州茅台",
+                    ),
                 ]
             )
 
@@ -205,9 +222,13 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["universe_size"] == 2
     assert payload["coverage"]["realtime_symbols"] == 2
     assert payload["coverage"]["daily_history_symbols"] == 2
-    assert {"easy_tdx", "tencent", "tushare_daily", "tushare_moneyflow"} <= set(
-        payload["data_sources"]
-    )
+    assert {
+        "easy_tdx",
+        "tencent",
+        "tushare_daily",
+        "tushare_moneyflow",
+        "tushare_sector_member",
+    } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
     assert payload["items"][0]["daily_factors"]["bars_used"] == 3
@@ -219,11 +240,14 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["total_mv"] == 166500000.0
     assert payload["items"][0]["daily_factors"]["moneyflow_net_amount"] == 8123.4
     assert payload["items"][0]["daily_factors"]["moneyflow_buy_lg_amount_rate"] == 6.2
+    assert payload["items"][0]["daily_factors"]["sector_heat"][0]["name"] == "白酒概念"
+    assert payload["items"][0]["daily_factors"]["sector_heat"][0]["pct_chg"] == 3.21
     assert "daily_momentum" in payload["items"][0]["factor_scores"]
     assert "daily_turnover" in payload["items"][0]["factor_scores"]
     assert "valuation_sanity" in payload["items"][0]["factor_scores"]
     assert "moneyflow_net" in payload["items"][0]["factor_scores"]
     assert "moneyflow_large" in payload["items"][0]["factor_scores"]
+    assert "sector_heat" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

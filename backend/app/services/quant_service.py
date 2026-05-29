@@ -3,10 +3,10 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyBar
+from app.db.models import DailyBar, SectorBar, SectorMember
 from app.services.market_data_service import DEFAULT_UNIVERSE, market_data_service, normalize_symbol
 
 
@@ -55,6 +55,8 @@ class QuantService:
             for item in selected
         ):
             data_sources.append("tushare_moneyflow")
+        if any(item.get("daily_factors", {}).get("sector_heat") for item in selected):
+            data_sources.append("tushare_sector_member")
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -160,6 +162,7 @@ class QuantService:
                 min(_number(daily.get("moneyflow_buy_lg_amount_rate")) / 10.0, 1.0),
                 -1.0,
             ),
+            "sector_heat": self._sector_heat_score(daily),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
         return {
@@ -202,6 +205,7 @@ class QuantService:
                 + factor_scores["market_cap"] * 2
                 + factor_scores["moneyflow_net"] * 4
                 + factor_scores["moneyflow_large"] * 2
+                + factor_scores["sector_heat"] * 4
             )
         return round(score, 4)
 
@@ -216,6 +220,13 @@ class QuantService:
         if not scores:
             return 0.0
         return sum(scores) / len(scores)
+
+    def _sector_heat_score(self, daily: dict[str, Any]) -> float:
+        sectors = daily.get("sector_heat") or []
+        if not sectors:
+            return 0.0
+        top = max(_number(item.get("pct_chg")) for item in sectors if isinstance(item, dict))
+        return max(min(top / 5.0, 1.0), -1.0)
 
     def _daily_factors_by_symbol(
         self,
@@ -234,10 +245,49 @@ class QuantService:
         by_symbol: dict[str, list[DailyBar]] = {}
         for row in rows:
             by_symbol.setdefault(row.symbol, []).append(row)
-        return {
+        factors = {
             symbol: self._daily_factors(bars[-max(1, lookback_days):])
             for symbol, bars in by_symbol.items()
         }
+        sector_heat = self._sector_heat_by_symbol(db, symbols)
+        for symbol, sectors in sector_heat.items():
+            factors.setdefault(symbol, self._empty_daily_factors())["sector_heat"] = sectors
+        return factors
+
+    def _sector_heat_by_symbol(
+        self,
+        db: Session,
+        symbols: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        trade_date = db.scalar(
+            select(SectorBar.trade_date).order_by(desc(SectorBar.trade_date)).limit(1)
+        )
+        if not trade_date:
+            return {}
+        sector_rows = db.scalars(
+            select(SectorBar).where(SectorBar.trade_date == trade_date)
+        ).all()
+        sectors_by_symbol = {row.symbol: row for row in sector_rows}
+        members = db.scalars(
+            select(SectorMember).where(SectorMember.stock_symbol.in_(symbols))
+        ).all()
+        result: dict[str, list[dict[str, Any]]] = {}
+        for member in members:
+            sector = sectors_by_symbol.get(member.sector_symbol)
+            if sector is None or sector.pct_chg is None:
+                continue
+            result.setdefault(member.stock_symbol, []).append(
+                {
+                    "symbol": member.sector_symbol,
+                    "name": member.sector_name or sector.name or member.sector_symbol,
+                    "pct_chg": round(float(sector.pct_chg or 0), 4),
+                    "turnover_rate": round(float(sector.turnover_rate or 0), 4),
+                }
+            )
+        for items in result.values():
+            items.sort(key=lambda item: item["pct_chg"], reverse=True)
+            del items[3:]
+        return result
 
     def _daily_factors(self, bars: list[DailyBar]) -> dict[str, Any]:
         usable = [bar for bar in bars if bar.close is not None]
@@ -286,6 +336,7 @@ class QuantService:
             "moneyflow_buy_sm_amount_rate": _number(
                 latest.moneyflow_buy_sm_amount_rate
             ),
+            "sector_heat": [],
         }
 
     def _empty_daily_factors(self) -> dict[str, Any]:
@@ -310,6 +361,7 @@ class QuantService:
             "moneyflow_buy_md_amount_rate": 0.0,
             "moneyflow_buy_sm_amount": 0.0,
             "moneyflow_buy_sm_amount_rate": 0.0,
+            "sector_heat": [],
         }
 
     def _stddev(self, values: list[float]) -> float:

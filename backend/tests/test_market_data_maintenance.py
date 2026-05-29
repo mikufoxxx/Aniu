@@ -378,6 +378,8 @@ def test_market_data_maintenance_uses_coverage_gap_when_symbols_are_omitted(
     monkeypatch,
     tmp_path,
 ) -> None:
+    from app.db.database import session_scope
+    from app.db.models import StockProfile
     from app.services.historical_data_service import historical_data_service
     from app.services.market_report_service import market_report_service
     from app.services.quant_service import quant_service
@@ -447,13 +449,35 @@ def test_market_data_maintenance_uses_coverage_gap_when_symbols_are_omitted(
             "created_at": "2026-05-29T08:45:00",
         }
 
+    def fake_refresh_financial_indicators(db, symbols):
+        captured["financials"] = symbols
+        return {
+            "source": "tushare_fina_indicator",
+            "stored_count": len(symbols),
+            "error": None,
+            "requested_symbols": symbols,
+        }
+
     monkeypatch.setattr(historical_data_service, "summarize_daily_coverage", fake_coverage)
     monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
+    monkeypatch.setattr(
+        historical_data_service,
+        "refresh_financial_indicators",
+        fake_refresh_financial_indicators,
+        raising=False,
+    )
     monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
     monkeypatch.setattr(market_report_service, "generate_report", fake_generate_report)
 
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    StockProfile(symbol="000001.SZ", name="平安银行"),
+                    StockProfile(symbol="600519.SH", name="贵州茅台"),
+                ]
+            )
         response = client.post(
             "/api/aniu/market/maintenance/run",
             headers=headers,
@@ -468,7 +492,9 @@ def test_market_data_maintenance_uses_coverage_gap_when_symbols_are_omitted(
     assert response.status_code == 200
     payload = response.json()
     assert payload["refresh"]["start_date"] == "20260520"
+    assert payload["financial_refresh"]["stored_count"] == 2
     assert captured["range"] == ("20260520", "20260528", None)
+    assert captured["financials"] == ["000001.SZ", "600519.SH"]
     assert captured["dataset"] == (None, 50, True, 120)
     assert captured["report"] == ("morning", None, 50, 120)
 

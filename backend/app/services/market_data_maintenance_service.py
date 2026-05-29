@@ -6,12 +6,12 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.database import session_scope
-from app.db.models import MarketDataMaintenanceRun
+from app.db.models import DailyBar, MarketDataMaintenanceRun, StockProfile
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_service import normalize_symbol
 from app.services.market_report_service import market_report_service
@@ -108,11 +108,7 @@ class MarketDataMaintenanceService:
             symbols=normalized_symbols,
             progress_callback=progress_callback,
         )
-        financial_symbols = normalized_symbols or quant_service._resolve_universe(
-            db,
-            None,
-            limit=normalized_limit,
-        )
+        financial_symbols = normalized_symbols or self._full_market_financial_symbols(db)
         financial_refresh = self._refresh_financial_indicators(
             db,
             financial_symbols,
@@ -211,6 +207,28 @@ class MarketDataMaintenanceService:
                 "error": str(exc),
                 "requested_symbols": symbols,
             }
+
+    def _full_market_financial_symbols(self, db: Session) -> list[str]:
+        profile_symbols = list(
+            db.scalars(select(StockProfile.symbol).order_by(StockProfile.symbol)).all()
+        )
+        if profile_symbols:
+            return profile_symbols
+        trade_date = db.scalar(
+            select(DailyBar.trade_date)
+            .group_by(DailyBar.trade_date)
+            .order_by(func.count(DailyBar.symbol).desc(), desc(DailyBar.trade_date))
+            .limit(1)
+        )
+        if not trade_date:
+            return []
+        return list(
+            db.scalars(
+                select(DailyBar.symbol)
+                .where(DailyBar.trade_date == trade_date)
+                .order_by(DailyBar.symbol)
+            ).all()
+        )
 
     def list_runs(self, db: Session, *, limit: int = 20) -> dict[str, Any]:
         rows = db.scalars(

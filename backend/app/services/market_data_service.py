@@ -336,6 +336,7 @@ class MarketDataService:
                 "https://push2.eastmoney.com/api/qt/ulist.np/get",
                 params=params,
                 timeout=8.0,
+                follow_redirects=True,
                 headers={"User-Agent": "Aniu/1.0"},
             )
             response.raise_for_status()

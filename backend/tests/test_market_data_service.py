@@ -189,6 +189,7 @@ def test_eastmoney_quotes_parse_push2_batches(monkeypatch) -> None:
             return self._payload
 
     def fake_get(url: str, **kwargs):
+        assert kwargs["follow_redirects"] is True
         secids = kwargs["params"]["secids"]
         calls.append(secids)
         diff = []

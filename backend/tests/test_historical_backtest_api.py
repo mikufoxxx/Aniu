@@ -282,6 +282,47 @@ def test_refresh_daily_range_skips_failed_dates(monkeypatch, tmp_path) -> None:
     _reset_state()
 
 
+def test_refresh_daily_range_stops_after_consecutive_failures(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    calls: list[str] = []
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        calls.append(trade_date)
+        raise RuntimeError("Tushare 日线请求超时")
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh-range",
+            headers=headers,
+            json={
+                "start_date": "20260525",
+                "end_date": "20260529",
+                "symbols": None,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == ["20260525", "20260526", "20260527"]
+    assert payload["processed_days"] == 5
+    assert payload["stored_count"] == 0
+    assert payload["skipped_count"] == 5
+    assert [item["trade_date"] for item in payload["daily_results"]] == [
+        "20260525",
+        "20260526",
+        "20260527",
+        "20260528",
+        "20260529",
+    ]
+    assert "连续 3 天刷新失败" in payload["daily_results"][3]["error"]
+
+    _reset_state()
+
+
 def test_backtest_uses_stored_daily_bars_and_persists_metrics(monkeypatch, tmp_path) -> None:
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)

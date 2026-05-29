@@ -16,6 +16,7 @@ _TUSHARE_DAILY_FIELDS = (
     "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
 )
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20.0
+_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
 
 
 def _to_float(value: Any) -> float | None:
@@ -164,15 +165,18 @@ class HistoricalDataService:
         stored_symbols: set[str] = set()
         total_stored = 0
         total_skipped = 0
+        consecutive_failures = 0
 
-        for trade_date in dates:
+        for index, trade_date in enumerate(dates):
             try:
                 result = self.refresh_daily_bars(
                     db,
                     trade_date=trade_date,
                     symbols=normalized_symbols,
                 )
+                consecutive_failures = 0
             except RuntimeError as exc:
+                consecutive_failures += 1
                 result = {
                     "trade_date": trade_date,
                     "source": "tushare",
@@ -191,6 +195,24 @@ class HistoricalDataService:
                     .distinct()
                 ).all()
             )
+            if consecutive_failures >= _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES:
+                remaining_dates = dates[index + 1 :]
+                for skipped_date in remaining_dates:
+                    daily_results.append(
+                        {
+                            "trade_date": skipped_date,
+                            "source": "tushare",
+                            "stored_count": 0,
+                            "skipped_count": 1,
+                            "requested_symbols": normalized_symbols or [],
+                            "error": (
+                                f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"
+                                "停止本轮剩余日期请求。"
+                            ),
+                        }
+                    )
+                total_skipped += len(remaining_dates)
+                break
 
         return {
             "start_date": dates[0],

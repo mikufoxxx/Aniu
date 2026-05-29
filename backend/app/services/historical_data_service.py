@@ -1164,7 +1164,7 @@ class HistoricalDataService:
         symbols: list[str] | None,
     ) -> int:
         symbol_filter = set(symbols or [])
-        stored_count = 0
+        aggregated: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
         for row in rows:
             symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
             if symbol_filter and symbol not in symbol_filter:
@@ -1175,29 +1175,56 @@ class HistoricalDataService:
             exalter = str(row.get("exalter") or "").strip()
             side = str(row.get("side") or "").strip()
             reason = str(row.get("reason") or "").strip()
+            key = (symbol, row_trade_date, exalter, side, reason)
+            item = aggregated.setdefault(
+                key,
+                {
+                    "symbol": symbol,
+                    "trade_date": row_trade_date,
+                    "exalter": exalter,
+                    "side": side,
+                    "reason": reason,
+                    "buy": 0.0,
+                    "sell": 0.0,
+                    "net_buy": 0.0,
+                    "buy_rate": None,
+                    "sell_rate": None,
+                    "rows": [],
+                },
+            )
+            item["buy"] += _to_float(row.get("buy")) or 0.0
+            item["sell"] += _to_float(row.get("sell")) or 0.0
+            item["net_buy"] += _to_float(row.get("net_buy")) or 0.0
+            item["buy_rate"] = _to_float(row.get("buy_rate"))
+            item["sell_rate"] = _to_float(row.get("sell_rate"))
+            item["rows"].append(dict(row))
+
+        stored_count = 0
+        for row in aggregated.values():
             existing = db.scalar(
                 select(DragonTigerInstitution).where(
-                    DragonTigerInstitution.symbol == symbol,
-                    DragonTigerInstitution.trade_date == row_trade_date,
-                    DragonTigerInstitution.exalter == exalter,
-                    DragonTigerInstitution.side == side,
-                    DragonTigerInstitution.reason == reason,
+                    DragonTigerInstitution.symbol == row["symbol"],
+                    DragonTigerInstitution.trade_date == row["trade_date"],
+                    DragonTigerInstitution.exalter == row["exalter"],
+                    DragonTigerInstitution.side == row["side"],
+                    DragonTigerInstitution.reason == row["reason"],
                 )
             )
             item = existing or DragonTigerInstitution(
-                symbol=symbol,
-                trade_date=row_trade_date,
-                exalter=exalter,
-                side=side,
-                reason=reason,
+                symbol=row["symbol"],
+                trade_date=row["trade_date"],
+                exalter=row["exalter"],
+                side=row["side"],
+                reason=row["reason"],
             )
-            item.buy = _to_float(row.get("buy"))
-            item.buy_rate = _to_float(row.get("buy_rate"))
-            item.sell = _to_float(row.get("sell"))
-            item.sell_rate = _to_float(row.get("sell_rate"))
-            item.net_buy = _to_float(row.get("net_buy"))
+            item.buy = row["buy"]
+            item.buy_rate = row["buy_rate"]
+            item.sell = row["sell"]
+            item.sell_rate = row["sell_rate"]
+            item.net_buy = row["net_buy"]
             item.source = "tushare_top_inst"
-            item.raw_payload = dict(row)
+            raw_rows = row["rows"]
+            item.raw_payload = raw_rows[0] if len(raw_rows) == 1 else {"rows": raw_rows}
             db.add(item)
             stored_count += 1
         return stored_count

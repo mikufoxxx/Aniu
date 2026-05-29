@@ -944,6 +944,16 @@ def test_refresh_daily_bars_stores_tushare_dragon_tiger_rows(monkeypatch, tmp_pa
                 "ts_code": "600519.SH",
                 "exalter": "机构专用",
                 "side": "0",
+                "buy": 10_000_000,
+                "sell": 2_000_000,
+                "net_buy": 8_000_000,
+                "reason": "涨幅偏离值达7%的证券",
+            },
+            {
+                "trade_date": trade_date,
+                "ts_code": "600519.SH",
+                "exalter": "机构专用",
+                "side": "0",
                 "buy": 60_000_000,
                 "buy_rate": 3.0,
                 "sell": 10_000_000,
@@ -1013,7 +1023,9 @@ def test_refresh_daily_bars_stores_tushare_dragon_tiger_rows(monkeypatch, tmp_pa
     assert lists[0].net_amount == 90_000_000
     assert lists[0].reason == "涨幅偏离值达7%的证券"
     assert institutions[0].exalter == "机构专用"
-    assert institutions[0].net_buy == 50_000_000
+    assert institutions[0].buy == 70_000_000
+    assert institutions[0].sell == 12_000_000
+    assert institutions[0].net_buy == 58_000_000
     assert institutions[0].source == "tushare_top_inst"
 
     _reset_state()

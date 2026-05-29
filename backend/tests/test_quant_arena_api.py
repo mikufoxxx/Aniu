@@ -163,6 +163,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         headers = _auth_headers(client)
         with session_scope() as db:
             from app.db.models import (
+                BlockTrade,
                 DragonTigerInstitution,
                 DragonTigerList,
                 FinancialIndicator,
@@ -288,6 +289,24 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         net_buy=50_000_000,
                         reason="涨幅偏离值达7%的证券",
                     ),
+                    BlockTrade(
+                        symbol="600519.SH",
+                        trade_date="20260528",
+                        price=1320.0,
+                        vol=140.0,
+                        amount=184_800.0,
+                        buyer="机构专用",
+                        seller="中信证券总部",
+                    ),
+                    BlockTrade(
+                        symbol="600519.SH",
+                        trade_date="20260528",
+                        price=1350.0,
+                        vol=60.0,
+                        amount=81_000.0,
+                        buyer="华泰证券上海营业部",
+                        seller="机构专用",
+                    ),
                 ]
             )
 
@@ -319,6 +338,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         "tushare_margin_detail",
         "tushare_top_list",
         "tushare_top_inst",
+        "tushare_block_trade",
     } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
@@ -340,6 +360,9 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["margin_detail"]["net_financing_buy"] == 90000000.0
     assert payload["items"][0]["daily_factors"]["dragon_tiger"]["net_amount"] == 90000000.0
     assert payload["items"][0]["daily_factors"]["dragon_tiger"]["institution_net_buy"] == 50000000.0
+    assert payload["items"][0]["daily_factors"]["block_trade"]["trade_count"] == 2
+    assert payload["items"][0]["daily_factors"]["block_trade"]["total_amount"] == 265800.0
+    assert payload["items"][0]["daily_factors"]["block_trade"]["price_vs_close_pct"] > 0
     assert payload["items"][0]["profile"]["industry"] == "白酒"
     assert payload["items"][0]["profile"]["area"] == "贵州"
     assert payload["coverage"]["profile_symbols"] == 1
@@ -347,6 +370,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["coverage"]["limit_event_symbols"] == 1
     assert payload["coverage"]["margin_detail_symbols"] == 1
     assert payload["coverage"]["dragon_tiger_symbols"] == 1
+    assert payload["coverage"]["block_trade_symbols"] == 1
     assert payload["items"][0]["financial_factors"]["roe"] == 31.2
     assert payload["items"][0]["financial_factors"]["grossprofit_margin"] == 91.2
     assert payload["items"][0]["financial_factors"]["netprofit_yoy"] == 18.5
@@ -361,6 +385,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert "limit_sentiment" in payload["items"][0]["factor_scores"]
     assert "margin_financing" in payload["items"][0]["factor_scores"]
     assert "dragon_tiger_flow" in payload["items"][0]["factor_scores"]
+    assert "block_trade_flow" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

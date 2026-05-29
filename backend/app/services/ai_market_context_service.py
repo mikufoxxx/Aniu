@@ -131,6 +131,7 @@ class AIMarketContextService:
             limit_parts = self._limit_event_parts(daily.get("limit_event") or {})
             margin_parts = self._margin_parts(daily.get("margin_detail") or {})
             dragon_tiger_parts = self._dragon_tiger_parts(daily.get("dragon_tiger") or {})
+            block_trade_parts = self._block_trade_parts(daily.get("block_trade") or {})
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -145,6 +146,7 @@ class AIMarketContextService:
                     f"{limit_parts}"
                     f"{margin_parts}"
                     f"{dragon_tiger_parts}"
+                    f"{block_trade_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -428,6 +430,29 @@ class AIMarketContextService:
         reason = item.get("reason")
         if reason:
             parts.append(f"上榜 {reason}")
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
+
+    def _block_trade_parts(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        total_amount = item.get("total_amount")
+        try:
+            amount_number = float(total_amount)
+        except (TypeError, ValueError):
+            amount_number = 0.0
+        trade_count = int(item.get("trade_count") or 0)
+        price_vs_close = item.get("price_vs_close_pct")
+        try:
+            price_vs_close_number = float(price_vs_close)
+        except (TypeError, ValueError):
+            price_vs_close_number = 0.0
+        if amount_number > 0:
+            parts.append(f"大宗成交 {amount_number:.2f}万")
+        if trade_count > 0:
+            parts.append(f"{trade_count}笔")
+        if price_vs_close_number:
+            parts.append(f"折溢价 {price_vs_close_number:+.2f}%")
         if not parts:
             return ""
         return "; ".join(parts) + "; "

@@ -445,6 +445,37 @@ class DragonTigerInstitution(Base):
     )
 
 
+class BlockTrade(Base):
+    __tablename__ = "block_trades"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "trade_date",
+            "price",
+            "vol",
+            "amount",
+            "buyer",
+            "seller",
+            name="uq_block_trades_symbol_trade_price_vol_amount_buyer_seller",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    trade_date: Mapped[str] = mapped_column(String(8), index=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vol: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    buyer: Mapped[str] = mapped_column(String(255), default="")
+    seller: Mapped[str] = mapped_column(String(255), default="")
+    source: Mapped[str] = mapped_column(String(32), default="tushare_block_trade")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

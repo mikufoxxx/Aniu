@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.models import (
     BacktestRun,
+    BlockTrade,
     DailyBar,
     DragonTigerInstitution,
     DragonTigerList,
@@ -65,6 +66,7 @@ _TUSHARE_TOP_LIST_FIELDS = (
 _TUSHARE_TOP_INST_FIELDS = (
     "trade_date,ts_code,exalter,side,buy,buy_rate,sell,sell_rate,net_buy,reason"
 )
+_TUSHARE_BLOCK_TRADE_FIELDS = "ts_code,trade_date,price,vol,amount,buyer,seller"
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_THS_MEMBER_WORKERS = 2
 _TUSHARE_THS_MEMBER_RETRIES = 3
@@ -414,6 +416,14 @@ class HistoricalDataService:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare top_inst 数据。")
         return self._request_tushare_top_inst({"trade_date": _normalize_trade_date(trade_date)})
 
+    def fetch_block_trade_rows(self, trade_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare block_trade 数据。")
+        return self._request_tushare_block_trade(
+            {"trade_date": _normalize_trade_date(trade_date)}
+        )
+
     def fetch_financial_indicator_rows(self, symbols: list[str]) -> list[dict[str, Any]]:
         settings = get_settings()
         if not settings.tushare_token:
@@ -535,6 +545,14 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_TOP_INST_FIELDS,
             label="top_inst",
+        )
+
+    def _request_tushare_block_trade(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="block_trade",
+            params=params,
+            fields=_TUSHARE_BLOCK_TRADE_FIELDS,
+            label="block_trade",
         )
 
     def _request_tushare_api(
@@ -727,6 +745,18 @@ class HistoricalDataService:
         except RuntimeError as exc:
             dragon_tiger_inst_error = str(exc)
 
+        block_trade_error = None
+        block_trade_count = 0
+        try:
+            block_trade_count = self._store_block_trade_rows(
+                db,
+                normalized_date,
+                self.fetch_block_trade_rows(normalized_date),
+                normalized_symbols,
+            )
+        except RuntimeError as exc:
+            block_trade_error = str(exc)
+
         stored_count = 0
         skipped_count = 0
         for row in rows:
@@ -807,6 +837,8 @@ class HistoricalDataService:
             "dragon_tiger_error": dragon_tiger_error,
             "dragon_tiger_inst_count": dragon_tiger_inst_count,
             "dragon_tiger_inst_error": dragon_tiger_inst_error,
+            "block_trade_count": block_trade_count,
+            "block_trade_error": block_trade_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -1229,6 +1261,58 @@ class HistoricalDataService:
             stored_count += 1
         return stored_count
 
+    def _store_block_trade_rows(
+        self,
+        db: Session,
+        trade_date: str,
+        rows: list[dict[str, Any]],
+        symbols: list[str] | None,
+    ) -> int:
+        symbol_filter = set(symbols or [])
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            if symbol_filter and symbol not in symbol_filter:
+                continue
+            row_trade_date = _normalize_trade_date(str(row.get("trade_date") or trade_date))
+            if row_trade_date != trade_date:
+                continue
+            price = _to_float(row.get("price"))
+            vol = _to_float(row.get("vol"))
+            amount = _to_float(row.get("amount"))
+            buyer = str(row.get("buyer") or "").strip()
+            seller = str(row.get("seller") or "").strip()
+            existing = db.scalar(
+                select(BlockTrade).where(
+                    BlockTrade.symbol == symbol,
+                    BlockTrade.trade_date == row_trade_date,
+                    BlockTrade.price == price,
+                    BlockTrade.vol == vol,
+                    BlockTrade.amount == amount,
+                    BlockTrade.buyer == buyer,
+                    BlockTrade.seller == seller,
+                )
+            )
+            item = existing or BlockTrade(
+                symbol=symbol,
+                trade_date=row_trade_date,
+                price=price,
+                vol=vol,
+                amount=amount,
+                buyer=buyer,
+                seller=seller,
+            )
+            item.price = price
+            item.vol = vol
+            item.amount = amount
+            item.buyer = buyer
+            item.seller = seller
+            item.source = "tushare_block_trade"
+            item.raw_payload = dict(row)
+            db.add(item)
+            stored_count += 1
+        return stored_count
+
     def refresh_daily_range(
         self,
         db: Session,
@@ -1280,6 +1364,8 @@ class HistoricalDataService:
                     "dragon_tiger_error": None,
                     "dragon_tiger_inst_count": 0,
                     "dragon_tiger_inst_error": None,
+                    "block_trade_count": 0,
+                    "block_trade_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -1338,6 +1424,8 @@ class HistoricalDataService:
                             "dragon_tiger_error": None,
                             "dragon_tiger_inst_count": 0,
                             "dragon_tiger_inst_error": None,
+                            "block_trade_count": 0,
+                            "block_trade_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"
@@ -1394,6 +1482,7 @@ class HistoricalDataService:
             "tushare_margin_detail": 0,
             "tushare_top_list": 0,
             "tushare_top_inst": 0,
+            "tushare_block_trade": 0,
         }
         errors: dict[str, list[str]] = defaultdict(list)
         for item in daily_results:
@@ -1408,6 +1497,7 @@ class HistoricalDataService:
             counts["tushare_margin_detail"] += int(item.get("margin_detail_count") or 0)
             counts["tushare_top_list"] += int(item.get("dragon_tiger_count") or 0)
             counts["tushare_top_inst"] += int(item.get("dragon_tiger_inst_count") or 0)
+            counts["tushare_block_trade"] += int(item.get("block_trade_count") or 0)
             for key, source in (
                 ("error", "tushare_daily"),
                 ("daily_basic_error", "tushare_daily_basic"),
@@ -1419,6 +1509,7 @@ class HistoricalDataService:
                 ("margin_detail_error", "tushare_margin_detail"),
                 ("dragon_tiger_error", "tushare_top_list"),
                 ("dragon_tiger_inst_error", "tushare_top_inst"),
+                ("block_trade_error", "tushare_block_trade"),
             ):
                 message = item.get(key)
                 if message:

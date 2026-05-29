@@ -1031,6 +1031,86 @@ def test_refresh_daily_bars_stores_tushare_dragon_tiger_rows(monkeypatch, tmp_pa
     _reset_state()
 
 
+def test_refresh_daily_bars_stores_tushare_block_trades(monkeypatch, tmp_path) -> None:
+    from app.db.models import BlockTrade
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date, symbols=None):
+        return [
+            {"ts_code": "600519.SH", "trade_date": trade_date, "close": 100, "amount": 9000},
+            {"ts_code": "000001.SZ", "trade_date": trade_date, "close": 10, "amount": 1000},
+        ]
+
+    def fake_block_trade_rows(trade_date):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": trade_date,
+                "price": 98.5,
+                "vol": 120.0,
+                "amount": 11820.0,
+                "buyer": "机构专用",
+                "seller": "中信证券总部",
+            },
+            {
+                "ts_code": "600519.SH",
+                "trade_date": trade_date,
+                "price": 101.5,
+                "vol": 80.0,
+                "amount": 8120.0,
+                "buyer": "华泰证券上海营业部",
+                "seller": "机构专用",
+            },
+            {
+                "ts_code": "300750.SZ",
+                "trade_date": trade_date,
+                "price": 200.0,
+                "vol": 20.0,
+                "amount": 4000.0,
+                "buyer": "机构专用",
+                "seller": "机构专用",
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_index_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_limit_list_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_margin_detail_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_top_list_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_top_inst_rows", lambda *args: [])
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_block_trade_rows",
+        fake_block_trade_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_daily_bars(
+                db,
+                trade_date="20260528",
+                symbols=["600519.SH", "000001.SZ"],
+            )
+            rows = db.query(BlockTrade).order_by(BlockTrade.amount.desc()).all()
+
+    assert result["block_trade_count"] == 2
+    assert result["block_trade_error"] is None
+    assert [(item.symbol, item.price, item.vol) for item in rows] == [
+        ("600519.SH", 98.5, 120.0),
+        ("600519.SH", 101.5, 80.0),
+    ]
+    assert rows[0].buyer == "机构专用"
+    assert rows[0].seller == "中信证券总部"
+    assert rows[0].source == "tushare_block_trade"
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 
@@ -1096,6 +1176,7 @@ def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_p
         "tushare_margin_detail": 0,
         "tushare_top_list": 0,
         "tushare_top_inst": 0,
+        "tushare_block_trade": 0,
     }
     assert payload["data_source_errors"] == {
         "tushare_moneyflow_ths": ["20260528: moneyflow partial"],

@@ -302,6 +302,16 @@ export interface QuantCandidate {
       institution_net_buy?: number
       institution_count?: number
     } | null
+    block_trade?: {
+      trade_date?: string | null
+      trade_count?: number
+      total_amount?: number
+      total_vol?: number
+      avg_price?: number
+      price_vs_close_pct?: number
+      top_buyer?: string | null
+      top_seller?: string | null
+    } | null
   }
   rationale: string
 }

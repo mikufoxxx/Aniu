@@ -12,6 +12,7 @@ from app.db import database as database_module
 from app.db.database import init_db, session_scope
 from app.db.models import (
     AppSettings,
+    BlockTrade,
     DailyBar,
     DragonTigerInstitution,
     DragonTigerList,
@@ -238,6 +239,24 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     net_buy=50_000_000,
                     reason="涨幅偏离值达7%的证券",
                 ),
+                BlockTrade(
+                    symbol="600519.SH",
+                    trade_date="20260528",
+                    price=1320.0,
+                    vol=140.0,
+                    amount=184_800.0,
+                    buyer="机构专用",
+                    seller="中信证券总部",
+                ),
+                BlockTrade(
+                    symbol="600519.SH",
+                    trade_date="20260528",
+                    price=1350.0,
+                    vol=60.0,
+                    amount=81_000.0,
+                    buyer="华泰证券上海营业部",
+                    seller="机构专用",
+                ),
             ]
         )
         db.flush()
@@ -253,7 +272,7 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
         "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, "
         "tushare_sector_member, tushare_stock_basic, tushare_fina_indicator, "
         "tushare_limit_list_d, tushare_margin_detail, tushare_top_list, "
-        "tushare_top_inst, tushare_index, tushare_sector"
+        "tushare_top_inst, tushare_block_trade, tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -272,6 +291,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "龙虎榜净买 9000.00万" in context
     assert "机构净买 5000.00万" in context
     assert "上榜 涨幅偏离值达7%的证券" in context
+    assert "大宗成交 265800.00万" in context
+    assert "2笔" in context
     assert "PE 23.50" in context
     assert "PB 7.80" in context
     assert "行业 白酒" in context

@@ -392,6 +392,16 @@ class ArenaOrderRead(BaseModel):
     reason: str
 
 
+class ArenaPositionRead(BaseModel):
+    symbol: str
+    name: str
+    quantity: int
+    avg_cost: float
+    last_price: float
+    market_value: float
+    unrealized_pnl: float
+
+
 class ArenaLeaderboardItemRead(BaseModel):
     agent_id: str
     agent_name: str
@@ -401,6 +411,11 @@ class ArenaLeaderboardItemRead(BaseModel):
     total_assets: float
     return_ratio: float
     order_count: int
+    positions: list[ArenaPositionRead] = Field(default_factory=list)
+
+
+class ArenaLeaderboardResponse(BaseModel):
+    items: list[ArenaLeaderboardItemRead] = Field(default_factory=list)
 
 
 class ArenaRunResponse(BaseModel):

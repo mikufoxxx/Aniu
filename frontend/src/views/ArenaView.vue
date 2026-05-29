@@ -84,6 +84,13 @@
         </div>
 
         <div class="arena-history-grid">
+          <label class="arena-field arena-checkbox-field">
+            <span>刷新范围</span>
+            <label class="arena-inline-check">
+              <input v-model="refreshFullMarket" type="checkbox" />
+              <b>全市场最大化刷新</b>
+            </label>
+          </label>
           <label class="arena-field">
             <span>交易日</span>
             <input v-model="tradeDate" type="text" placeholder="20260528" />
@@ -166,14 +173,18 @@
             <p class="section-kicker">Leaderboard</p>
           </div>
         </div>
-        <div class="arena-rank-list" v-if="arenaResult?.leaderboard.length">
-          <div v-for="rank in arenaResult.leaderboard" :key="rank.agent_id" class="arena-rank-card">
+        <div class="arena-rank-list" v-if="displayLeaderboard.length">
+          <div v-for="rank in displayLeaderboard" :key="rank.agent_id" class="arena-rank-card">
             <div>
               <strong>{{ rank.agent_name }}</strong>
               <span>{{ styleText(rank.style) }}</span>
             </div>
             <b>{{ formatAmount(rank.total_assets) }}</b>
-            <p>现金 {{ formatAmount(rank.cash) }} · 持仓 {{ formatAmount(rank.position_value) }}</p>
+            <p>
+              现金 {{ formatAmount(rank.cash) }} ·
+              持仓 {{ formatAmount(rank.position_value) }} ·
+              订单 {{ rank.order_count }}
+            </p>
           </div>
         </div>
         <div v-else class="empty-state">
@@ -213,9 +224,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { ArenaAgentConfig, ArenaRunPayload, BacktestPayload, DailyRefreshPayload, MarketSourceHealthPayload, QuantCandidate } from '@/types'
+import type { ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRefreshPayload, MarketSourceHealthPayload, QuantCandidate } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const agents: ArenaAgentConfig[] = [
@@ -232,11 +243,18 @@ const errorMessage = ref('')
 const sourceHealth = ref<MarketSourceHealthPayload | null>(null)
 const candidates = ref<QuantCandidate[]>([])
 const arenaResult = ref<ArenaRunPayload | null>(null)
+const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
 const dailyRefreshResult = ref<DailyRefreshPayload | null>(null)
 const backtestResult = ref<BacktestPayload | null>(null)
 const tradeDate = ref('20260528')
 const backtestStartDate = ref('20260526')
 const backtestEndDate = ref('20260528')
+const refreshFullMarket = ref(true)
+
+const displayLeaderboard = computed(() => {
+  if (arenaLeaderboard.value?.items.length) return arenaLeaderboard.value.items
+  return arenaResult.value?.leaderboard ?? []
+})
 
 function parseSymbols(): string[] {
   return symbolsText.value
@@ -247,6 +265,10 @@ function parseSymbols(): string[] {
 
 async function loadSources(): Promise<void> {
   sourceHealth.value = await api.getMarketSourceHealth()
+}
+
+async function loadLeaderboard(): Promise<void> {
+  arenaLeaderboard.value = await api.getArenaLeaderboard()
 }
 
 async function loadCandidates(): Promise<void> {
@@ -274,6 +296,7 @@ async function runArena(): Promise<void> {
     })
     arenaResult.value = payload
     candidates.value = payload.candidates
+    await loadLeaderboard()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '竞技场运行失败。'
   } finally {
@@ -287,7 +310,7 @@ async function refreshDaily(): Promise<void> {
   try {
     dailyRefreshResult.value = await api.refreshDailyBars({
       trade_date: tradeDate.value,
-      symbols: parseSymbols(),
+      symbols: refreshFullMarket.value ? undefined : parseSymbols(),
     })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '日线刷新失败。'
@@ -360,7 +383,7 @@ function formatPercent(value: number | null | undefined): string {
 
 onMounted(async () => {
   try {
-    await Promise.all([loadSources(), loadCandidates()])
+    await Promise.all([loadSources(), loadCandidates(), loadLeaderboard()])
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '页面初始化失败。'
   }
@@ -385,8 +408,33 @@ onMounted(async () => {
 
 .arena-history-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.arena-checkbox-field {
+  align-content: start;
+}
+
+.arena-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 41px;
+  padding: 0 10px;
+  border: 1px solid rgba(145, 170, 214, 0.16);
+  border-radius: 8px;
+  background: rgba(7, 14, 27, 0.82);
+  color: #eef4ff;
+}
+
+.arena-inline-check input {
+  width: 16px;
+  height: 16px;
+}
+
+.arena-inline-check b {
+  font-size: 13px;
 }
 
 .arena-history-result {

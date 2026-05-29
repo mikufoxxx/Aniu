@@ -220,6 +220,54 @@ class ArenaRun(Base):
     )
 
 
+class ArenaAccount(Base):
+    __tablename__ = "arena_accounts"
+    __table_args__ = (
+        UniqueConstraint("agent_id", name="uq_arena_accounts_agent_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_name: Mapped[str] = mapped_column(String(120))
+    style: Mapped[str] = mapped_column(String(32), default="balanced")
+    initial_cash: Mapped[float] = mapped_column(Float, default=200000.0)
+    cash: Mapped[float] = mapped_column(Float, default=200000.0)
+    realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    order_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    positions: Mapped[list["ArenaPosition"]] = relationship(
+        back_populates="account",
+        cascade="all, delete-orphan",
+        order_by="ArenaPosition.symbol",
+    )
+
+
+class ArenaPosition(Base):
+    __tablename__ = "arena_positions"
+    __table_args__ = (
+        UniqueConstraint("account_id", "symbol", name="uq_arena_positions_account_symbol"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("arena_accounts.id", ondelete="CASCADE"), index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    name: Mapped[str] = mapped_column(String(64), default="")
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+    avg_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    last_price: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    account: Mapped[ArenaAccount] = relationship(back_populates="positions")
+
+
 class ArenaOrder(Base):
     __tablename__ = "arena_orders"
 

@@ -8,6 +8,7 @@ from app.db.database import get_db
 from app.schemas.aniu import (
     ArenaRunRequest,
     ArenaRunResponse,
+    ArenaLeaderboardResponse,
     BacktestRequest,
     BacktestResponse,
     DailyRefreshRequest,
@@ -102,3 +103,11 @@ def run_arena_once(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/arena/leaderboard", response_model=ArenaLeaderboardResponse)
+def get_arena_leaderboard(
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaLeaderboardResponse:
+    return arena_service.leaderboard(db)

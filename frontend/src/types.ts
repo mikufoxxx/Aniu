@@ -277,6 +277,19 @@ export interface ArenaLeaderboardItem {
   total_assets: number
   return_ratio: number
   order_count: number
+  positions?: Array<{
+    symbol: string
+    name: string
+    quantity: number
+    avg_cost: number
+    last_price: number
+    market_value: number
+    unrealized_pnl: number
+  }>
+}
+
+export interface ArenaLeaderboardPayload {
+  items: ArenaLeaderboardItem[]
 }
 
 export interface ArenaRunPayload {

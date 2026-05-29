@@ -1,4 +1,4 @@
-import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -397,6 +397,9 @@ export const api = {
       body: JSON.stringify(payload),
       timeoutMs: 60000,
     })
+  },
+  getArenaLeaderboard() {
+    return request<ArenaLeaderboardPayload>(`${API_PREFIX}/arena/leaderboard`)
   },
   chat(payload: ChatRequest) {
     return request<ChatResponse>(`${API_PREFIX}/chat`, {

@@ -174,3 +174,53 @@ def test_arena_run_keeps_each_ai_account_independent(monkeypatch, tmp_path) -> N
     assert payload["orders"][0]["remaining_cash"] != payload["orders"][1]["remaining_cash"]
 
     _reset_state()
+
+
+def test_arena_accounts_persist_cash_and_positions_across_runs(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+
+    call_count = {"value": 0}
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        call_count["value"] += 1
+        price = 10.0 if call_count["value"] == 1 else 12.0
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": price,
+                "change_pct": 3.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        payload = {
+            "symbols": ["000001.SZ"],
+            "initial_cash": 200000,
+            "agents": [
+                {"id": "deepseek", "name": "DeepSeek", "style": "momentum"},
+            ],
+        }
+        first = client.post("/api/aniu/arena/run", headers=headers, json=payload).json()
+        second = client.post("/api/aniu/arena/run", headers=headers, json=payload).json()
+        leaderboard_response = client.get("/api/aniu/arena/leaderboard", headers=headers)
+
+    assert first["leaderboard"][0]["cash"] == 110000
+    assert second["leaderboard"][0]["cash"] < first["leaderboard"][0]["cash"]
+    assert second["leaderboard"][0]["position_value"] > first["leaderboard"][0]["position_value"]
+    assert leaderboard_response.status_code == 200
+    leaderboard = leaderboard_response.json()
+    assert leaderboard["items"][0]["agent_id"] == "deepseek"
+    assert leaderboard["items"][0]["order_count"] == 2
+    assert leaderboard["items"][0]["positions"][0]["symbol"] == "000001.SZ"
+    assert leaderboard["items"][0]["positions"][0]["quantity"] > 9000
+
+    _reset_state()

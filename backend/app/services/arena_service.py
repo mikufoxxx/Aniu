@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import ArenaOrder, ArenaRun
+from app.db.models import ArenaAccount, ArenaOrder, ArenaPosition, ArenaRun
 from app.services.quant_service import quant_service
 
 
@@ -43,13 +44,20 @@ class ArenaService:
         leaderboard: list[dict[str, Any]] = []
         orders: list[dict[str, Any]] = []
         for index, agent in enumerate(active_agents):
+            account = self._get_or_create_account(
+                db,
+                agent=agent,
+                initial_cash=initial_cash,
+            )
+            self._mark_positions(account, candidates)
             decision = self._decide_for_agent(
                 agent=agent,
                 candidates=candidates,
                 agent_index=index,
-                initial_cash=initial_cash,
+                available_cash=account.cash,
             )
             if decision is not None:
+                self._apply_buy(account, decision)
                 order = ArenaOrder(
                     arena_run_id=arena_run.id,
                     agent_id=decision["agent_id"],
@@ -71,25 +79,7 @@ class ArenaService:
             else:
                 order_payload = None
 
-            total_assets = initial_cash
-            cash = initial_cash
-            position_value = 0.0
-            if order_payload is not None:
-                cash = float(order_payload["remaining_cash"])
-                position_value = float(order_payload["amount"])
-                total_assets = cash + position_value
-            leaderboard.append(
-                {
-                    "agent_id": str(agent.get("id") or f"agent_{index + 1}"),
-                    "agent_name": str(agent.get("name") or f"AI {index + 1}"),
-                    "style": str(agent.get("style") or "balanced"),
-                    "cash": round(cash, 2),
-                    "position_value": round(position_value, 2),
-                    "total_assets": round(total_assets, 2),
-                    "return_ratio": 0.0,
-                    "order_count": 1 if order_payload is not None else 0,
-                }
-            )
+            leaderboard.append(self._leaderboard_item(account))
 
         arena_run.leaderboard_payload = leaderboard
         db.add(arena_run)
@@ -103,13 +93,23 @@ class ArenaService:
             "data_sources": candidate_payload["data_sources"],
         }
 
+    def leaderboard(self, db: Session) -> dict[str, Any]:
+        accounts = db.scalars(
+            select(ArenaAccount)
+            .options(selectinload(ArenaAccount.positions))
+            .order_by(ArenaAccount.id)
+        ).all()
+        items = [self._leaderboard_item(account, include_positions=True) for account in accounts]
+        items.sort(key=lambda item: item["total_assets"], reverse=True)
+        return {"items": items}
+
     def _decide_for_agent(
         self,
         *,
         agent: dict[str, str],
         candidates: list[dict[str, Any]],
         agent_index: int,
-        initial_cash: float,
+        available_cash: float,
     ) -> dict[str, Any] | None:
         if not candidates:
             return None
@@ -121,7 +121,7 @@ class ArenaService:
         else:
             allocation_ratio = 0.3
 
-        budget = initial_cash * allocation_ratio
+        budget = available_cash * allocation_ratio
         preferred_index = 0 if style == "momentum" else min(agent_index, len(candidates) - 1)
         candidate = self._select_affordable_candidate(
             candidates=candidates,
@@ -146,9 +146,119 @@ class ArenaService:
             "quantity": quantity,
             "price": price,
             "amount": amount,
-            "remaining_cash": round(initial_cash - amount, 2),
+            "remaining_cash": round(available_cash - amount, 2),
             "reason": f"{style} 根据候选评分 {candidate['score']} 执行模拟买入。",
         }
+
+    def _get_or_create_account(
+        self,
+        db: Session,
+        *,
+        agent: dict[str, str],
+        initial_cash: float,
+    ) -> ArenaAccount:
+        agent_id = str(agent.get("id") or "agent")
+        account = db.scalar(
+            select(ArenaAccount)
+            .options(selectinload(ArenaAccount.positions))
+            .where(ArenaAccount.agent_id == agent_id)
+        )
+        if account is not None:
+            account.agent_name = str(agent.get("name") or account.agent_name)
+            account.style = str(agent.get("style") or account.style)
+            return account
+        account = ArenaAccount(
+            agent_id=agent_id,
+            agent_name=str(agent.get("name") or agent_id),
+            style=str(agent.get("style") or "balanced"),
+            initial_cash=initial_cash,
+            cash=initial_cash,
+        )
+        db.add(account)
+        db.flush()
+        return account
+
+    def _mark_positions(
+        self,
+        account: ArenaAccount,
+        candidates: list[dict[str, Any]],
+    ) -> None:
+        prices = {candidate["symbol"]: float(candidate.get("price") or 0) for candidate in candidates}
+        for position in account.positions:
+            if position.symbol in prices and prices[position.symbol] > 0:
+                position.last_price = prices[position.symbol]
+
+    def _apply_buy(self, account: ArenaAccount, decision: dict[str, Any]) -> None:
+        symbol = str(decision["symbol"])
+        price = float(decision["price"])
+        quantity = int(decision["quantity"])
+        amount = float(decision["amount"])
+        current = next(
+            (position for position in account.positions if position.symbol == symbol),
+            None,
+        )
+        if current is None:
+            current = ArenaPosition(
+                account_id=account.id,
+                symbol=symbol,
+                name=str(decision.get("name") or symbol),
+                quantity=0,
+                avg_cost=0.0,
+                last_price=price,
+            )
+            account.positions.append(current)
+
+        previous_cost = current.avg_cost * current.quantity
+        new_quantity = current.quantity + quantity
+        current.quantity = new_quantity
+        current.avg_cost = round((previous_cost + amount) / new_quantity, 6)
+        current.last_price = price
+        current.name = str(decision.get("name") or current.name)
+        account.cash = round(account.cash - amount, 2)
+        account.order_count += 1
+
+    def _leaderboard_item(
+        self,
+        account: ArenaAccount,
+        *,
+        include_positions: bool = False,
+    ) -> dict[str, Any]:
+        position_payloads = [
+            {
+                "symbol": position.symbol,
+                "name": position.name,
+                "quantity": position.quantity,
+                "avg_cost": round(position.avg_cost, 4),
+                "last_price": round(position.last_price, 4),
+                "market_value": round(position.quantity * position.last_price, 2),
+                "unrealized_pnl": round(
+                    position.quantity * (position.last_price - position.avg_cost),
+                    2,
+                ),
+            }
+            for position in account.positions
+            if position.quantity > 0
+        ]
+        position_value = sum(item["market_value"] for item in position_payloads)
+        total_assets = account.cash + position_value
+        payload = {
+            "agent_id": account.agent_id,
+            "agent_name": account.agent_name,
+            "style": account.style,
+            "cash": round(account.cash, 2),
+            "position_value": round(position_value, 2),
+            "total_assets": round(total_assets, 2),
+            "return_ratio": round(
+                (total_assets - account.initial_cash) / account.initial_cash,
+                6,
+            )
+            if account.initial_cash
+            else 0.0,
+            "order_count": account.order_count,
+        }
+        if include_positions:
+            payload["positions"] = position_payloads
+        return payload
 
     def _select_affordable_candidate(
         self,

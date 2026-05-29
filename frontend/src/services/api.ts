@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenancePayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -430,6 +430,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 5 * 60 * 1000,
+    })
+  },
+  startMarketDataMaintenanceJob(payload: { end_date?: string; lookback_days?: number; symbols?: string[]; dataset_limit?: number; report_type?: 'morning' | 'closing' }) {
+    return request<MarketDataMaintenanceJobPayload>(`${API_PREFIX}/market/maintenance/jobs`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  getMarketDataMaintenanceJob(jobId: string) {
+    return request<MarketDataMaintenanceJobPayload>(`${API_PREFIX}/market/maintenance/jobs/${jobId}`, {
+      timeoutMs: 60000,
     })
   },
   runBacktest(payload: { symbols: string[]; start_date: string; end_date: string; initial_cash?: number }) {

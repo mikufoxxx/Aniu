@@ -1,6 +1,8 @@
 from datetime import datetime
 from pathlib import Path
 import sys
+import threading
+import time
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
@@ -17,6 +19,7 @@ from app.services.trading_calendar_service import trading_calendar_service
 
 def create_test_client(monkeypatch, tmp_path) -> TestClient:
     from app.services.aniu_service import aniu_service
+    from app.services.market_data_maintenance_service import market_data_maintenance_service
 
     monkeypatch.setenv("APP_LOGIN_PASSWORD", "release-pass")
     monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "maintenance.db"))
@@ -29,6 +32,7 @@ def create_test_client(monkeypatch, tmp_path) -> TestClient:
     rate_limit_module._limiter.reset()
     aniu_service._account_overview_cache = None
     aniu_service._account_overview_cache_expires_at = None
+    market_data_maintenance_service.reset_runtime_state()
     app = create_app()
     return TestClient(app)
 
@@ -144,6 +148,122 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
     assert captured["range"] == ("20260526", "20260528", ["000001.SZ", "600519.SH"])
     assert captured["dataset"] == (["000001.SZ", "600519.SH"], 20, True, 3)
     assert captured["report"] == ("closing", ["000001.SZ", "600519.SH"], 20, 3)
+
+    _reset_state()
+
+
+def test_market_data_maintenance_job_starts_and_can_be_polled(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_maintenance_service import market_data_maintenance_service
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_run(db, **kwargs):
+        started.set()
+        release.wait(timeout=2)
+        return {
+            "status": "completed",
+            "refresh": {
+                "start_date": "20260526",
+                "end_date": "20260528",
+                "source": "tushare",
+                "processed_days": 3,
+                "stored_count": 300,
+                "skipped_count": 0,
+                "unique_symbols": 100,
+                "requested_symbols": [],
+                "daily_results": [],
+            },
+            "dataset": {
+                "universe_size": 500,
+                "item_count": 200,
+                "lookback_days": 120,
+                "data_sources": ["tushare_daily"],
+                "coverage": {"daily_history_symbols": 200, "realtime_symbols": 200},
+                "items": [],
+            },
+            "report": None,
+        }
+
+    monkeypatch.setattr(market_data_maintenance_service, "run_now", fake_run)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        created = client.post(
+            "/api/aniu/market/maintenance/jobs",
+            headers=headers,
+            json={"end_date": "20260528", "lookback_days": 3, "dataset_limit": 20},
+        )
+
+        assert created.status_code == 200
+        payload = created.json()
+        assert payload["status"] in {"queued", "running"}
+        assert payload["job_id"]
+        assert started.wait(timeout=2)
+
+        running = client.get(
+            f"/api/aniu/market/maintenance/jobs/{payload['job_id']}",
+            headers=headers,
+        )
+        assert running.status_code == 200
+        assert running.json()["status"] == "running"
+
+        release.set()
+        deadline = time.time() + 2
+        completed_payload = None
+        while time.time() < deadline:
+            completed = client.get(
+                f"/api/aniu/market/maintenance/jobs/{payload['job_id']}",
+                headers=headers,
+            )
+            completed_payload = completed.json()
+            if completed_payload["status"] == "completed":
+                break
+            time.sleep(0.05)
+
+    assert completed_payload is not None
+    assert completed_payload["status"] == "completed"
+    assert completed_payload["result"]["refresh"]["stored_count"] == 300
+
+    _reset_state()
+
+
+def test_market_data_maintenance_job_reuses_running_job(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_maintenance_service import market_data_maintenance_service
+
+    release = threading.Event()
+    calls = 0
+
+    def fake_run(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        release.wait(timeout=2)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(market_data_maintenance_service, "run_now", fake_run)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        first = client.post(
+            "/api/aniu/market/maintenance/jobs",
+            headers=headers,
+            json={"end_date": "20260528"},
+        )
+        second = client.post(
+            "/api/aniu/market/maintenance/jobs",
+            headers=headers,
+            json={"end_date": "20260528"},
+        )
+        release.set()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["job_id"] == first.json()["job_id"]
+    assert second.json()["status"] in {"queued", "running"}
+    assert calls == 1
 
     _reset_state()
 

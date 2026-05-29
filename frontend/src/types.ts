@@ -239,6 +239,15 @@ export interface MarketDataMaintenancePayload {
   report?: MarketReport
 }
 
+export interface MarketDataMaintenanceJobPayload {
+  job_id: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  submitted_at: string
+  completed_at?: string | null
+  result?: MarketDataMaintenancePayload | null
+  error?: string | null
+}
+
 export interface AIMarketContextPayload {
   context: string
   context_length: number

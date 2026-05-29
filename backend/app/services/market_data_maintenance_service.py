@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import threading
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -17,9 +19,13 @@ from app.services.quant_service import quant_service
 class MarketDataMaintenanceService:
     def __init__(self) -> None:
         self._completed_slots: set[str] = set()
+        self._job_lock = threading.Lock()
+        self._jobs: dict[str, dict[str, Any]] = {}
 
     def reset_runtime_state(self) -> None:
         self._completed_slots.clear()
+        with self._job_lock:
+            self._jobs.clear()
 
     def process_due_jobs(self, *, now: datetime | None = None) -> dict[str, Any]:
         settings = get_settings()
@@ -102,6 +108,94 @@ class MarketDataMaintenanceService:
                 lookback_days=normalized_lookback,
             )
         return result
+
+    def start_job(
+        self,
+        *,
+        end_date: str | None = None,
+        lookback_days: int | None = None,
+        symbols: list[str] | None = None,
+        dataset_limit: int | None = None,
+        report_type: str | None = None,
+    ) -> dict[str, Any]:
+        with self._job_lock:
+            running = self._running_job_locked()
+            if running is not None:
+                return dict(running)
+
+            job_id = uuid4().hex
+            job = {
+                "job_id": job_id,
+                "status": "queued",
+                "submitted_at": datetime.now(ZoneInfo("Asia/Shanghai")),
+                "completed_at": None,
+                "result": None,
+                "error": None,
+            }
+            self._jobs[job_id] = job
+
+        thread = threading.Thread(
+            target=self._run_job,
+            kwargs={
+                "job_id": job_id,
+                "end_date": end_date,
+                "lookback_days": lookback_days,
+                "symbols": list(symbols) if symbols else None,
+                "dataset_limit": dataset_limit,
+                "report_type": report_type,
+            },
+            daemon=True,
+        )
+        thread.start()
+        return self.get_job(job_id)
+
+    def get_job(self, job_id: str) -> dict[str, Any]:
+        with self._job_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise LookupError(f"维护任务不存在: {job_id}")
+            return dict(job)
+
+    def _running_job_locked(self) -> dict[str, Any] | None:
+        for job in self._jobs.values():
+            if job.get("status") in {"queued", "running"}:
+                return job
+        return None
+
+    def _run_job(
+        self,
+        *,
+        job_id: str,
+        end_date: str | None,
+        lookback_days: int | None,
+        symbols: list[str] | None,
+        dataset_limit: int | None,
+        report_type: str | None,
+    ) -> None:
+        with self._job_lock:
+            if job_id in self._jobs:
+                self._jobs[job_id]["status"] = "running"
+        try:
+            with session_scope() as db:
+                result = self.run_now(
+                    db,
+                    end_date=end_date,
+                    lookback_days=lookback_days,
+                    symbols=symbols,
+                    dataset_limit=dataset_limit,
+                    report_type=report_type,
+                )
+            with self._job_lock:
+                job = self._jobs[job_id]
+                job["status"] = "completed"
+                job["completed_at"] = datetime.now(ZoneInfo("Asia/Shanghai"))
+                job["result"] = result
+        except Exception as exc:
+            with self._job_lock:
+                job = self._jobs[job_id]
+                job["status"] = "failed"
+                job["completed_at"] = datetime.now(ZoneInfo("Asia/Shanghai"))
+                job["error"] = str(exc)
 
     def _normalize_end_date(self, end_date: str | None) -> str:
         if not end_date:

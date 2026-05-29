@@ -160,6 +160,20 @@
           </span>
         </div>
 
+        <div v-if="maintenanceJob" class="arena-history-result">
+          <strong>维护任务</strong>
+          <span>
+            {{ maintenanceJob.status }} ·
+            {{ formatDateTime(maintenanceJob.submitted_at) }}
+            <template v-if="maintenanceJob.completed_at">
+              - {{ formatDateTime(maintenanceJob.completed_at) }}
+            </template>
+            <template v-if="maintenanceJob.error">
+              · {{ maintenanceJob.error }}
+            </template>
+          </span>
+        </div>
+
         <div v-if="backtestResult" class="arena-history-result">
           <strong>回测结果</strong>
           <span>
@@ -377,9 +391,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -403,6 +417,7 @@ const aiMarketContext = ref<AIMarketContextPayload | null>(null)
 const arenaResult = ref<ArenaRunPayload | null>(null)
 const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
 const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
+const maintenanceJob = ref<MarketDataMaintenanceJobPayload | null>(null)
 const backtestResult = ref<BacktestPayload | null>(null)
 const marketReports = ref<MarketReport[]>([])
 const marketReportPerformance = ref<Record<number, MarketReportPerformancePayload>>({})
@@ -412,6 +427,7 @@ const maintenanceLookbackDays = ref(120)
 const backtestStartDate = ref('20260526')
 const backtestEndDate = ref('20260528')
 const refreshFullMarket = ref(true)
+let maintenancePollTimer: number | undefined
 
 const displayLeaderboard = computed(() => {
   if (arenaLeaderboard.value?.items.length) return arenaLeaderboard.value.items
@@ -588,28 +604,68 @@ async function runMaintenance(): Promise<void> {
   historyLoading.value = true
   errorMessage.value = ''
   try {
-    const payload = await api.runMarketDataMaintenance({
+    const job = await api.startMarketDataMaintenanceJob({
       end_date: refreshEndDate.value,
       lookback_days: maintenanceLookbackDays.value,
       symbols: selectedSymbols(),
       dataset_limit: 500,
     })
-    dailyRefreshResult.value = payload.refresh
-    quantDataset.value = payload.dataset
-    candidates.value = payload.dataset.items
-    if (payload.report) {
-      marketReports.value = [
-        payload.report,
-        ...marketReports.value.filter((item) => item.id !== payload.report?.id),
-      ].slice(0, 6)
-      await loadReportPerformance(payload.report.id)
-    }
+    maintenanceJob.value = job
+    await pollMaintenanceJob(job.job_id)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据维护失败。'
-  } finally {
     historyLoading.value = false
   }
 }
+
+async function pollMaintenanceJob(jobId: string): Promise<void> {
+  clearMaintenancePoll()
+  maintenancePollTimer = window.setTimeout(async () => {
+    try {
+      const job = await api.getMarketDataMaintenanceJob(jobId)
+      maintenanceJob.value = job
+      if (job.status === 'queued' || job.status === 'running') {
+        await pollMaintenanceJob(jobId)
+        return
+      }
+      historyLoading.value = false
+      if (job.status === 'failed') {
+        errorMessage.value = job.error || '数据维护失败。'
+        return
+      }
+      if (job.result) {
+        await applyMaintenanceResult(job.result)
+      }
+    } catch (error) {
+      historyLoading.value = false
+      errorMessage.value = error instanceof Error ? error.message : '数据维护状态查询失败。'
+    }
+  }, 3000)
+}
+
+async function applyMaintenanceResult(payload: MarketDataMaintenancePayload): Promise<void> {
+  dailyRefreshResult.value = payload.refresh
+  quantDataset.value = payload.dataset
+  candidates.value = payload.dataset.items
+  if (payload.report) {
+    marketReports.value = [
+      payload.report,
+      ...marketReports.value.filter((item) => item.id !== payload.report?.id),
+    ].slice(0, 6)
+    await loadReportPerformance(payload.report.id)
+  }
+}
+
+function clearMaintenancePoll(): void {
+  if (maintenancePollTimer !== undefined) {
+    window.clearTimeout(maintenancePollTimer)
+    maintenancePollTimer = undefined
+  }
+}
+
+onUnmounted(() => {
+  clearMaintenancePoll()
+})
 
 async function runBacktest(): Promise<void> {
   historyLoading.value = true

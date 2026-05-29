@@ -457,6 +457,15 @@ class MarketDataMaintenanceRunResponse(BaseModel):
     report: MarketReportRead | None = None
 
 
+class MarketDataMaintenanceJobResponse(BaseModel):
+    job_id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    submitted_at: datetime
+    completed_at: datetime | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
 class BacktestRequest(BaseModel):
     symbols: list[str] = Field(min_length=1, max_length=200)
     start_date: str = Field(min_length=8, max_length=10)

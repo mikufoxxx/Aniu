@@ -19,6 +19,7 @@ from app.schemas.aniu import (
     DailyRangeRefreshResponse,
     DailyRefreshRequest,
     DailyRefreshResponse,
+    MarketDataMaintenanceJobResponse,
     MarketDataMaintenanceRunRequest,
     MarketDataMaintenanceRunResponse,
     MarketReportListResponse,
@@ -211,6 +212,34 @@ def run_market_data_maintenance(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/market/maintenance/jobs", response_model=MarketDataMaintenanceJobResponse)
+def start_market_data_maintenance_job(
+    payload: MarketDataMaintenanceRunRequest,
+    _user: str = Depends(get_current_user),
+) -> MarketDataMaintenanceJobResponse:
+    try:
+        return market_data_maintenance_service.start_job(
+            end_date=payload.end_date,
+            lookback_days=payload.lookback_days,
+            symbols=payload.symbols,
+            dataset_limit=payload.dataset_limit,
+            report_type=payload.report_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market/maintenance/jobs/{job_id}", response_model=MarketDataMaintenanceJobResponse)
+def get_market_data_maintenance_job(
+    job_id: str,
+    _user: str = Depends(get_current_user),
+) -> MarketDataMaintenanceJobResponse:
+    try:
+        return market_data_maintenance_service.get_job(job_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/quant/backtest", response_model=BacktestResponse)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -9,6 +10,8 @@ from app.core.config import get_settings
 from app.db.models import DailyBar, MarketDataMaintenanceRun, MarketReport
 from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
+from app.services.settings_service import settings_service
+from skills.mx_core.client import MXClient
 
 
 _MAX_AI_MARKET_CONTEXT_LIMIT = 100
@@ -53,6 +56,7 @@ class AIMarketContextService:
             dataset,
             self._recent_report_performance(db),
             self._latest_data_quality(db),
+            self._mx_supplemental_context(db),
         )
 
     def _format_dataset(
@@ -60,6 +64,7 @@ class AIMarketContextService:
         dataset: dict[str, Any],
         report_performance: list[dict[str, Any]] | None = None,
         data_quality: dict[str, Any] | None = None,
+        mx_supplement: dict[str, Any] | None = None,
     ) -> str:
         sources = ", ".join(dataset.get("data_sources") or []) or "--"
         coverage = dataset.get("coverage") or {}
@@ -102,6 +107,16 @@ class AIMarketContextService:
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
+        if mx_supplement:
+            lines.append("妙想补充信号:")
+            if mx_supplement.get("screen"):
+                lines.append(
+                    f"- 自然语言选股: {self._compact_payload(mx_supplement['screen'])}"
+                )
+            if mx_supplement.get("news"):
+                lines.append(f"- 资讯检索: {self._compact_payload(mx_supplement['news'])}")
+            if mx_supplement.get("error"):
+                lines.append(f"- 获取失败: {mx_supplement['error']}")
         if report_performance:
             lines.append("历史推荐表现:")
             for item in report_performance:
@@ -120,7 +135,22 @@ class AIMarketContextService:
             dataset,
             self._recent_report_performance(db),
             self._latest_data_quality(db),
+            self._mx_supplemental_context(db),
         )
+
+    def _mx_supplemental_context(self, db: Session) -> dict[str, Any] | None:
+        app_settings = settings_service.get_or_create_settings(db)
+        api_key = str(app_settings.mx_api_key or "").strip()
+        if not api_key:
+            return None
+        env_settings = get_settings()
+        try:
+            with MXClient(api_key=api_key, base_url=env_settings.mx_api_url) as client:
+                screen = client.screen_stocks(app_settings.screener_query)
+                news = client.search_news(app_settings.news_query)
+            return {"screen": screen, "news": news}
+        except Exception as exc:
+            return {"error": str(exc)[:240]}
 
     def _latest_data_quality(self, db: Session) -> dict[str, Any] | None:
         row = db.scalar(
@@ -194,6 +224,9 @@ class AIMarketContextService:
             return f"{float(value):.3f}"
         except (TypeError, ValueError):
             return "--"
+
+    def _compact_payload(self, value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))[:800]
 
 
 ai_market_context_service = AIMarketContextService()

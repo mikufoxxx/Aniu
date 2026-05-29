@@ -10,7 +10,7 @@ from app.core import rate_limit as rate_limit_module
 from app.core.config import get_settings
 from app.db import database as database_module
 from app.db.database import init_db, session_scope
-from app.db.models import DailyBar, MarketDataMaintenanceRun, MarketReport
+from app.db.models import AppSettings, DailyBar, MarketDataMaintenanceRun, MarketReport
 from app.services.automation_session_service import automation_session_service
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -308,6 +308,141 @@ def test_ai_market_context_includes_latest_data_quality_snapshot(
     assert "入库 49500 条" in context
     assert "最新日 20260528 覆盖 5506 只" in context
     assert "补数状态 覆盖充足" in context
+
+    _reset_state()
+
+
+def test_ai_market_context_includes_miaoxiang_supplement_when_configured(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_market_context_service import ai_market_context_service
+    from app.services.market_data_service import market_data_service
+
+    _use_temp_db(monkeypatch, tmp_path)
+    calls: list[tuple[str, str]] = []
+
+    class DummyMXClient:
+        def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+            assert api_key == "mx-key"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def screen_stocks(self, query: str):
+            calls.append(("screen", query))
+            return {"items": [{"code": "600519", "name": "贵州茅台", "reason": "资金关注"}]}
+
+        def search_news(self, query: str):
+            calls.append(("news", query))
+            return {"items": [{"title": "白酒板块走强", "summary": "机构关注龙头"}]}
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 1.0,
+                "amount": 10_000_000,
+                "turnover": 0.5,
+                "volume_ratio": 1.2,
+                "source": "tencent",
+                "timestamp": "2026-05-29 10:30:03",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr("app.services.ai_market_context_service.MXClient", DummyMXClient)
+
+    with session_scope() as db:
+        db.add(
+            AppSettings(
+                mx_api_key="mx-key",
+                screener_query="A股今天值得关注的强势股",
+                news_query="今天A股市场热点新闻",
+            )
+        )
+        db.add(DailyBar(symbol="600519.SH", trade_date="20260528", close=95, amount=9500))
+        db.flush()
+        context = ai_market_context_service.build_context(
+            db,
+            symbols=["600519.SH"],
+            limit=1,
+            lookback_days=3,
+        )
+
+    assert calls == [
+        ("screen", "A股今天值得关注的强势股"),
+        ("news", "今天A股市场热点新闻"),
+    ]
+    assert "妙想补充信号:" in context
+    assert "自然语言选股" in context
+    assert "600519" in context
+    assert "资讯检索" in context
+    assert "白酒板块走强" in context
+
+    _reset_state()
+
+
+def test_ai_market_context_keeps_quant_context_when_miaoxiang_fails(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_market_context_service import ai_market_context_service
+    from app.services.market_data_service import market_data_service
+
+    _use_temp_db(monkeypatch, tmp_path)
+
+    class FailingMXClient:
+        def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def screen_stocks(self, query: str):
+            raise RuntimeError("今日调用次数已达上限")
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 1.0,
+                "amount": 10_000_000,
+                "turnover": 0.5,
+                "volume_ratio": 1.2,
+                "source": "tencent",
+                "timestamp": "2026-05-29 10:30:03",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr("app.services.ai_market_context_service.MXClient", FailingMXClient)
+
+    with session_scope() as db:
+        db.add(AppSettings(mx_api_key="mx-key"))
+        db.add(DailyBar(symbol="600519.SH", trade_date="20260528", close=95, amount=9500))
+        db.flush()
+        context = ai_market_context_service.build_context(
+            db,
+            symbols=["600519.SH"],
+            limit=1,
+            lookback_days=3,
+        )
+
+    assert "AI量化市场上下文" in context
+    assert "600519.SH 贵州茅台" in context
+    assert "妙想补充信号:" in context
+    assert "获取失败: 今日调用次数已达上限" in context
 
     _reset_state()
 

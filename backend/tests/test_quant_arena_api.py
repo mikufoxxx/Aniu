@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 
 from fastapi.testclient import TestClient
@@ -9,7 +10,12 @@ from app.core.config import get_settings
 from app.core import rate_limit as rate_limit_module
 from app.db import database as database_module
 from app.db.database import session_scope
-from app.db.models import DailyBar
+from app.db.models import (
+    AppSettings,
+    ArenaAccount,
+    ArenaPosition,
+    DailyBar,
+)
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -442,6 +448,245 @@ def test_arena_orders_store_shared_snapshot_and_agent_decision_context(
         assert context["selected_candidate"]["symbol"] == order["symbol"]
         assert "factor_scores" in context["selected_candidate"]
         assert "daily_factors" in context["selected_candidate"]
+
+    _reset_state()
+
+
+def test_arena_run_uses_llm_decision_for_each_agent_when_configured(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    calls: list[dict[str, object]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 1.2,
+                "amount": 8_000_000,
+                "turnover": 0.4,
+                "volume_ratio": 1.1,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            },
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 4.0,
+                "amount": 20_000_000,
+                "turnover": 1.2,
+                "volume_ratio": 1.8,
+                "source": "tencent",
+                "timestamp": "2026-05-29 15:00:03",
+            },
+        ]
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        calls.append(
+            {
+                "base_url": base_url,
+                "api_key": api_key,
+                "payload": payload,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        symbol = "000001.SZ" if payload["model"] == "deepseek-chat" else "600519.SH"
+        reason = "LLM 选择高弹性标的" if symbol == "000001.SZ" else "LLM 选择低波动核心资产"
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "BUY",
+                                "symbol": symbol,
+                                "allocation_ratio": 0.1,
+                                "reason": reason,
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            settings = db.query(AppSettings).first()
+            assert settings is not None
+            settings.provider_name = "openai-compatible"
+            settings.llm_base_url = "https://llm.example/v1"
+            settings.llm_api_key = "llm-key"
+            settings.llm_model = "fallback-model"
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "symbols": ["600519.SH", "000001.SZ"],
+                "initial_cash": 200000,
+                "agents": [
+                    {
+                        "id": "deepseek",
+                        "name": "DeepSeek",
+                        "style": "momentum",
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "prompt": "偏动量突破",
+                    },
+                    {
+                        "id": "gpt",
+                        "name": "GPT",
+                        "style": "risk_control",
+                        "provider": "openai-compatible",
+                        "model": "gpt-4o-mini",
+                        "prompt": "偏回撤控制",
+                    },
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [call["payload"]["model"] for call in calls] == [
+        "deepseek-chat",
+        "gpt-4o-mini",
+    ]
+    assert all(call["base_url"] == "https://llm.example/v1" for call in calls)
+    assert all(call["api_key"] == "llm-key" for call in calls)
+    user_prompts = [call["payload"]["messages"][1]["content"] for call in calls]
+    assert all("arena-" in prompt for prompt in user_prompts)
+    assert all("600519.SH" in prompt and "000001.SZ" in prompt for prompt in user_prompts)
+    orders_by_agent = {order["agent_id"]: order for order in payload["orders"]}
+    assert orders_by_agent["deepseek"]["symbol"] == "000001.SZ"
+    assert orders_by_agent["gpt"]["symbol"] == "600519.SH"
+    assert orders_by_agent["deepseek"]["quantity"] == 2000
+    assert orders_by_agent["gpt"]["quantity"] == 200
+    for order in payload["orders"]:
+        context = order["decision_context"]
+        assert context["llm_decision"]["used"] is True
+        assert context["llm_decision"]["model"] == order["decision_context"]["agent"]["model"]
+        assert context["llm_decision"]["raw_decision"]["action"] == "BUY"
+
+    _reset_state()
+
+
+def test_arena_run_uses_llm_sell_decision_for_existing_position(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": -1.0,
+                "amount": 5_000_000,
+                "turnover": 0.5,
+                "volume_ratio": 0.9,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            }
+        ]
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "SELL",
+                                "symbol": "000001.SZ",
+                                "sell_ratio": 0.5,
+                                "reason": "LLM 判断动能衰减，先卖出一半。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            settings = db.query(AppSettings).first()
+            assert settings is not None
+            settings.llm_base_url = "https://llm.example/v1"
+            settings.llm_api_key = "llm-key"
+            settings.llm_model = "fallback-model"
+            account = ArenaAccount(
+                agent_id="seller",
+                agent_name="卖出 AI",
+                style="risk_control",
+                initial_cash=200000,
+                cash=100000,
+            )
+            account.positions.append(
+                ArenaPosition(
+                    symbol="000001.SZ",
+                    name="平安银行",
+                    quantity=1000,
+                    avg_cost=9.0,
+                    last_price=10.0,
+                )
+            )
+            db.add(account)
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500))
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "symbols": ["000001.SZ"],
+                "initial_cash": 200000,
+                "agents": [
+                    {
+                        "id": "seller",
+                        "name": "卖出 AI",
+                        "style": "risk_control",
+                        "provider": "openai-compatible",
+                        "model": "gpt-4o-mini",
+                        "prompt": "弱势时主动减仓",
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["orders"]) == 1
+    order = payload["orders"][0]
+    assert order["action"] == "SELL"
+    assert order["symbol"] == "000001.SZ"
+    assert order["quantity"] == 500
+    assert order["remaining_cash"] == 105000
+    context = order["decision_context"]
+    assert context["llm_decision"]["used"] is True
+    assert context["llm_decision"]["raw_decision"]["action"] == "SELL"
+    assert context["selected_candidate"]["symbol"] == "000001.SZ"
 
     _reset_state()
 

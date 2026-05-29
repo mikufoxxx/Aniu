@@ -1,12 +1,22 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import ArenaAccount, ArenaAgentConfig, ArenaOrder, ArenaPosition, ArenaRun
+from app.db.models import (
+    AppSettings,
+    ArenaAccount,
+    ArenaAgentConfig,
+    ArenaOrder,
+    ArenaPosition,
+    ArenaRun,
+)
+from app.services.llm_service import llm_service
 from app.services.quant_service import quant_service
+from app.services.settings_service import settings_service
 
 
 DEFAULT_AGENTS = [
@@ -32,6 +42,7 @@ class ArenaService:
         initial_cash: float = 200000.0,
     ) -> dict[str, Any]:
         active_agents = agents or self.enabled_agents(db)
+        app_settings = settings_service.get_or_create_settings(db)
         candidate_payload = quant_service.generate_candidates(
             db=db,
             symbols=symbols,
@@ -61,12 +72,14 @@ class ArenaService:
             self._mark_positions(account, candidates)
             sell_decision = self._stop_loss_decision(account)
             decision = sell_decision or self._decide_for_agent(
+                account=account,
                 agent=agent,
                 candidates=candidates,
                 agent_index=index,
                 available_cash=account.cash,
                 snapshot_id=snapshot_id,
                 data_sources=data_sources,
+                app_settings=app_settings,
             )
             if decision is not None:
                 if decision["action"] == "SELL":
@@ -211,16 +224,51 @@ class ArenaService:
     def _decide_for_agent(
         self,
         *,
+        account: ArenaAccount,
         agent: dict[str, str],
         candidates: list[dict[str, Any]],
         agent_index: int,
         available_cash: float,
         snapshot_id: str,
         data_sources: list[str],
+        app_settings: AppSettings,
     ) -> dict[str, Any] | None:
         if not candidates:
             return None
         style = str(agent.get("style") or "balanced")
+        llm_decision = self._llm_decision(
+            agent=agent,
+            candidates=candidates,
+            positions=account.positions,
+            snapshot_id=snapshot_id,
+            data_sources=data_sources,
+            app_settings=app_settings,
+        )
+        if llm_decision is not None:
+            if llm_decision["action"] == "SELL":
+                return self._sell_decision_from_position(
+                    account=account,
+                    agent=agent,
+                    position=llm_decision["position"],
+                    candidate=llm_decision["candidate"],
+                    sell_ratio=llm_decision["sell_ratio"],
+                    reason=llm_decision["reason"],
+                    snapshot_id=snapshot_id,
+                    data_sources=data_sources,
+                    llm_decision=llm_decision["context"],
+                )
+            return self._buy_decision_from_candidate(
+                agent=agent,
+                style=style,
+                candidate=llm_decision["candidate"],
+                available_cash=available_cash,
+                allocation_ratio=llm_decision["allocation_ratio"],
+                reason=llm_decision["reason"],
+                snapshot_id=snapshot_id,
+                data_sources=data_sources,
+                llm_decision=llm_decision["context"],
+                agent_index=agent_index,
+            )
         if style == "momentum":
             allocation_ratio = 0.45
         elif style == "risk_control":
@@ -237,6 +285,34 @@ class ArenaService:
         )
         if candidate is None:
             return None
+        return self._buy_decision_from_candidate(
+            agent=agent,
+            style=style,
+            candidate=candidate,
+            available_cash=available_cash,
+            allocation_ratio=allocation_ratio,
+            reason=f"{style} 根据候选评分 {candidate['score']} 执行模拟买入。",
+            snapshot_id=snapshot_id,
+            data_sources=data_sources,
+            llm_decision=None,
+            agent_index=agent_index,
+        )
+
+    def _buy_decision_from_candidate(
+        self,
+        *,
+        agent: dict[str, str],
+        style: str,
+        candidate: dict[str, Any],
+        available_cash: float,
+        allocation_ratio: float,
+        reason: str,
+        snapshot_id: str,
+        data_sources: list[str],
+        llm_decision: dict[str, Any] | None,
+        agent_index: int,
+    ) -> dict[str, Any] | None:
+        budget = available_cash * allocation_ratio
         price = float(candidate.get("price") or 0)
         if price <= 0:
             return None
@@ -255,15 +331,251 @@ class ArenaService:
             "price": price,
             "amount": amount,
             "remaining_cash": round(available_cash - amount, 2),
-            "reason": f"{style} 根据候选评分 {candidate['score']} 执行模拟买入。",
+            "reason": reason,
             "decision_context": self._decision_context(
                 snapshot_id=snapshot_id,
                 agent=agent,
                 data_sources=data_sources,
                 candidate=candidate,
                 action="BUY",
+                llm_decision=llm_decision,
             ),
         }
+
+    def _sell_decision_from_position(
+        self,
+        *,
+        account: ArenaAccount,
+        agent: dict[str, str],
+        position: ArenaPosition,
+        candidate: dict[str, Any],
+        sell_ratio: float,
+        reason: str,
+        snapshot_id: str,
+        data_sources: list[str],
+        llm_decision: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        quantity = int((position.quantity * sell_ratio) // 100) * 100
+        if quantity <= 0 and position.quantity > 0:
+            quantity = position.quantity
+        quantity = min(quantity, position.quantity)
+        price = float(candidate.get("price") or position.last_price or 0)
+        if quantity <= 0 or price <= 0:
+            return None
+        amount = round(quantity * price, 2)
+        return {
+            "agent_id": account.agent_id,
+            "agent_name": account.agent_name,
+            "style": account.style,
+            "action": "SELL",
+            "symbol": position.symbol,
+            "name": position.name or position.symbol,
+            "quantity": quantity,
+            "price": price,
+            "amount": amount,
+            "remaining_cash": round(account.cash + amount, 2),
+            "reason": reason,
+            "decision_context": self._decision_context(
+                snapshot_id=snapshot_id,
+                agent=agent,
+                data_sources=data_sources,
+                candidate=candidate,
+                action="SELL",
+                llm_decision=llm_decision,
+            ),
+        }
+
+    def _llm_decision(
+        self,
+        *,
+        agent: dict[str, str],
+        candidates: list[dict[str, Any]],
+        positions: list[ArenaPosition],
+        snapshot_id: str,
+        data_sources: list[str],
+        app_settings: AppSettings,
+    ) -> dict[str, Any] | None:
+        if not app_settings.llm_base_url or not app_settings.llm_api_key:
+            return None
+        model = str(agent.get("model") or app_settings.llm_model or "").strip()
+        if not model:
+            return None
+
+        payload = {
+            "model": model,
+            "temperature": 0.2,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是A股模拟交易竞技场里的独立AI选手。"
+                        "只能基于用户给出的同一份候选快照做低频模拟交易决策。"
+                        "只返回JSON，不要输出Markdown。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": self._llm_prompt(
+                        agent=agent,
+                        candidates=candidates,
+                        positions=positions,
+                        snapshot_id=snapshot_id,
+                        data_sources=data_sources,
+                    ),
+                },
+            ],
+        }
+        try:
+            response = llm_service._call_llm(
+                base_url=str(app_settings.llm_base_url),
+                api_key=str(app_settings.llm_api_key),
+                payload=payload,
+                timeout_seconds=60,
+            )
+            raw_decision = self._extract_llm_json(response)
+            action = str(raw_decision.get("action") or "HOLD").upper()
+            if action not in {"BUY", "SELL"}:
+                return None
+            symbol = str(raw_decision.get("symbol") or "").strip().upper()
+            candidate = next(
+                (
+                    item
+                    for item in candidates
+                    if str(item.get("symbol") or "").upper() == symbol
+                ),
+                None,
+            )
+            if action == "BUY" and candidate is None:
+                return None
+            reason = str(raw_decision.get("reason") or "LLM 基于候选快照执行模拟买入。")
+            context = {
+                "used": True,
+                "provider": str(agent.get("provider") or "openai-compatible"),
+                "model": model,
+                "raw_decision": raw_decision,
+            }
+            if action == "SELL":
+                position = next(
+                    (
+                        item for item in positions
+                        if str(item.symbol or "").upper() == symbol and item.quantity > 0
+                    ),
+                    None,
+                )
+                if position is None:
+                    return None
+                fallback_candidate = {
+                    "symbol": position.symbol,
+                    "name": position.name,
+                    "price": position.last_price,
+                    "factor_scores": {},
+                    "daily_factors": {},
+                }
+                return {
+                    "action": "SELL",
+                    "position": position,
+                    "candidate": candidate or fallback_candidate,
+                    "sell_ratio": self._normalize_sell_ratio(
+                        raw_decision.get("sell_ratio")
+                    ),
+                    "reason": reason,
+                    "context": context,
+                }
+
+            allocation_ratio = self._normalize_allocation_ratio(
+                raw_decision.get("allocation_ratio")
+            )
+            return {
+                "action": "BUY",
+                "candidate": candidate,
+                "allocation_ratio": allocation_ratio,
+                "reason": reason,
+                "context": context,
+            }
+        except Exception:
+            return None
+
+    def _llm_prompt(
+        self,
+        *,
+        agent: dict[str, str],
+        candidates: list[dict[str, Any]],
+        positions: list[ArenaPosition],
+        snapshot_id: str,
+        data_sources: list[str],
+    ) -> str:
+        prompt_payload = {
+            "snapshot_id": snapshot_id,
+            "agent": {
+                "id": agent.get("id"),
+                "name": agent.get("name"),
+                "style": agent.get("style"),
+                "provider": agent.get("provider"),
+                "model": agent.get("model"),
+                "prompt": agent.get("prompt"),
+            },
+            "data_sources": data_sources,
+            "positions": [
+                {
+                    "symbol": position.symbol,
+                    "name": position.name,
+                    "quantity": position.quantity,
+                    "avg_cost": position.avg_cost,
+                    "last_price": position.last_price,
+                    "unrealized_pnl": round(
+                        position.quantity * (position.last_price - position.avg_cost),
+                        2,
+                    ),
+                }
+                for position in positions
+                if position.quantity > 0
+            ],
+            "candidates": candidates,
+            "output_schema": {
+                "action": "BUY, SELL or HOLD",
+                "symbol": "候选或持仓股票代码，HOLD时可为空",
+                "allocation_ratio": "0到1之间的小数，例如0.1代表使用10%现金",
+                "sell_ratio": "0到1之间的小数，例如0.5代表卖出一半持仓",
+                "reason": "一句话说明决策依据",
+            },
+        }
+        return json.dumps(prompt_payload, ensure_ascii=False, default=str)
+
+    def _extract_llm_json(self, response: dict[str, Any]) -> dict[str, Any]:
+        content = (
+            response.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("LLM 未返回决策内容")
+        text = content.strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:].strip()
+        parsed = json.loads(text)
+        if not isinstance(parsed, dict):
+            raise ValueError("LLM 决策不是 JSON 对象")
+        return parsed
+
+    def _normalize_allocation_ratio(self, value: Any) -> float:
+        try:
+            ratio = float(value)
+        except (TypeError, ValueError):
+            ratio = 0.3
+        if ratio > 1:
+            ratio = ratio / 100
+        return min(max(ratio, 0.01), 0.95)
+
+    def _normalize_sell_ratio(self, value: Any) -> float:
+        try:
+            ratio = float(value)
+        except (TypeError, ValueError):
+            ratio = 1.0
+        if ratio > 1:
+            ratio = ratio / 100
+        return min(max(ratio, 0.01), 1.0)
 
     def _stop_loss_decision(self, account: ArenaAccount) -> dict[str, Any] | None:
         stop_loss = STOP_LOSS_BY_STYLE.get(account.style, 0.06)
@@ -311,6 +623,7 @@ class ArenaService:
         data_sources: list[str],
         candidate: dict[str, Any],
         action: str,
+        llm_decision: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "snapshot_id": snapshot_id,
@@ -337,6 +650,7 @@ class ArenaService:
                 "daily_factors": candidate.get("daily_factors") or {},
                 "rationale": candidate.get("rationale"),
             },
+            "llm_decision": llm_decision or {"used": False},
         }
 
     def _get_or_create_account(

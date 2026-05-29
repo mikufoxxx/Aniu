@@ -556,6 +556,33 @@ def test_refresh_daily_bars_stores_hot_sector_members(monkeypatch, tmp_path) -> 
     _reset_state()
 
 
+def test_fetch_sector_member_rows_keeps_partial_success(monkeypatch) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
+    get_settings.cache_clear()
+
+    def fake_request(params: dict[str, str]):
+        if params["ts_code"] == "885002.TI":
+            raise RuntimeError("Tushare ths_member 请求超时: {'ts_code': '885002.TI'}")
+        return [{"ts_code": params["ts_code"], "con_code": "600519.SH"}]
+
+    monkeypatch.setattr(
+        historical_data_service,
+        "_request_tushare_ths_member",
+        fake_request,
+    )
+
+    rows = historical_data_service.fetch_sector_member_rows(
+        ["885001.TI", "885002.TI", "885003.TI"]
+    )
+
+    assert len(rows) == 2
+    assert "1 个板块成分拉取失败" in historical_data_service._last_sector_member_error
+
+    _reset_state()
+
+
 def test_refresh_daily_range_processes_each_date_and_summarizes_coverage(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

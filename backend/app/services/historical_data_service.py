@@ -308,6 +308,7 @@ class HistoricalDataService:
         settings = get_settings()
         if not settings.tushare_token:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_member 数据。")
+        self._last_sector_member_error = None
         if len(sector_symbols) <= 1:
             rows: list[dict[str, Any]] = []
             for symbol in sector_symbols:
@@ -315,6 +316,7 @@ class HistoricalDataService:
             return rows
 
         rows: list[dict[str, Any]] = []
+        errors: list[str] = []
         worker_count = min(_TUSHARE_THS_MEMBER_WORKERS, len(sector_symbols))
         with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures = [
@@ -322,7 +324,17 @@ class HistoricalDataService:
                 for symbol in sector_symbols
             ]
             for future in as_completed(futures):
-                rows.extend(future.result())
+                try:
+                    rows.extend(future.result())
+                except RuntimeError as exc:
+                    errors.append(str(exc))
+        if errors:
+            self._last_sector_member_error = (
+                f"{len(errors)} 个板块成分拉取失败，已保留其余成功数据；"
+                f"首个错误: {errors[0]}"
+            )
+            if not rows:
+                raise RuntimeError(self._last_sector_member_error)
         return rows
 
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -528,6 +540,7 @@ class HistoricalDataService:
                     self.fetch_sector_member_rows(hot_sector_symbols),
                     sector_index_rows,
                 )
+                sector_member_error = getattr(self, "_last_sector_member_error", None)
             except RuntimeError as exc:
                 sector_member_error = str(exc)
 

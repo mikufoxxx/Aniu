@@ -263,6 +263,30 @@ class SectorMember(Base):
     )
 
 
+class StockProfile(Base):
+    __tablename__ = "stock_profiles"
+    __table_args__ = (
+        UniqueConstraint("symbol", name="uq_stock_profiles_symbol"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    area: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    market: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    exchange: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    list_status: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    list_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    is_hs: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_stock_basic")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

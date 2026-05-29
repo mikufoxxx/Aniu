@@ -333,6 +333,7 @@
             <div class="position-cell-main">
               <strong class="position-name">{{ item.name || item.symbol }}</strong>
               <span class="position-symbol">{{ item.symbol }}</span>
+              <span v-if="profileText(item)" class="position-symbol">{{ profileText(item) }}</span>
             </div>
             <div>{{ item.score.toFixed(2) }}</div>
             <div>
@@ -838,6 +839,7 @@ function tierText(tier: string): string {
 
 function progressText(phase: string | undefined): string {
   const mapping: Record<string, string> = {
+    refreshing_profiles: '刷新股票画像',
     refreshing_daily: '刷新日线',
     building_dataset: '构建数据集',
     completed: '已完成',
@@ -856,6 +858,12 @@ function sourceCountsText(counts: Record<string, number> | undefined): string {
   ].filter(([, value]) => typeof value === 'number' && value > 0)
   if (!items.length) return '--'
   return items.map(([label, value]) => `${label}${formatInteger(value as number)}`).join(' / ')
+}
+
+function profileText(item: QuantCandidate): string {
+  const profile = item.profile
+  if (!profile) return ''
+  return [profile.industry, profile.area, profile.market].filter(Boolean).join(' · ')
 }
 
 function readinessText(value: boolean | undefined): string {

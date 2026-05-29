@@ -236,6 +236,16 @@ export interface QuantCandidate {
   timestamp: string | null
   score: number
   factor_scores: Record<string, number>
+  profile: {
+    name?: string | null
+    area?: string | null
+    industry?: string | null
+    market?: string | null
+    exchange?: string | null
+    list_status?: string | null
+    list_date?: string | null
+    is_hs?: string | null
+  }
   daily_factors: {
     latest_trade_date?: string | null
     bars_used?: number
@@ -265,6 +275,11 @@ export interface QuantDatasetPayload {
 
 export interface MarketDataMaintenancePayload {
   status: string
+  profile_refresh?: {
+    source: string
+    stored_count: number
+    error?: string | null
+  } | null
   refresh: DailyRangeRefreshPayload
   dataset: QuantDatasetPayload
   report?: MarketReport

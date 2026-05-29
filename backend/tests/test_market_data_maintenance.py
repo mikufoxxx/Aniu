@@ -109,6 +109,14 @@ def test_market_data_maintenance_initial_backfill_uses_full_configured_window(
             "daily_results": [],
         }
 
+    def fake_refresh_profiles(db):
+        captured["profiles"] = True
+        return {
+            "source": "tushare_stock_basic",
+            "stored_count": 5300,
+            "error": None,
+        }
+
     def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=20):
         captured["dataset"] = (symbols, limit, prefer_realtime, lookback_days)
         return {
@@ -122,6 +130,12 @@ def test_market_data_maintenance_initial_backfill_uses_full_configured_window(
 
     monkeypatch.setattr(historical_data_service, "summarize_daily_coverage", fake_coverage)
     monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
+    monkeypatch.setattr(
+        historical_data_service,
+        "refresh_stock_profiles",
+        fake_refresh_profiles,
+        raising=False,
+    )
     monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
 
     with create_test_client(monkeypatch, tmp_path) as client:
@@ -292,7 +306,21 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
             "created_at": "2026-05-29T15:30:00",
         }
 
+    def fake_refresh_profiles(db):
+        captured["profiles"] = True
+        return {
+            "source": "tushare_stock_basic",
+            "stored_count": 5300,
+            "error": None,
+        }
+
     monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
+    monkeypatch.setattr(
+        historical_data_service,
+        "refresh_stock_profiles",
+        fake_refresh_profiles,
+        raising=False,
+    )
     monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
     monkeypatch.setattr(market_report_service, "generate_report", fake_generate_report)
 
@@ -318,11 +346,13 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
     assert payload["refresh"]["data_source_errors"] == {
         "tushare_sector_member": ["20260528: 2 个板块成分拉取失败"],
     }
+    assert payload["profile_refresh"]["stored_count"] == 5300
     assert payload["dataset"]["coverage"]["daily_history_symbols"] == 3
     assert payload["report"]["report_type"] == "closing"
     assert captured["range"] == ("20260526", "20260528", ["000001.SZ", "600519.SH"])
     assert captured["dataset"] == (["000001.SZ", "600519.SH"], 20, True, 3)
     assert captured["report"] == ("closing", ["000001.SZ", "600519.SH"], 20, 3)
+    assert captured["profiles"] is True
 
     _reset_state()
 

@@ -93,6 +93,7 @@ class MarketDataMaintenanceService:
             - timedelta(days=normalized_lookback - 1)
         ).strftime("%Y%m%d")
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
+        profile_refresh = self._refresh_stock_profiles(db, progress_callback)
         if normalized_symbols is None:
             coverage = historical_data_service.summarize_daily_coverage(db)
             start_date, normalized_end = self._refresh_window(
@@ -130,6 +131,7 @@ class MarketDataMaintenanceService:
         )
         result: dict[str, Any] = {
             "status": "completed",
+            "profile_refresh": profile_refresh,
             "refresh": refresh,
             "dataset": dataset,
         }
@@ -144,6 +146,32 @@ class MarketDataMaintenanceService:
         coverage_after = historical_data_service.summarize_daily_coverage(db)
         self._record_run(db, result=result, coverage=coverage_after)
         return result
+
+    def _refresh_stock_profiles(
+        self,
+        db: Session,
+        progress_callback=None,
+    ) -> dict[str, Any]:
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "refreshing_profiles",
+                    "total_days": 0,
+                    "processed_days": 0,
+                    "current_trade_date": None,
+                    "stored_count": 0,
+                    "skipped_count": 0,
+                    "error_count": 0,
+                }
+            )
+        try:
+            return historical_data_service.refresh_stock_profiles(db)
+        except RuntimeError as exc:
+            return {
+                "source": "tushare_stock_basic",
+                "stored_count": 0,
+                "error": str(exc),
+            }
 
     def list_runs(self, db: Session, *, limit: int = 20) -> dict[str, Any]:
         rows = db.scalars(

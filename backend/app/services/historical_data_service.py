@@ -12,7 +12,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import BacktestRun, DailyBar, IndexBar, SectorBar, SectorMember
+from app.db.models import BacktestRun, DailyBar, IndexBar, SectorBar, SectorMember, StockProfile
 from app.services.market_data_service import normalize_symbol
 
 _TUSHARE_DAILY_FIELDS = (
@@ -31,6 +31,9 @@ _TUSHARE_THS_DAILY_FIELDS = (
     "ts_code,trade_date,close,pct_change,turnover_rate,total_mv,float_mv"
 )
 _TUSHARE_THS_MEMBER_FIELDS = "ts_code,con_code,con_name,is_new"
+_TUSHARE_STOCK_BASIC_FIELDS = (
+    "ts_code,symbol,name,area,industry,market,exchange,list_status,list_date,is_hs"
+)
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_THS_MEMBER_WORKERS = 2
 _TUSHARE_THS_MEMBER_RETRIES = 3
@@ -337,6 +340,12 @@ class HistoricalDataService:
                 raise RuntimeError(self._last_sector_member_error)
         return rows
 
+    def fetch_stock_basic_rows(self) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare stock_basic 数据。")
+        return self._request_tushare_stock_basic({"list_status": "L"})
+
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return self._request_tushare_api(
             api_name="daily",
@@ -400,6 +409,14 @@ class HistoricalDataService:
                     raise
                 time.sleep(_TUSHARE_THS_MEMBER_RETRY_DELAY_SECONDS * (attempt + 1))
         return []
+
+    def _request_tushare_stock_basic(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="stock_basic",
+            params=params,
+            fields=_TUSHARE_STOCK_BASIC_FIELDS,
+            label="stock_basic",
+        )
 
     def _request_tushare_api(
         self,
@@ -617,6 +634,32 @@ class HistoricalDataService:
             "sector_member_count": sector_member_count,
             "sector_member_error": sector_member_error,
             "requested_symbols": normalized_symbols or [],
+        }
+
+    def refresh_stock_profiles(self, db: Session) -> dict[str, Any]:
+        rows = self.fetch_stock_basic_rows()
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            existing = db.scalar(select(StockProfile).where(StockProfile.symbol == symbol))
+            profile = existing or StockProfile(symbol=symbol)
+            profile.name = str(row.get("name") or profile.name or symbol)
+            profile.area = str(row.get("area") or "") or None
+            profile.industry = str(row.get("industry") or "") or None
+            profile.market = str(row.get("market") or "") or None
+            profile.exchange = str(row.get("exchange") or "") or None
+            profile.list_status = str(row.get("list_status") or "") or None
+            profile.list_date = str(row.get("list_date") or "") or None
+            profile.is_hs = str(row.get("is_hs") or "") or None
+            profile.source = "tushare_stock_basic"
+            profile.raw_payload = dict(row)
+            db.add(profile)
+            stored_count += 1
+        db.commit()
+        return {
+            "source": "tushare_stock_basic",
+            "stored_count": stored_count,
+            "error": None,
         }
 
     def _store_index_rows(

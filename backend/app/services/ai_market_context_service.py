@@ -123,6 +123,8 @@ class AIMarketContextService:
         lines.append("候选信号:")
         for index, item in enumerate(items[:10], start=1):
             daily = item.get("daily_factors") or {}
+            profile = item.get("profile") or {}
+            profile_parts = self._profile_parts(profile)
             daily_basic_parts = self._daily_basic_parts(daily)
             lines.append(
                 (
@@ -132,6 +134,7 @@ class AIMarketContextService:
                     f"涨幅 {float(item.get('change_pct') or 0):+.2f}%; "
                     f"日线动量 {float(daily.get('momentum_pct') or 0):+.2f}%; "
                     f"日线覆盖 {int(daily.get('bars_used') or 0)}日; "
+                    f"{profile_parts}"
                     f"{daily_basic_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
@@ -335,6 +338,21 @@ class AIMarketContextService:
             parts.append(
                 f"热板块 {sector.get('name')} {float(sector.get('pct_chg') or 0):+.2f}%"
             )
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
+
+    def _profile_parts(self, profile: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key, label in (
+            ("industry", "行业"),
+            ("area", "地域"),
+            ("market", "市场"),
+            ("list_date", "上市"),
+        ):
+            value = profile.get(key)
+            if value:
+                parts.append(f"{label} {value}")
         if not parts:
             return ""
         return "; ".join(parts) + "; "

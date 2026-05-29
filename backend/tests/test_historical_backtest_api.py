@@ -583,6 +583,63 @@ def test_fetch_sector_member_rows_keeps_partial_success(monkeypatch) -> None:
     _reset_state()
 
 
+def test_refresh_stock_profiles_stores_tushare_stock_basic_rows(monkeypatch, tmp_path) -> None:
+    from app.db.models import StockProfile
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_stock_basic_rows():
+        return [
+            {
+                "ts_code": "600519.SH",
+                "symbol": "600519",
+                "name": "贵州茅台",
+                "area": "贵州",
+                "industry": "白酒",
+                "market": "主板",
+                "exchange": "SSE",
+                "list_status": "L",
+                "list_date": "20010827",
+                "is_hs": "H",
+            },
+            {
+                "ts_code": "000001.SZ",
+                "symbol": "000001",
+                "name": "平安银行",
+                "area": "深圳",
+                "industry": "银行",
+                "market": "主板",
+                "exchange": "SZSE",
+                "list_status": "L",
+                "list_date": "19910403",
+                "is_hs": "S",
+            },
+        ]
+
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_stock_basic_rows",
+        fake_fetch_stock_basic_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_stock_profiles(db)
+            profiles = db.query(StockProfile).order_by(StockProfile.symbol).all()
+
+    assert result == {
+        "source": "tushare_stock_basic",
+        "stored_count": 2,
+        "error": None,
+    }
+    assert [(item.symbol, item.name, item.industry, item.area) for item in profiles] == [
+        ("000001.SZ", "平安银行", "银行", "深圳"),
+        ("600519.SH", "贵州茅台", "白酒", "贵州"),
+    ]
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

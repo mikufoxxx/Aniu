@@ -17,6 +17,7 @@ from app.db.models import (
     DailyBar,
     SectorBar,
     SectorMember,
+    StockProfile,
 )
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
@@ -203,6 +204,16 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         stock_symbol="600519.SH",
                         stock_name="贵州茅台",
                     ),
+                    StockProfile(
+                        symbol="600519.SH",
+                        name="贵州茅台",
+                        area="贵州",
+                        industry="白酒",
+                        market="主板",
+                        exchange="SSE",
+                        list_status="L",
+                        list_date="20010827",
+                    ),
                 ]
             )
 
@@ -228,6 +239,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         "tushare_daily",
         "tushare_moneyflow",
         "tushare_sector_member",
+        "tushare_stock_basic",
     } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
@@ -242,6 +254,9 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["moneyflow_buy_lg_amount_rate"] == 6.2
     assert payload["items"][0]["daily_factors"]["sector_heat"][0]["name"] == "白酒概念"
     assert payload["items"][0]["daily_factors"]["sector_heat"][0]["pct_chg"] == 3.21
+    assert payload["items"][0]["profile"]["industry"] == "白酒"
+    assert payload["items"][0]["profile"]["area"] == "贵州"
+    assert payload["coverage"]["profile_symbols"] == 1
     assert "daily_momentum" in payload["items"][0]["factor_scores"]
     assert "daily_turnover" in payload["items"][0]["factor_scores"]
     assert "valuation_sanity" in payload["items"][0]["factor_scores"]

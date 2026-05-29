@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyBar, SectorBar, SectorMember
+from app.db.models import DailyBar, SectorBar, SectorMember, StockProfile
 from app.services.market_data_service import DEFAULT_UNIVERSE, market_data_service, normalize_symbol
 
 
@@ -39,8 +39,13 @@ class QuantService:
             symbols=universe,
             lookback_days=lookback_days,
         )
+        profiles = self._profiles_by_symbol(db, universe)
         candidates = [
-            self._score_quote(item, daily_factors.get(normalize_symbol(str(item.get("symbol") or ""))))
+            self._score_quote(
+                item,
+                daily_factors.get(normalize_symbol(str(item.get("symbol") or ""))),
+                profiles.get(normalize_symbol(str(item.get("symbol") or ""))),
+            )
             for item in quotes
         ]
         candidates.sort(key=lambda item: item["score"], reverse=True)
@@ -57,6 +62,8 @@ class QuantService:
             data_sources.append("tushare_moneyflow")
         if any(item.get("daily_factors", {}).get("sector_heat") for item in selected):
             data_sources.append("tushare_sector_member")
+        if any(item.get("profile") for item in selected):
+            data_sources.append("tushare_stock_basic")
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -119,6 +126,7 @@ class QuantService:
                 1 for item in items if item.get("daily_factors", {}).get("bars_used", 0) > 0
             ),
             "symbols_with_price": sum(1 for item in items if item.get("price") is not None),
+            "profile_symbols": sum(1 for item in items if item.get("profile")),
         }
         return {
             "universe_size": payload["universe_size"],
@@ -133,12 +141,15 @@ class QuantService:
         self,
         quote: dict[str, Any],
         daily_factors: dict[str, Any] | None = None,
+        profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         change_pct = _number(quote.get("change_pct"))
         amount = max(_number(quote.get("amount")), 0.0)
         turnover = max(_number(quote.get("turnover")), 0.0)
         volume_ratio = max(_number(quote.get("volume_ratio"), 1.0), 0.0)
         daily = daily_factors or self._empty_daily_factors()
+        profile_payload = profile or {}
+        display_name = str(quote.get("name") or profile_payload.get("name") or "")
 
         factor_scores = {
             "momentum": max(min(change_pct / 10.0, 1.0), -1.0),
@@ -167,7 +178,7 @@ class QuantService:
         score = self._weighted_score(factor_scores, daily["bars_used"])
         return {
             "symbol": normalize_symbol(str(quote.get("symbol") or "")),
-            "name": str(quote.get("name") or ""),
+            "name": display_name,
             "price": quote.get("price"),
             "change_pct": change_pct,
             "amount": amount,
@@ -179,6 +190,7 @@ class QuantService:
             "factor_scores": {
                 key: round(value, 4) for key, value in factor_scores.items()
             },
+            "profile": profile_payload,
             "daily_factors": daily,
             "rationale": self._rationale(change_pct, amount, volume_ratio),
         }
@@ -253,6 +265,30 @@ class QuantService:
         for symbol, sectors in sector_heat.items():
             factors.setdefault(symbol, self._empty_daily_factors())["sector_heat"] = sectors
         return factors
+
+    def _profiles_by_symbol(
+        self,
+        db: Session | None,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        if db is None:
+            return {}
+        rows = db.scalars(
+            select(StockProfile).where(StockProfile.symbol.in_(symbols))
+        ).all()
+        return {
+            row.symbol: {
+                "name": row.name,
+                "area": row.area,
+                "industry": row.industry,
+                "market": row.market,
+                "exchange": row.exchange,
+                "list_status": row.list_status,
+                "list_date": row.list_date,
+                "is_hs": row.is_hs,
+            }
+            for row in rows
+        }
 
     def _sector_heat_by_symbol(
         self,

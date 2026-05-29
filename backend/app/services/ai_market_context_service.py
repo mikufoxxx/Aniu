@@ -129,6 +129,7 @@ class AIMarketContextService:
             daily_basic_parts = self._daily_basic_parts(daily)
             financial_parts = self._financial_parts(financial)
             limit_parts = self._limit_event_parts(daily.get("limit_event") or {})
+            margin_parts = self._margin_parts(daily.get("margin_detail") or {})
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -141,6 +142,7 @@ class AIMarketContextService:
                     f"{daily_basic_parts}"
                     f"{financial_parts}"
                     f"{limit_parts}"
+                    f"{margin_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -384,6 +386,26 @@ class AIMarketContextService:
         if up_stat:
             parts.append(f"统计 {up_stat}")
         return " ".join(parts) + "; "
+
+    def _margin_parts(self, margin: dict[str, Any]) -> str:
+        parts: list[str] = []
+        net_buy = margin.get("net_financing_buy")
+        rzrqye = margin.get("rzrqye")
+        try:
+            net_buy_number = float(net_buy)
+        except (TypeError, ValueError):
+            net_buy_number = 0.0
+        try:
+            balance_number = float(rzrqye)
+        except (TypeError, ValueError):
+            balance_number = 0.0
+        if net_buy_number != 0:
+            parts.append(f"融资净买 {net_buy_number / 10000:.2f}万")
+        if balance_number > 0:
+            parts.append(f"两融余额 {balance_number / 10000:.2f}万")
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
 
     def _profile_parts(self, profile: dict[str, Any]) -> str:
         parts: list[str] = []

@@ -10,6 +10,7 @@ from app.db.models import (
     DailyBar,
     FinancialIndicator,
     LimitEvent,
+    MarginDetail,
     SectorBar,
     SectorMember,
     StockProfile,
@@ -77,6 +78,8 @@ class QuantService:
             data_sources.append("tushare_fina_indicator")
         if any(item.get("daily_factors", {}).get("limit_event") for item in selected):
             data_sources.append("tushare_limit_list_d")
+        if any(item.get("daily_factors", {}).get("margin_detail") for item in selected):
+            data_sources.append("tushare_margin_detail")
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -144,6 +147,9 @@ class QuantService:
             "limit_event_symbols": sum(
                 1 for item in items if item.get("daily_factors", {}).get("limit_event")
             ),
+            "margin_detail_symbols": sum(
+                1 for item in items if item.get("daily_factors", {}).get("margin_detail")
+            ),
         }
         return {
             "universe_size": payload["universe_size"],
@@ -194,6 +200,7 @@ class QuantService:
             ),
             "sector_heat": self._sector_heat_score(daily),
             "limit_sentiment": self._limit_sentiment_score(daily),
+            "margin_financing": self._margin_financing_score(daily),
             "financial_quality": self._financial_quality_score(financial_payload),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
@@ -241,6 +248,7 @@ class QuantService:
                 + factor_scores["moneyflow_large"] * 2
                 + factor_scores["sector_heat"] * 4
                 + factor_scores["limit_sentiment"] * 4
+                + factor_scores["margin_financing"] * 3
                 + factor_scores["financial_quality"] * 4
             )
         return round(score, 4)
@@ -278,6 +286,17 @@ class QuantService:
         if limit_type == "D":
             return -1.0
         return 0.0
+
+    def _margin_financing_score(self, daily: dict[str, Any]) -> float:
+        margin = daily.get("margin_detail") or {}
+        if not isinstance(margin, dict):
+            return 0.0
+        net_buy = _number(margin.get("net_financing_buy"))
+        balance = _number(margin.get("rzrqye"))
+        score = max(min(net_buy / 100000000.0, 1.0), -1.0)
+        if balance > 0:
+            score += min(math.log10(balance + 1) / 20.0, 0.5)
+        return max(min(score, 1.0), -1.0)
 
     def _financial_quality_score(self, financial: dict[str, Any]) -> float:
         if not financial:
@@ -324,6 +343,9 @@ class QuantService:
         limit_events = self._limit_events_by_symbol(db, symbols)
         for symbol, event in limit_events.items():
             factors.setdefault(symbol, self._empty_daily_factors())["limit_event"] = event
+        margin_details = self._margin_details_by_symbol(db, symbols)
+        for symbol, detail in margin_details.items():
+            factors.setdefault(symbol, self._empty_daily_factors())["margin_detail"] = detail
         return factors
 
     def _profiles_by_symbol(
@@ -427,6 +449,36 @@ class QuantService:
             for symbol, row in latest.items()
         }
 
+    def _margin_details_by_symbol(
+        self,
+        db: Session,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        rows = db.scalars(
+            select(MarginDetail)
+            .where(MarginDetail.symbol.in_(symbols))
+            .order_by(MarginDetail.symbol, desc(MarginDetail.trade_date))
+        ).all()
+        latest: dict[str, MarginDetail] = {}
+        for row in rows:
+            latest.setdefault(row.symbol, row)
+        return {
+            symbol: {
+                "trade_date": row.trade_date,
+                "name": row.name,
+                "rzye": _number(row.rzye),
+                "rqye": _number(row.rqye),
+                "rzmre": _number(row.rzmre),
+                "rqyl": _number(row.rqyl),
+                "rzche": _number(row.rzche),
+                "rqchl": _number(row.rqchl),
+                "rqmcl": _number(row.rqmcl),
+                "rzrqye": _number(row.rzrqye),
+                "net_financing_buy": _number(row.rzmre) - _number(row.rzche),
+            }
+            for symbol, row in latest.items()
+        }
+
     def _sector_heat_by_symbol(
         self,
         db: Session,
@@ -511,6 +563,7 @@ class QuantService:
             ),
             "sector_heat": [],
             "limit_event": None,
+            "margin_detail": None,
         }
 
     def _empty_daily_factors(self) -> dict[str, Any]:
@@ -537,6 +590,7 @@ class QuantService:
             "moneyflow_buy_sm_amount_rate": 0.0,
             "sector_heat": [],
             "limit_event": None,
+            "margin_detail": None,
         }
 
     def _stddev(self, values: list[float]) -> float:

@@ -352,6 +352,32 @@ class LimitEvent(Base):
     )
 
 
+class MarginDetail(Base):
+    __tablename__ = "margin_details"
+    __table_args__ = (
+        UniqueConstraint("symbol", "trade_date", name="uq_margin_details_symbol_trade_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    trade_date: Mapped[str] = mapped_column(String(8), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    rzye: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rqye: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rzmre: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rqyl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rzche: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rqchl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rqmcl: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rzrqye: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_margin_detail")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

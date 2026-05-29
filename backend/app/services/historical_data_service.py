@@ -18,6 +18,7 @@ from app.db.models import (
     FinancialIndicator,
     IndexBar,
     LimitEvent,
+    MarginDetail,
     SectorBar,
     SectorMember,
     StockProfile,
@@ -51,6 +52,9 @@ _TUSHARE_LIMIT_LIST_D_FIELDS = (
     "trade_date,ts_code,industry,name,close,pct_chg,amount,limit_amount,float_mv,"
     "total_mv,turnover_ratio,fd_amount,first_time,last_time,open_times,up_stat,"
     "limit_times,limit"
+)
+_TUSHARE_MARGIN_DETAIL_FIELDS = (
+    "trade_date,ts_code,name,rzye,rqye,rzmre,rqyl,rzche,rqchl,rqmcl,rzrqye"
 )
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_THS_MEMBER_WORKERS = 2
@@ -381,6 +385,14 @@ class HistoricalDataService:
             {"trade_date": _normalize_trade_date(trade_date)}
         )
 
+    def fetch_margin_detail_rows(self, trade_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare margin_detail 数据。")
+        return self._request_tushare_margin_detail(
+            {"trade_date": _normalize_trade_date(trade_date)}
+        )
+
     def fetch_financial_indicator_rows(self, symbols: list[str]) -> list[dict[str, Any]]:
         settings = get_settings()
         if not settings.tushare_token:
@@ -478,6 +490,14 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_LIMIT_LIST_D_FIELDS,
             label="limit_list_d",
+        )
+
+    def _request_tushare_margin_detail(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="margin_detail",
+            params=params,
+            fields=_TUSHARE_MARGIN_DETAIL_FIELDS,
+            label="margin_detail",
         )
 
     def _request_tushare_api(
@@ -635,6 +655,18 @@ class HistoricalDataService:
         except RuntimeError as exc:
             limit_event_error = str(exc)
 
+        margin_detail_error = None
+        margin_detail_count = 0
+        try:
+            margin_detail_count = self._store_margin_detail_rows(
+                db,
+                normalized_date,
+                self.fetch_margin_detail_rows(normalized_date),
+                normalized_symbols,
+            )
+        except RuntimeError as exc:
+            margin_detail_error = str(exc)
+
         stored_count = 0
         skipped_count = 0
         for row in rows:
@@ -709,6 +741,8 @@ class HistoricalDataService:
             "sector_member_error": sector_member_error,
             "limit_event_count": limit_event_count,
             "limit_event_error": limit_event_error,
+            "margin_detail_count": margin_detail_count,
+            "margin_detail_error": margin_detail_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -973,6 +1007,44 @@ class HistoricalDataService:
             stored_count += 1
         return stored_count
 
+    def _store_margin_detail_rows(
+        self,
+        db: Session,
+        trade_date: str,
+        rows: list[dict[str, Any]],
+        symbols: list[str] | None,
+    ) -> int:
+        symbol_filter = set(symbols or [])
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            if symbol_filter and symbol not in symbol_filter:
+                continue
+            row_trade_date = _normalize_trade_date(str(row.get("trade_date") or trade_date))
+            if row_trade_date != trade_date:
+                continue
+            existing = db.scalar(
+                select(MarginDetail).where(
+                    MarginDetail.symbol == symbol,
+                    MarginDetail.trade_date == row_trade_date,
+                )
+            )
+            detail = existing or MarginDetail(symbol=symbol, trade_date=row_trade_date)
+            detail.name = str(row.get("name") or detail.name or symbol)
+            detail.rzye = _to_float(row.get("rzye"))
+            detail.rqye = _to_float(row.get("rqye"))
+            detail.rzmre = _to_float(row.get("rzmre"))
+            detail.rqyl = _to_float(row.get("rqyl"))
+            detail.rzche = _to_float(row.get("rzche"))
+            detail.rqchl = _to_float(row.get("rqchl"))
+            detail.rqmcl = _to_float(row.get("rqmcl"))
+            detail.rzrqye = _to_float(row.get("rzrqye"))
+            detail.source = "tushare_margin_detail"
+            detail.raw_payload = dict(row)
+            db.add(detail)
+            stored_count += 1
+        return stored_count
+
     def refresh_daily_range(
         self,
         db: Session,
@@ -1018,6 +1090,8 @@ class HistoricalDataService:
                     "sector_member_error": None,
                     "limit_event_count": 0,
                     "limit_event_error": None,
+                    "margin_detail_count": 0,
+                    "margin_detail_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -1070,6 +1144,8 @@ class HistoricalDataService:
                             "sector_member_error": None,
                             "limit_event_count": 0,
                             "limit_event_error": None,
+                            "margin_detail_count": 0,
+                            "margin_detail_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"
@@ -1123,6 +1199,7 @@ class HistoricalDataService:
             "tushare_sector": 0,
             "tushare_sector_member": 0,
             "tushare_limit_list_d": 0,
+            "tushare_margin_detail": 0,
         }
         errors: dict[str, list[str]] = defaultdict(list)
         for item in daily_results:
@@ -1134,6 +1211,7 @@ class HistoricalDataService:
             counts["tushare_sector"] += int(item.get("sector_count") or 0)
             counts["tushare_sector_member"] += int(item.get("sector_member_count") or 0)
             counts["tushare_limit_list_d"] += int(item.get("limit_event_count") or 0)
+            counts["tushare_margin_detail"] += int(item.get("margin_detail_count") or 0)
             for key, source in (
                 ("error", "tushare_daily"),
                 ("daily_basic_error", "tushare_daily_basic"),
@@ -1142,6 +1220,7 @@ class HistoricalDataService:
                 ("sector_error", "tushare_sector"),
                 ("sector_member_error", "tushare_sector_member"),
                 ("limit_event_error", "tushare_limit_list_d"),
+                ("margin_detail_error", "tushare_margin_detail"),
             ):
                 message = item.get(key)
                 if message:

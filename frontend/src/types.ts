@@ -278,6 +278,19 @@ export interface QuantCandidate {
       fd_amount?: number
       turnover_ratio?: number
     } | null
+    margin_detail?: {
+      trade_date?: string | null
+      name?: string | null
+      rzye?: number
+      rqye?: number
+      rzmre?: number
+      rqyl?: number
+      rzche?: number
+      rqchl?: number
+      rqmcl?: number
+      rzrqye?: number
+      net_financing_buy?: number
+    } | null
   }
   rationale: string
 }

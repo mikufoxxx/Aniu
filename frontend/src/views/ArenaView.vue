@@ -336,6 +336,7 @@
               <span v-if="profileText(item)" class="position-symbol">{{ profileText(item) }}</span>
               <span v-if="financialText(item)" class="position-symbol">{{ financialText(item) }}</span>
               <span v-if="limitEventText(item)" class="position-symbol">{{ limitEventText(item) }}</span>
+              <span v-if="marginText(item)" class="position-symbol">{{ marginText(item) }}</span>
             </div>
             <div>{{ item.score.toFixed(2) }}</div>
             <div>
@@ -859,6 +860,7 @@ function sourceCountsText(counts: Record<string, number> | undefined): string {
     ['板块', counts.tushare_sector],
     ['成分', counts.tushare_sector_member],
     ['涨跌停', counts.tushare_limit_list_d],
+    ['两融', counts.tushare_margin_detail],
   ].filter(([, value]) => typeof value === 'number' && value > 0)
   if (!items.length) return '--'
   return items.map(([label, value]) => `${label}${formatInteger(value as number)}`).join(' / ')
@@ -897,6 +899,19 @@ function limitEventText(item: QuantCandidate): string {
   }
   if (typeof event.open_times === 'number' && event.open_times > 0) {
     parts.push(`开${event.open_times}`)
+  }
+  return parts.join(' · ')
+}
+
+function marginText(item: QuantCandidate): string {
+  const margin = item.daily_factors?.margin_detail
+  if (!margin) return ''
+  const parts: string[] = []
+  if (typeof margin.net_financing_buy === 'number' && margin.net_financing_buy !== 0) {
+    parts.push(`融净 ${formatAmount(margin.net_financing_buy)}`)
+  }
+  if (typeof margin.rzrqye === 'number' && margin.rzrqye > 0) {
+    parts.push(`两融 ${formatAmount(margin.rzrqye)}`)
   }
   return parts.join(' · ')
 }

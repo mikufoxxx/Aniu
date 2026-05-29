@@ -818,6 +818,88 @@ def test_refresh_daily_bars_stores_tushare_limit_events(monkeypatch, tmp_path) -
     _reset_state()
 
 
+def test_refresh_daily_bars_stores_tushare_margin_details(monkeypatch, tmp_path) -> None:
+    from app.db.models import MarginDetail
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date, symbols=None):
+        return [
+            {"ts_code": "600519.SH", "trade_date": trade_date, "close": 100, "amount": 9000},
+            {"ts_code": "000001.SZ", "trade_date": trade_date, "close": 10, "amount": 1000},
+        ]
+
+    def fake_fetch_margin_rows(trade_date):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": trade_date,
+                "name": "贵州茅台",
+                "rzye": 3_200_000_000,
+                "rqye": 42_000_000,
+                "rzmre": 180_000_000,
+                "rqyl": 120_000,
+                "rzche": 90_000_000,
+                "rqchl": 15_000,
+                "rqmcl": 22_000,
+                "rzrqye": 3_242_000_000,
+            },
+            {
+                "ts_code": "000001.SZ",
+                "trade_date": trade_date,
+                "name": "平安银行",
+                "rzye": 1_100_000_000,
+                "rqye": 12_000_000,
+                "rzmre": 20_000_000,
+                "rzche": 40_000_000,
+                "rzrqye": 1_112_000_000,
+            },
+            {
+                "ts_code": "300750.SZ",
+                "trade_date": trade_date,
+                "name": "宁德时代",
+                "rzye": 5_000_000_000,
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_index_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_limit_list_rows", lambda *args: [])
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_margin_detail_rows",
+        fake_fetch_margin_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_daily_bars(
+                db,
+                trade_date="20260528",
+                symbols=["600519.SH", "000001.SZ"],
+            )
+            rows = db.query(MarginDetail).order_by(MarginDetail.symbol).all()
+
+    assert result["margin_detail_count"] == 2
+    assert result["margin_detail_error"] is None
+    assert [(item.symbol, item.name) for item in rows] == [
+        ("000001.SZ", "平安银行"),
+        ("600519.SH", "贵州茅台"),
+    ]
+    assert rows[1].rzye == 3_200_000_000
+    assert rows[1].rqye == 42_000_000
+    assert rows[1].rzmre == 180_000_000
+    assert rows[1].rzche == 90_000_000
+    assert rows[1].rzrqye == 3_242_000_000
+    assert rows[1].source == "tushare_margin_detail"
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 
@@ -880,6 +962,7 @@ def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_p
         "tushare_sector": 3016,
         "tushare_sector_member": 210000,
         "tushare_limit_list_d": 0,
+        "tushare_margin_detail": 0,
     }
     assert payload["data_source_errors"] == {
         "tushare_moneyflow_ths": ["20260528: moneyflow partial"],

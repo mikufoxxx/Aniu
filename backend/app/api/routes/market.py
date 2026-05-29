@@ -17,6 +17,8 @@ from app.schemas.aniu import (
     DailyRangeRefreshResponse,
     DailyRefreshRequest,
     DailyRefreshResponse,
+    MarketDataMaintenanceRunRequest,
+    MarketDataMaintenanceRunResponse,
     MarketSourceHealthResponse,
     QuantCandidatesRequest,
     QuantCandidatesResponse,
@@ -25,6 +27,7 @@ from app.schemas.aniu import (
 )
 from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
+from app.services.market_data_maintenance_service import market_data_maintenance_service
 from app.services.market_data_service import market_data_service
 from app.services.quant_service import quant_service
 
@@ -104,6 +107,26 @@ def refresh_daily_bar_range(
             start_date=payload.start_date,
             end_date=payload.end_date,
             symbols=payload.symbols,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/market/maintenance/run", response_model=MarketDataMaintenanceRunResponse)
+def run_market_data_maintenance(
+    payload: MarketDataMaintenanceRunRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> MarketDataMaintenanceRunResponse:
+    try:
+        return market_data_maintenance_service.run_now(
+            db,
+            end_date=payload.end_date,
+            lookback_days=payload.lookback_days,
+            symbols=payload.symbols,
+            dataset_limit=payload.dataset_limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

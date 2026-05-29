@@ -232,6 +232,12 @@ export interface QuantDatasetPayload {
   items: QuantCandidate[]
 }
 
+export interface MarketDataMaintenancePayload {
+  status: string
+  refresh: DailyRangeRefreshPayload
+  dataset: QuantDatasetPayload
+}
+
 export interface DailyRefreshPayload {
   trade_date: string
   source: string

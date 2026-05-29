@@ -4,6 +4,7 @@ import logging
 from threading import Event, Thread
 
 from app.core.config import get_settings
+from app.services.market_data_maintenance_service import market_data_maintenance_service
 from app.services.run_service import run_service
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class SchedulerService:
         while not self._stop_event.is_set():
             try:
                 run_service.process_due_schedule()
+                market_data_maintenance_service.process_due_jobs()
             except Exception as exc:
                 logger.exception("scheduler loop error: %s", exc)
             self._stop_event.wait(poll_seconds)

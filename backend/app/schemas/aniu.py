@@ -367,6 +367,19 @@ class DailyRangeRefreshResponse(BaseModel):
     daily_results: list[DailyRefreshResponse] = Field(default_factory=list)
 
 
+class MarketDataMaintenanceRunRequest(BaseModel):
+    end_date: str | None = Field(default=None, min_length=8, max_length=10)
+    lookback_days: int = Field(default=10, ge=1, le=120)
+    symbols: list[str] | None = None
+    dataset_limit: int = Field(default=100, ge=1, le=500)
+
+
+class MarketDataMaintenanceRunResponse(BaseModel):
+    status: str
+    refresh: DailyRangeRefreshResponse
+    dataset: QuantDatasetResponse
+
+
 class BacktestRequest(BaseModel):
     symbols: list[str] = Field(min_length=1, max_length=200)
     start_date: str = Field(min_length=8, max_length=10)

@@ -105,6 +105,13 @@
             <button
               class="button ghost small soft-header-button overview-refresh-button"
               :disabled="historyLoading"
+              @click="runMaintenance"
+            >
+              {{ historyLoading ? '维护中…' : '数据维护' }}
+            </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="historyLoading"
               @click="runBacktest"
             >
               {{ historyLoading ? '回测中…' : '运行回测' }}
@@ -127,6 +134,10 @@
           <label class="arena-field">
             <span>刷新结束</span>
             <input v-model="refreshEndDate" type="text" placeholder="20260528" />
+          </label>
+          <label class="arena-field">
+            <span>维护回看</span>
+            <input v-model.number="maintenanceLookbackDays" type="number" min="1" max="120" />
           </label>
           <label class="arena-field">
             <span>开始日期</span>
@@ -323,6 +334,7 @@ const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
 const backtestResult = ref<BacktestPayload | null>(null)
 const refreshStartDate = ref('20260526')
 const refreshEndDate = ref('20260528')
+const maintenanceLookbackDays = ref(10)
 const backtestStartDate = ref('20260526')
 const backtestEndDate = ref('20260528')
 const refreshFullMarket = ref(true)
@@ -438,6 +450,26 @@ async function refreshDaily(): Promise<void> {
   }
 }
 
+async function runMaintenance(): Promise<void> {
+  historyLoading.value = true
+  errorMessage.value = ''
+  try {
+    const payload = await api.runMarketDataMaintenance({
+      end_date: refreshEndDate.value,
+      lookback_days: maintenanceLookbackDays.value,
+      symbols: refreshFullMarket.value ? undefined : parseSymbols(),
+      dataset_limit: 100,
+    })
+    dailyRefreshResult.value = payload.refresh
+    quantDataset.value = payload.dataset
+    candidates.value = payload.dataset.items
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '数据维护失败。'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 async function runBacktest(): Promise<void> {
   historyLoading.value = true
   errorMessage.value = ''
@@ -532,7 +564,7 @@ onMounted(async () => {
 
 .arena-history-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
 }
 

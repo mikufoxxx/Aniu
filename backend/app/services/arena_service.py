@@ -395,11 +395,10 @@ class ArenaService:
         data_sources: list[str],
         app_settings: AppSettings,
     ) -> dict[str, Any] | None:
-        if not app_settings.llm_base_url or not app_settings.llm_api_key:
+        llm_config = self._resolve_llm_config(agent=agent, app_settings=app_settings)
+        if llm_config is None:
             return None
-        model = str(agent.get("model") or app_settings.llm_model or "").strip()
-        if not model:
-            return None
+        model = llm_config["model"]
 
         payload = {
             "model": model,
@@ -427,8 +426,8 @@ class ArenaService:
         }
         try:
             response = llm_service._call_llm(
-                base_url=str(app_settings.llm_base_url),
-                api_key=str(app_settings.llm_api_key),
+                base_url=llm_config["base_url"],
+                api_key=llm_config["api_key"],
                 payload=payload,
                 timeout_seconds=60,
             )
@@ -450,7 +449,7 @@ class ArenaService:
             reason = str(raw_decision.get("reason") or "LLM 基于候选快照执行模拟买入。")
             context = {
                 "used": True,
-                "provider": str(agent.get("provider") or "openai-compatible"),
+                "provider": llm_config["provider"],
                 "model": model,
                 "raw_decision": raw_decision,
             }
@@ -494,6 +493,50 @@ class ArenaService:
             }
         except Exception:
             return None
+
+    def _resolve_llm_config(
+        self,
+        *,
+        agent: dict[str, str],
+        app_settings: AppSettings,
+    ) -> dict[str, str] | None:
+        provider = str(
+            agent.get("provider")
+            or getattr(app_settings, "provider_name", None)
+            or "openai-compatible"
+        ).strip()
+        provider_configs = getattr(app_settings, "llm_provider_configs", None)
+        provider_config: dict[str, Any] = {}
+        if isinstance(provider_configs, dict):
+            raw_config = provider_configs.get(provider) or provider_configs.get(provider.lower())
+            if isinstance(raw_config, dict):
+                provider_config = raw_config
+
+        base_url = str(
+            provider_config.get("base_url")
+            or getattr(app_settings, "llm_base_url", None)
+            or ""
+        ).strip()
+        api_key = str(
+            provider_config.get("api_key")
+            or getattr(app_settings, "llm_api_key", None)
+            or ""
+        ).strip()
+        model = str(
+            agent.get("model")
+            or provider_config.get("default_model")
+            or provider_config.get("model")
+            or getattr(app_settings, "llm_model", None)
+            or ""
+        ).strip()
+        if not base_url or not api_key or not model:
+            return None
+        return {
+            "provider": provider,
+            "base_url": base_url,
+            "api_key": api_key,
+            "model": model,
+        }
 
     def _llm_prompt(
         self,

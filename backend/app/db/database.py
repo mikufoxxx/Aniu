@@ -96,6 +96,8 @@ def _ensure_app_settings_columns(engine) -> None:
         statements.append(
             "ALTER TABLE app_settings ADD COLUMN automation_context_detected_at DATETIME"
         )
+    if "llm_provider_configs" not in columns:
+        statements.append("ALTER TABLE app_settings ADD COLUMN llm_provider_configs JSON")
 
     if not statements:
         return

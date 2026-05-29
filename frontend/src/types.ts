@@ -5,6 +5,7 @@ export interface AppSettings {
   llm_base_url: string | null
   llm_api_key: string | null
   llm_model: string
+  llm_provider_configs: Record<string, Record<string, unknown>>
   automation_context_window_tokens: number | null
   system_prompt: string
   created_at: string

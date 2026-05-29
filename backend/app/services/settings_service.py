@@ -25,6 +25,7 @@ class SettingsService:
                 llm_base_url=env.openai_base_url,
                 llm_api_key=env.openai_api_key,
                 llm_model=env.openai_model,
+                llm_provider_configs={},
                 system_prompt=DEFAULT_SYSTEM_PROMPT,
             )
             db.add(instance)
@@ -41,6 +42,11 @@ class SettingsService:
         for field, value in payload.model_dump().items():
             if field in sensitive_fields and isinstance(value, str) and "****" in value:
                 continue
+            if field == "llm_provider_configs":
+                value = self._merge_masked_provider_configs(
+                    existing=getattr(instance, "llm_provider_configs", None),
+                    incoming=value,
+                )
             old_value = getattr(instance, field, None)
             if old_value != value:
                 changed_fields.append(field)
@@ -52,6 +58,34 @@ class SettingsService:
         instance.updated_at = assume_utc(instance.updated_at)
         logger.info("settings updated: changed_fields=%s", changed_fields)
         return instance
+
+    def _merge_masked_provider_configs(
+        self,
+        *,
+        existing: object,
+        incoming: object,
+    ) -> dict[str, object]:
+        if not isinstance(incoming, dict):
+            return {}
+        existing_configs = existing if isinstance(existing, dict) else {}
+        merged: dict[str, object] = {}
+        for provider, raw_config in incoming.items():
+            if not isinstance(raw_config, dict):
+                continue
+            provider_key = str(provider).strip()
+            if not provider_key:
+                continue
+            config = dict(raw_config)
+            api_key = config.get("api_key")
+            existing_config = existing_configs.get(provider_key)
+            if (
+                isinstance(api_key, str)
+                and "****" in api_key
+                and isinstance(existing_config, dict)
+            ):
+                config["api_key"] = existing_config.get("api_key")
+            merged[provider_key] = config
+        return merged
 
 
 settings_service = SettingsService()

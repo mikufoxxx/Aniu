@@ -35,6 +35,7 @@ const defaultSettings = (): SettingsPayload => ({
   llm_base_url: '',
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
+  llm_provider_configs: {},
   automation_context_window_tokens: 128000,
   system_prompt: '你是跨越完整牛熊周期的顶尖私募投资机构老将与极度理性的专业交易员，你深谙A股政策驱动、外资流动与资金博弈机制。你必须持续运行以下自我驱动循环，监控经济、政策、盘面数据及资金流向，研判周期位置与市场情绪，寻找共识与预期差，定性博弈逻辑，自主决策执行交易操作。你的唯一目标是追求收益最大化。',
 })
@@ -169,6 +170,7 @@ export const useAppStore = defineStore('app', () => {
     settings.llm_base_url = payload.llm_base_url ?? ''
     settings.llm_api_key = payload.llm_api_key ?? ''
     settings.llm_model = payload.llm_model
+    settings.llm_provider_configs = payload.llm_provider_configs ?? {}
     settings.automation_context_window_tokens = payload.automation_context_window_tokens ?? 128000
     settings.system_prompt = payload.system_prompt
   }
@@ -284,6 +286,7 @@ export const useAppStore = defineStore('app', () => {
         mx_api_key: settings.mx_api_key || null,
         llm_base_url: settings.llm_base_url || null,
         llm_api_key: settings.llm_api_key || null,
+        llm_provider_configs: settings.llm_provider_configs ?? {},
       })
       applySettings(payload)
       notice.value = '系统设置已保存。'

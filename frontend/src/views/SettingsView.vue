@@ -38,6 +38,11 @@
               <input v-model="settings.mx_api_key" type="password" placeholder="妙想接口 apikey" />
               <p class="field-help">用于访问东方财富妙想接口的密钥。</p>
             </label>
+            <label class="field">
+              <span>多 AI 服务商</span>
+              <textarea v-model="providerConfigsText" rows="8" spellcheck="false" />
+              <p class="field-help">JSON 格式。key 是 provider，例如 deepseek；value 支持 base_url、api_key、default_model。</p>
+            </label>
           </div>
           <div class="settings-right">
             <label class="field">
@@ -55,7 +60,7 @@
             class="button primary"
             :class="{ 'is-loading': busy }"
             :disabled="busy"
-            @click="saveSettings"
+            @click="saveSettingsWithProviderConfigs"
           >
             保存设置
           </button>
@@ -233,6 +238,25 @@ const {
   deleteSkill: deleteManagedSkill,
 } = useSkillManager()
 const skillArchiveInputRef = ref<HTMLInputElement | null>(null)
+const providerConfigsText = ref('{}')
+
+function formatProviderConfigs(value: Record<string, Record<string, unknown>> | undefined) {
+  return JSON.stringify(value ?? {}, null, 2)
+}
+
+async function saveSettingsWithProviderConfigs() {
+  try {
+    const parsed = JSON.parse(providerConfigsText.value || '{}')
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('多 AI 服务商配置必须是 JSON 对象。')
+    }
+    settings.value.llm_provider_configs = parsed
+    await saveSettings()
+    providerConfigsText.value = formatProviderConfigs(settings.value.llm_provider_configs)
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '多 AI 服务商配置格式错误。'
+  }
+}
 
 function openImportFileDialog() {
   if (skillArchiveInputRef.value) {
@@ -296,6 +320,7 @@ onMounted(async () => {
       store.loadSettings(),
       loadSkills(),
     ])
+    providerConfigsText.value = formatProviderConfigs(settings.value.llm_provider_configs)
   } catch (error) {
     errorMessage.value = (error as Error).message
   }

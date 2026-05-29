@@ -14,12 +14,28 @@ def _mask_key(value: str | None) -> str | None:
     return value[:3] + "****" + value[-4:]
 
 
+def _mask_provider_configs(value: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    masked: dict[str, Any] = {}
+    for provider, config in value.items():
+        if not isinstance(config, dict):
+            continue
+        provider_config = dict(config)
+        api_key = provider_config.get("api_key")
+        if isinstance(api_key, str):
+            provider_config["api_key"] = _mask_key(api_key)
+        masked[str(provider)] = provider_config
+    return masked
+
+
 class AppSettingsBase(BaseModel):
     provider_name: str = "openai-compatible"
     mx_api_key: str | None = Field(default=None, max_length=512)
     llm_base_url: str | None = Field(default=None, max_length=512)
     llm_api_key: str | None = Field(default=None, max_length=512)
     llm_model: str = Field(default="gpt-4o-mini", max_length=128)
+    llm_provider_configs: dict[str, Any] = Field(default_factory=dict)
     system_prompt: str = Field(max_length=20000)
     automation_session_id: int | None = None
     automation_context_window_tokens: int | None = Field(default=128000, ge=4096)
@@ -39,6 +55,7 @@ class AppSettingsRead(AppSettingsBase):
     def mask_sensitive_fields(self) -> "AppSettingsRead":
         self.mx_api_key = _mask_key(self.mx_api_key)
         self.llm_api_key = _mask_key(self.llm_api_key)
+        self.llm_provider_configs = _mask_provider_configs(self.llm_provider_configs)
         return self
 
 

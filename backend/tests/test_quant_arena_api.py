@@ -586,6 +586,134 @@ def test_arena_run_uses_llm_decision_for_each_agent_when_configured(
     _reset_state()
 
 
+def test_arena_run_resolves_llm_credentials_by_agent_provider(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    calls: list[dict[str, object]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 2.0,
+                "amount": 8_000_000,
+                "turnover": 0.4,
+                "volume_ratio": 1.1,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            }
+        ]
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        calls.append(
+            {
+                "base_url": base_url,
+                "api_key": api_key,
+                "payload": payload,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "BUY",
+                                "symbol": "600519.SH",
+                                "allocation_ratio": 0.1,
+                                "reason": f"{payload['model']} 独立判断买入。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            settings = db.query(AppSettings).first()
+            assert settings is not None
+            settings.llm_base_url = "https://global.example/v1"
+            settings.llm_api_key = "global-key"
+            settings.llm_model = "global-model"
+            settings.llm_provider_configs = {
+                "deepseek": {
+                    "base_url": "https://deepseek.example/v1",
+                    "api_key": "deepseek-key",
+                    "default_model": "deepseek-chat",
+                },
+                "openai-compatible": {
+                    "base_url": "https://openai.example/v1",
+                    "api_key": "openai-key",
+                    "default_model": "gpt-4o-mini",
+                },
+            }
+            db.add(DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900))
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "symbols": ["600519.SH"],
+                "initial_cash": 200000,
+                "agents": [
+                    {
+                        "id": "deepseek_ai",
+                        "name": "DeepSeek",
+                        "style": "momentum",
+                        "provider": "deepseek",
+                        "model": "",
+                        "prompt": "偏动量突破",
+                    },
+                    {
+                        "id": "openai_ai",
+                        "name": "OpenAI",
+                        "style": "balanced",
+                        "provider": "openai-compatible",
+                        "model": "",
+                        "prompt": "偏均衡",
+                    },
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert [
+        (
+            call["base_url"],
+            call["api_key"],
+            call["payload"]["model"],
+        )
+        for call in calls
+    ] == [
+        ("https://deepseek.example/v1", "deepseek-key", "deepseek-chat"),
+        ("https://openai.example/v1", "openai-key", "gpt-4o-mini"),
+    ]
+    payload = response.json()
+    contexts = [order["decision_context"] for order in payload["orders"]]
+    assert [context["llm_decision"]["provider"] for context in contexts] == [
+        "deepseek",
+        "openai-compatible",
+    ]
+    assert [context["llm_decision"]["model"] for context in contexts] == [
+        "deepseek-chat",
+        "gpt-4o-mini",
+    ]
+
+    _reset_state()
+
+
 def test_arena_run_uses_llm_sell_decision_for_existing_position(
     monkeypatch,
     tmp_path,

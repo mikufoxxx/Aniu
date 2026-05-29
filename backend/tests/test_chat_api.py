@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core import rate_limit as rate_limit_module
 from app.db import database as database_module
 from app.db.database import session_scope
-from app.db.models import ChatMessageRecord, ChatSession, StrategyRun
+from app.db.models import AppSettings, ChatMessageRecord, ChatSession, StrategyRun
 from app.main import create_app
 from app.skills import skill_registry
 from app.services.event_bus import event_bus
@@ -331,6 +331,77 @@ def test_settings_endpoint_updates_max_context_tokens(monkeypatch, tmp_path) -> 
     payload = response.json()
     assert payload["llm_model"] == "gpt-5.4"
     assert payload["automation_context_window_tokens"] == 128000
+
+    database_module._engine = None
+    database_module._session_local = None
+    get_settings.cache_clear()
+
+
+def test_settings_endpoint_masks_and_preserves_llm_provider_configs(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.put(
+            "/api/aniu/settings",
+            json={
+                "provider_name": "openai-compatible",
+                "mx_api_key": None,
+                "llm_base_url": "https://example.com/v1",
+                "llm_api_key": "sk-test",
+                "llm_model": "gpt-5.4",
+                "llm_provider_configs": {
+                    "deepseek": {
+                        "base_url": "https://api.deepseek.com/v1",
+                        "api_key": "deepseek-secret",
+                        "default_model": "deepseek-chat",
+                    }
+                },
+                "automation_context_window_tokens": 128000,
+                "system_prompt": "system prompt",
+                "automation_session_id": None,
+                "automation_recent_message_limit": 24,
+                "automation_enable_auto_compaction": True,
+                "automation_idle_summary_hours": 12,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 200
+        masked = response.json()["llm_provider_configs"]["deepseek"]["api_key"]
+        assert masked == "dee****cret"
+
+        preserve_response = client.put(
+            "/api/aniu/settings",
+            json={
+                "provider_name": "openai-compatible",
+                "mx_api_key": None,
+                "llm_base_url": "https://example.com/v1",
+                "llm_api_key": "sk-test",
+                "llm_model": "gpt-5.4",
+                "llm_provider_configs": {
+                    "deepseek": {
+                        "base_url": "https://api.deepseek.com/v1",
+                        "api_key": masked,
+                        "default_model": "deepseek-v3",
+                    }
+                },
+                "automation_context_window_tokens": 128000,
+                "system_prompt": "system prompt",
+                "automation_session_id": None,
+                "automation_recent_message_limit": 24,
+                "automation_enable_auto_compaction": True,
+                "automation_idle_summary_hours": 12,
+            },
+            headers=headers,
+        )
+
+    assert preserve_response.status_code == 200
+    with session_scope() as db:
+        settings = db.query(AppSettings).first()
+        assert settings is not None
+        assert settings.llm_provider_configs["deepseek"]["api_key"] == "deepseek-secret"
+        assert settings.llm_provider_configs["deepseek"]["default_model"] == "deepseek-v3"
 
     database_module._engine = None
     database_module._session_local = None

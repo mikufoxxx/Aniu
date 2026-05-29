@@ -408,7 +408,7 @@ const marketReports = ref<MarketReport[]>([])
 const marketReportPerformance = ref<Record<number, MarketReportPerformancePayload>>({})
 const refreshStartDate = ref('20260526')
 const refreshEndDate = ref('20260528')
-const maintenanceLookbackDays = ref(10)
+const maintenanceLookbackDays = ref(120)
 const backtestStartDate = ref('20260526')
 const backtestEndDate = ref('20260528')
 const refreshFullMarket = ref(true)
@@ -423,6 +423,10 @@ function parseSymbols(): string[] {
     .split(/[\n,，\s]+/)
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+function selectedSymbols(): string[] | undefined {
+  return refreshFullMarket.value ? undefined : parseSymbols()
 }
 
 async function loadSources(): Promise<void> {
@@ -461,9 +465,10 @@ async function loadCandidates(): Promise<void> {
   errorMessage.value = ''
   try {
     const payload = await api.generateQuantCandidates({
-      symbols: parseSymbols(),
-      limit: 10,
+      symbols: selectedSymbols(),
+      limit: 200,
       prefer_realtime: true,
+      lookback_days: 120,
     })
     candidates.value = payload.candidates
   } catch (error) {
@@ -476,10 +481,10 @@ async function loadQuantDataset(): Promise<void> {
   errorMessage.value = ''
   try {
     const payload = await api.buildQuantDataset({
-      symbols: parseSymbols(),
-      limit: 20,
+      symbols: selectedSymbols(),
+      limit: 200,
       prefer_realtime: true,
-      lookback_days: 20,
+      lookback_days: 120,
     })
     quantDataset.value = payload
     candidates.value = payload.items
@@ -495,9 +500,9 @@ async function loadAIMarketContext(): Promise<void> {
   errorMessage.value = ''
   try {
     aiMarketContext.value = await api.buildAIMarketContext({
-      symbols: parseSymbols(),
-      limit: 10,
-      lookback_days: 20,
+      symbols: selectedSymbols(),
+      limit: 50,
+      lookback_days: 120,
     })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'AI 上下文构建失败。'
@@ -526,9 +531,9 @@ async function generateReport(reportType: 'morning' | 'closing'): Promise<void> 
   try {
     const report = await api.generateMarketReport({
       report_type: reportType,
-      symbols: parseSymbols(),
-      limit: 10,
-      lookback_days: 20,
+      symbols: selectedSymbols(),
+      limit: 50,
+      lookback_days: 120,
     })
     marketReports.value = [report, ...marketReports.value.filter((item) => item.id !== report.id)].slice(0, 6)
     await loadReportPerformance(report.id)
@@ -570,7 +575,7 @@ async function refreshDaily(): Promise<void> {
     dailyRefreshResult.value = await api.refreshDailyRange({
       start_date: refreshStartDate.value,
       end_date: refreshEndDate.value,
-      symbols: refreshFullMarket.value ? undefined : parseSymbols(),
+      symbols: selectedSymbols(),
     })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '日线刷新失败。'
@@ -586,8 +591,8 @@ async function runMaintenance(): Promise<void> {
     const payload = await api.runMarketDataMaintenance({
       end_date: refreshEndDate.value,
       lookback_days: maintenanceLookbackDays.value,
-      symbols: refreshFullMarket.value ? undefined : parseSymbols(),
-      dataset_limit: 100,
+      symbols: selectedSymbols(),
+      dataset_limit: 500,
     })
     dailyRefreshResult.value = payload.refresh
     quantDataset.value = payload.dataset

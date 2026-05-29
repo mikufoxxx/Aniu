@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import DailyBar
@@ -21,6 +21,8 @@ def _number(value: Any, default: float = 0.0) -> float:
 
 
 class QuantService:
+    _AUTO_UNIVERSE_LIMIT = 500
+
     def generate_candidates(
         self,
         *,
@@ -30,7 +32,7 @@ class QuantService:
         prefer_realtime: bool = True,
         lookback_days: int = 20,
     ) -> dict[str, Any]:
-        universe = [normalize_symbol(symbol) for symbol in (symbols or DEFAULT_UNIVERSE)]
+        universe = self._resolve_universe(db, symbols, limit=limit)
         quotes = market_data_service.get_quotes(universe, prefer_realtime=prefer_realtime)
         daily_factors = self._daily_factors_by_symbol(
             db,
@@ -54,6 +56,33 @@ class QuantService:
             "data_sources": data_sources,
             "candidates": selected,
         }
+
+    def _resolve_universe(
+        self,
+        db: Session | None,
+        symbols: list[str] | None,
+        *,
+        limit: int,
+    ) -> list[str]:
+        if symbols:
+            return [normalize_symbol(symbol) for symbol in symbols]
+        stored = self._stored_universe(db, limit=max(limit, self._AUTO_UNIVERSE_LIMIT))
+        return stored or [normalize_symbol(symbol) for symbol in DEFAULT_UNIVERSE]
+
+    def _stored_universe(self, db: Session | None, *, limit: int) -> list[str]:
+        if db is None:
+            return []
+        latest_trade_date = db.scalar(select(func.max(DailyBar.trade_date)))
+        if not latest_trade_date:
+            return []
+        return list(
+            db.scalars(
+                select(DailyBar.symbol)
+                .where(DailyBar.trade_date == latest_trade_date)
+                .order_by(DailyBar.amount.desc(), DailyBar.symbol)
+                .limit(max(1, min(self._AUTO_UNIVERSE_LIMIT, int(limit))))
+            ).all()
+        )
 
     def build_dataset(
         self,

@@ -370,7 +370,7 @@ export const api = {
   getMarketSourceHealth() {
     return request<MarketSourceHealthPayload>(`${API_PREFIX}/market/sources/health`)
   },
-  generateQuantCandidates(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean }) {
+  generateQuantCandidates(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean; lookback_days?: number }) {
     return request<QuantCandidatesPayload>(`${API_PREFIX}/quant/candidates`, {
       method: 'POST',
       body: JSON.stringify(payload),

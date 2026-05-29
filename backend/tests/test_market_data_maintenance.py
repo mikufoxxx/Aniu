@@ -44,6 +44,23 @@ def _reset_state() -> None:
     get_settings.cache_clear()
 
 
+def test_market_data_defaults_maximize_monthly_allowance(monkeypatch) -> None:
+    monkeypatch.delenv("MARKET_DATA_MAINTENANCE_LOOKBACK_DAYS", raising=False)
+    monkeypatch.delenv("MARKET_DATA_MAINTENANCE_DATASET_LIMIT", raising=False)
+    monkeypatch.delenv("AI_MARKET_CONTEXT_LIMIT", raising=False)
+    monkeypatch.delenv("AI_MARKET_CONTEXT_LOOKBACK_DAYS", raising=False)
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.market_data_maintenance_lookback_days == 120
+    assert settings.market_data_maintenance_dataset_limit == 500
+    assert settings.ai_market_context_limit == 50
+    assert settings.ai_market_context_lookback_days == 120
+
+    _reset_state()
+
+
 def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
     monkeypatch,
     tmp_path,

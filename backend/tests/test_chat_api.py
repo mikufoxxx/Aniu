@@ -408,6 +408,26 @@ def test_settings_endpoint_masks_and_preserves_llm_provider_configs(
     get_settings.cache_clear()
 
 
+def test_settings_endpoint_normalizes_null_llm_provider_configs(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            settings = db.query(AppSettings).first()
+            assert settings is not None
+            settings.llm_provider_configs = None
+        response = client.get("/api/aniu/settings", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["llm_provider_configs"] == {}
+
+    database_module._engine = None
+    database_module._session_local = None
+    get_settings.cache_clear()
+
+
 def test_chat_endpoint_rejects_empty_messages(monkeypatch, tmp_path) -> None:
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)

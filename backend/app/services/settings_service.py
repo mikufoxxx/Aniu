@@ -31,6 +31,8 @@ class SettingsService:
             db.add(instance)
             db.commit()
             db.refresh(instance)
+        if instance.llm_provider_configs is None:
+            instance.llm_provider_configs = {}
         instance.created_at = assume_utc(instance.created_at)
         instance.updated_at = assume_utc(instance.updated_at)
         return instance

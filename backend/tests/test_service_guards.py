@@ -216,7 +216,7 @@ def test_build_initial_request_payload_uses_run_type_tool_profile() -> None:
 def test_consume_llm_stream_uses_fresh_http_client_per_request(monkeypatch) -> None:
     service = LLMService()
     created_timeouts: list[int] = []
-    client_ids: list[int] = []
+    clients: list[object] = []
 
     class FakeResponse:
         is_error = False
@@ -245,7 +245,7 @@ def test_consume_llm_stream_uses_fresh_http_client_per_request(monkeypatch) -> N
 
         def stream(self, method, url, headers=None, json=None):
             del method, url, headers, json
-            client_ids.append(id(self))
+            clients.append(self)
             return FakeResponse()
 
     def fake_create_http_client(timeout_seconds: int):
@@ -276,8 +276,8 @@ def test_consume_llm_stream_uses_fresh_http_client_per_request(monkeypatch) -> N
     )
 
     assert created_timeouts == [5, 7]
-    assert len(client_ids) == 2
-    assert client_ids[0] != client_ids[1]
+    assert len(clients) == 2
+    assert clients[0] is not clients[1]
 
 
 def test_consume_llm_stream_reads_json_error_body_from_stream(monkeypatch) -> None:

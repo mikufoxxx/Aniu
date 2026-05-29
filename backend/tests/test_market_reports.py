@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
@@ -9,7 +10,7 @@ from app.core import rate_limit as rate_limit_module
 from app.core.config import get_settings
 from app.db import database as database_module
 from app.db.database import session_scope
-from app.db.models import DailyBar
+from app.db.models import DailyBar, MarketReport
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -119,5 +120,91 @@ def test_market_report_generation_persists_structured_morning_report(monkeypatch
     assert len(reports) == 1
     assert reports[0]["id"] == payload["id"]
     assert reports[0]["recommendations"][0]["symbol"] == "600519.SH"
+
+    _reset_state()
+
+
+def test_market_report_performance_evaluates_recommendation_forward_returns(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 1.0,
+                "amount": 10_000_000,
+                "turnover": 0.5,
+                "volume_ratio": 1.2,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 09:25:00",
+            },
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 0.5,
+                "amount": 8_000_000,
+                "turnover": 0.4,
+                "volume_ratio": 1.1,
+                "source": "tencent",
+                "timestamp": "2026-05-29 09:25:00",
+            },
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260527", close=90, amount=9000),
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=95, amount=9500),
+                    DailyBar(symbol="600519.SH", trade_date="20260529", close=100, amount=10000),
+                    DailyBar(symbol="600519.SH", trade_date="20260601", close=110, amount=11000),
+                    DailyBar(symbol="000001.SZ", trade_date="20260527", close=9.5, amount=900),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=9.8, amount=950),
+                    DailyBar(symbol="000001.SZ", trade_date="20260529", close=10, amount=1000),
+                    DailyBar(symbol="000001.SZ", trade_date="20260601", close=9, amount=1100),
+                ]
+            )
+
+        response = client.post(
+            "/api/aniu/market/reports",
+            headers=headers,
+            json={
+                "report_type": "morning",
+                "symbols": ["600519.SH", "000001.SZ"],
+                "limit": 2,
+                "lookback_days": 3,
+            },
+        )
+        report_id = response.json()["id"]
+
+        with session_scope() as db:
+            report = db.get(MarketReport, report_id)
+            assert report is not None
+            report.created_at = datetime(2026, 5, 29, 8, 45, 0)
+
+        performance_response = client.get(
+            f"/api/aniu/market/reports/{report_id}/performance?horizon_days=1",
+            headers=headers,
+        )
+
+    assert performance_response.status_code == 200
+    payload = performance_response.json()
+    assert payload["report_id"] == report_id
+    assert payload["horizon_days"] == 1
+    assert payload["evaluated_count"] == 2
+    assert payload["average_return_pct"] == 0
+    assert payload["items"][0]["symbol"] == "600519.SH"
+    assert payload["items"][0]["return_pct"] == 10
+    assert payload["items"][1]["symbol"] == "000001.SZ"
+    assert payload["items"][1]["return_pct"] == -10
 
     _reset_state()

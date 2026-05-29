@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import MarketReport
+from app.db.models import DailyBar, MarketReport
 from app.services.ai_market_context_service import ai_market_context_service
 from app.services.market_data_service import DEFAULT_UNIVERSE, normalize_symbol
 from app.services.quant_service import quant_service
@@ -81,6 +81,50 @@ class MarketReportService:
         reports = db.scalars(stmt.limit(max(1, min(100, int(limit))))).all()
         return {"items": [self._payload(report) for report in reports]}
 
+    def evaluate_performance(
+        self,
+        db: Session,
+        *,
+        report_id: int,
+        horizon_days: int = 1,
+    ) -> dict[str, Any]:
+        report = db.get(MarketReport, report_id)
+        if report is None:
+            raise LookupError("报告不存在。")
+
+        normalized_horizon = max(1, min(20, int(horizon_days)))
+        report_date = report.created_at.strftime("%Y%m%d")
+        items: list[dict[str, Any]] = []
+        for recommendation in report.recommendations_payload or []:
+            symbol = str(recommendation.get("symbol") or "").strip()
+            if not symbol:
+                continue
+            bars = db.scalars(
+                select(DailyBar)
+                .where(
+                    DailyBar.symbol == symbol,
+                    DailyBar.trade_date >= report_date,
+                    DailyBar.close.is_not(None),
+                )
+                .order_by(DailyBar.trade_date)
+            ).all()
+            items.append(self._performance_item(recommendation, bars, normalized_horizon))
+
+        evaluated = [item for item in items if item["status"] == "evaluated"]
+        returns = [float(item["return_pct"]) for item in evaluated]
+        return {
+            "report_id": report.id,
+            "report_type": report.report_type,
+            "title": report.title,
+            "horizon_days": normalized_horizon,
+            "evaluated_count": len(evaluated),
+            "pending_count": len(items) - len(evaluated),
+            "average_return_pct": round(sum(returns) / len(returns), 4) if returns else None,
+            "best_return_pct": round(max(returns), 4) if returns else None,
+            "worst_return_pct": round(min(returns), 4) if returns else None,
+            "items": items,
+        }
+
     def _normalize_report_type(self, report_type: str) -> str:
         text = str(report_type or "").strip().lower()
         if text not in REPORT_TITLES:
@@ -115,6 +159,47 @@ class MarketReportService:
                 }
             )
         return recommendations
+
+    def _performance_item(
+        self,
+        recommendation: dict[str, Any],
+        bars: list[DailyBar],
+        horizon_days: int,
+    ) -> dict[str, Any]:
+        base = {
+            "symbol": recommendation.get("symbol"),
+            "name": recommendation.get("name") or recommendation.get("symbol"),
+            "action": recommendation.get("action"),
+            "score": float(recommendation.get("score") or 0),
+            "entry_date": bars[0].trade_date if bars else None,
+            "entry_close": bars[0].close if bars else None,
+            "evaluation_date": None,
+            "evaluation_close": None,
+            "return_pct": None,
+            "status": "pending",
+        }
+        if not bars:
+            base["status"] = "no_entry"
+            return base
+        if len(bars) <= horizon_days:
+            return base
+        entry = bars[0]
+        evaluation = bars[horizon_days]
+        if not entry.close:
+            base["status"] = "no_entry"
+            return base
+        base.update(
+            {
+                "evaluation_date": evaluation.trade_date,
+                "evaluation_close": evaluation.close,
+                "return_pct": round(
+                    ((float(evaluation.close or 0) - float(entry.close)) / float(entry.close)) * 100,
+                    4,
+                ),
+                "status": "evaluated",
+            }
+        )
+        return base
 
     def _reason(self, item: dict[str, Any], action: str) -> str:
         daily = item.get("daily_factors") or {}

@@ -270,6 +270,32 @@ export interface MarketReport {
   created_at: string
 }
 
+export interface MarketReportPerformanceItem {
+  symbol: string
+  name: string
+  action: string
+  score: number
+  entry_date: string | null
+  entry_close: number | null
+  evaluation_date: string | null
+  evaluation_close: number | null
+  return_pct: number | null
+  status: string
+}
+
+export interface MarketReportPerformancePayload {
+  report_id: number
+  report_type: string
+  title: string
+  horizon_days: number
+  evaluated_count: number
+  pending_count: number
+  average_return_pct: number | null
+  best_return_pct: number | null
+  worst_return_pct: number | null
+  items: MarketReportPerformanceItem[]
+}
+
 export interface MarketReportListPayload {
   items: MarketReport[]
 }

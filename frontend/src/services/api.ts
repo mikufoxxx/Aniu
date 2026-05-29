@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenancePayload, MarketReport, MarketReportListPayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenancePayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -405,6 +405,11 @@ export const api = {
       params.set('report_type', options.report_type)
     }
     return request<MarketReportListPayload>(`${API_PREFIX}/market/reports?${params.toString()}`)
+  },
+  getMarketReportPerformance(reportId: number, options: { horizon_days?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('horizon_days', String(options.horizon_days ?? 1))
+    return request<MarketReportPerformancePayload>(`${API_PREFIX}/market/reports/${reportId}/performance?${params.toString()}`)
   },
   refreshDailyBars(payload: { trade_date: string; symbols?: string[] }) {
     return request<DailyRefreshPayload>(`${API_PREFIX}/market/daily/refresh`, {

@@ -22,6 +22,7 @@ from app.schemas.aniu import (
     MarketDataMaintenanceRunRequest,
     MarketDataMaintenanceRunResponse,
     MarketReportListResponse,
+    MarketReportPerformanceResponse,
     MarketReportRead,
     MarketReportRequest,
     MarketSourceHealthResponse,
@@ -135,6 +136,23 @@ def list_market_reports(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market/reports/{report_id}/performance", response_model=MarketReportPerformanceResponse)
+def get_market_report_performance(
+    report_id: int,
+    horizon_days: int = 1,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> MarketReportPerformanceResponse:
+    try:
+        return market_report_service.evaluate_performance(
+            db,
+            report_id=report_id,
+            horizon_days=horizon_days,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/market/daily/refresh", response_model=DailyRefreshResponse)

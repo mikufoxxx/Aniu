@@ -294,6 +294,18 @@
               <span>日线 {{ report.coverage.daily_history_symbols ?? 0 }}</span>
               <span>{{ report.data_sources.join(', ') || '--' }}</span>
             </div>
+            <div v-if="marketReportPerformance[report.id]" class="arena-report-performance">
+              <span>1日评估 {{ marketReportPerformance[report.id].evaluated_count }}只</span>
+              <span :class="profitClass(marketReportPerformance[report.id].average_return_pct)">
+                均值 {{ formatSignedPercent(marketReportPerformance[report.id].average_return_pct) }}
+              </span>
+              <span :class="profitClass(marketReportPerformance[report.id].best_return_pct)">
+                最好 {{ formatSignedPercent(marketReportPerformance[report.id].best_return_pct) }}
+              </span>
+              <span :class="profitClass(marketReportPerformance[report.id].worst_return_pct)">
+                最差 {{ formatSignedPercent(marketReportPerformance[report.id].worst_return_pct) }}
+              </span>
+            </div>
             <div class="arena-report-picks">
               <span v-for="item in report.recommendations.slice(0, 3)" :key="`${report.id}-${item.symbol}`">
                 {{ item.action }} {{ item.symbol }} {{ item.score.toFixed(1) }}
@@ -367,7 +379,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketReport, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -393,6 +405,7 @@ const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
 const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
 const backtestResult = ref<BacktestPayload | null>(null)
 const marketReports = ref<MarketReport[]>([])
+const marketReportPerformance = ref<Record<number, MarketReportPerformancePayload>>({})
 const refreshStartDate = ref('20260526')
 const refreshEndDate = ref('20260528')
 const maintenanceLookbackDays = ref(10)
@@ -496,6 +509,15 @@ async function loadAIMarketContext(): Promise<void> {
 async function loadMarketReports(): Promise<void> {
   const payload = await api.listMarketReports({ limit: 6 })
   marketReports.value = payload.items
+  await Promise.allSettled(payload.items.map((report) => loadReportPerformance(report.id)))
+}
+
+async function loadReportPerformance(reportId: number): Promise<void> {
+  const payload = await api.getMarketReportPerformance(reportId, { horizon_days: 1 })
+  marketReportPerformance.value = {
+    ...marketReportPerformance.value,
+    [reportId]: payload,
+  }
 }
 
 async function generateReport(reportType: 'morning' | 'closing'): Promise<void> {
@@ -509,6 +531,7 @@ async function generateReport(reportType: 'morning' | 'closing'): Promise<void> 
       lookback_days: 20,
     })
     marketReports.value = [report, ...marketReports.value.filter((item) => item.id !== report.id)].slice(0, 6)
+    await loadReportPerformance(report.id)
     quantDataset.value = report.dataset as QuantDatasetPayload
     candidates.value = (quantDataset.value.items ?? []) as QuantCandidate[]
     aiMarketContext.value = {
@@ -574,6 +597,7 @@ async function runMaintenance(): Promise<void> {
         payload.report,
         ...marketReports.value.filter((item) => item.id !== payload.report?.id),
       ].slice(0, 6)
+      await loadReportPerformance(payload.report.id)
     }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据维护失败。'
@@ -799,6 +823,7 @@ onMounted(async () => {
 
 .arena-report-head,
 .arena-report-meta,
+.arena-report-performance,
 .arena-report-picks {
   display: flex;
   flex-wrap: wrap;
@@ -826,6 +851,12 @@ onMounted(async () => {
   border-radius: 8px;
   padding: 4px 8px;
   color: #dbe7f8;
+}
+
+.arena-report-performance span {
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  padding: 4px 8px;
 }
 
 .arena-field {

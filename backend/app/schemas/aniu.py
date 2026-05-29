@@ -384,6 +384,32 @@ class MarketReportListResponse(BaseModel):
     items: list[MarketReportRead] = Field(default_factory=list)
 
 
+class MarketReportPerformanceItemRead(BaseModel):
+    symbol: str
+    name: str
+    action: str
+    score: float
+    entry_date: str | None = None
+    entry_close: float | None = None
+    evaluation_date: str | None = None
+    evaluation_close: float | None = None
+    return_pct: float | None = None
+    status: str
+
+
+class MarketReportPerformanceResponse(BaseModel):
+    report_id: int
+    report_type: str
+    title: str
+    horizon_days: int
+    evaluated_count: int
+    pending_count: int
+    average_return_pct: float | None = None
+    best_return_pct: float | None = None
+    worst_return_pct: float | None = None
+    items: list[MarketReportPerformanceItemRead] = Field(default_factory=list)
+
+
 class DailyRefreshRequest(BaseModel):
     trade_date: str = Field(min_length=8, max_length=10)
     symbols: list[str] | None = None

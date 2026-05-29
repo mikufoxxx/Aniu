@@ -1055,6 +1055,15 @@ def test_refresh_daily_bars_stores_tushare_block_trades(monkeypatch, tmp_path) -
             {
                 "ts_code": "600519.SH",
                 "trade_date": trade_date,
+                "price": 98.5,
+                "vol": 120.0,
+                "amount": 11820.0,
+                "buyer": "机构专用",
+                "seller": "中信证券总部",
+            },
+            {
+                "ts_code": "600519.SH",
+                "trade_date": trade_date,
                 "price": 101.5,
                 "vol": 80.0,
                 "amount": 8120.0,

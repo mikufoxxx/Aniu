@@ -1269,6 +1269,9 @@ class HistoricalDataService:
         symbols: list[str] | None,
     ) -> int:
         symbol_filter = set(symbols or [])
+        seen_keys: set[
+            tuple[str, str, float | None, float | None, float | None, str, str]
+        ] = set()
         stored_count = 0
         for row in rows:
             symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
@@ -1282,6 +1285,10 @@ class HistoricalDataService:
             amount = _to_float(row.get("amount"))
             buyer = str(row.get("buyer") or "").strip()
             seller = str(row.get("seller") or "").strip()
+            key = (symbol, row_trade_date, price, vol, amount, buyer, seller)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
             existing = db.scalar(
                 select(BlockTrade).where(
                     BlockTrade.symbol == symbol,

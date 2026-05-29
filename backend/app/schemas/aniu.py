@@ -347,6 +347,43 @@ class AIMarketContextResponse(BaseModel):
     context_length: int
 
 
+class MarketReportRequest(BaseModel):
+    report_type: Literal["morning", "closing"]
+    symbols: list[str] | None = None
+    limit: int = Field(default=10, ge=1, le=50)
+    lookback_days: int = Field(default=20, ge=1, le=120)
+
+
+class MarketReportRecommendationRead(BaseModel):
+    symbol: str
+    name: str
+    action: str
+    score: float
+    price: float | None = None
+    change_pct: float | None = None
+    daily_momentum_pct: float
+    reason: str
+
+
+class MarketReportRead(BaseModel):
+    id: int
+    report_type: str
+    title: str
+    symbols: list[str] = Field(default_factory=list)
+    lookback_days: int
+    data_sources: list[str] = Field(default_factory=list)
+    coverage: dict[str, int] = Field(default_factory=dict)
+    recommendations: list[MarketReportRecommendationRead] = Field(default_factory=list)
+    dataset: dict[str, Any] = Field(default_factory=dict)
+    context: str
+    summary: str
+    created_at: datetime
+
+
+class MarketReportListResponse(BaseModel):
+    items: list[MarketReportRead] = Field(default_factory=list)
+
+
 class DailyRefreshRequest(BaseModel):
     trade_date: str = Field(min_length=8, max_length=10)
     symbols: list[str] | None = None

@@ -21,6 +21,9 @@ from app.schemas.aniu import (
     DailyRefreshResponse,
     MarketDataMaintenanceRunRequest,
     MarketDataMaintenanceRunResponse,
+    MarketReportListResponse,
+    MarketReportRead,
+    MarketReportRequest,
     MarketSourceHealthResponse,
     QuantCandidatesRequest,
     QuantCandidatesResponse,
@@ -32,6 +35,7 @@ from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_maintenance_service import market_data_maintenance_service
 from app.services.market_data_service import market_data_service
+from app.services.market_report_service import market_report_service
 from app.services.quant_service import quant_service
 
 router = APIRouter(tags=["aniu-market-quant-arena"])
@@ -94,6 +98,41 @@ def build_ai_market_context(
             lookback_days=payload.lookback_days,
         )
         return {"context": context, "context_length": len(context)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/market/reports", response_model=MarketReportRead)
+def generate_market_report(
+    payload: MarketReportRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> MarketReportRead:
+    try:
+        return market_report_service.generate_report(
+            db,
+            report_type=payload.report_type,
+            symbols=payload.symbols,
+            limit=payload.limit,
+            lookback_days=payload.lookback_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market/reports", response_model=MarketReportListResponse)
+def list_market_reports(
+    report_type: str | None = None,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> MarketReportListResponse:
+    try:
+        return market_report_service.list_reports(
+            db,
+            report_type=report_type,
+            limit=limit,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -259,6 +259,53 @@
         </div>
       </section>
 
+      <section class="panel arena-reports-panel">
+        <div class="panel-head">
+          <div class="head-main">
+            <h2>早晚报</h2>
+            <p class="section-kicker">Reports</p>
+          </div>
+          <div class="panel-head-actions">
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="reportLoading"
+              @click="generateReport('morning')"
+            >
+              {{ reportLoading ? '生成中…' : '早盘推荐' }}
+            </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="reportLoading"
+              @click="generateReport('closing')"
+            >
+              {{ reportLoading ? '生成中…' : '收盘分析' }}
+            </button>
+          </div>
+        </div>
+        <div class="arena-report-list" v-if="marketReports.length">
+          <article v-for="report in marketReports" :key="report.id" class="arena-report-card">
+            <div class="arena-report-head">
+              <strong>{{ report.title }}</strong>
+              <span>{{ formatDateTime(report.created_at) }}</span>
+            </div>
+            <p>{{ report.summary }}</p>
+            <div class="arena-report-meta">
+              <span>实时 {{ report.coverage.realtime_symbols ?? 0 }}</span>
+              <span>日线 {{ report.coverage.daily_history_symbols ?? 0 }}</span>
+              <span>{{ report.data_sources.join(', ') || '--' }}</span>
+            </div>
+            <div class="arena-report-picks">
+              <span v-for="item in report.recommendations.slice(0, 3)" :key="`${report.id}-${item.symbol}`">
+                {{ item.action }} {{ item.symbol }} {{ item.score.toFixed(1) }}
+              </span>
+            </div>
+          </article>
+        </div>
+        <div v-else class="empty-state">
+          <p>暂无早晚报。</p>
+        </div>
+      </section>
+
       <section class="panel arena-leaderboard-panel">
         <div class="panel-head">
           <div class="head-main">
@@ -320,7 +367,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketReport, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -333,6 +380,7 @@ const symbolsText = ref(defaultSymbols.join('\n'))
 const initialCash = ref(200000)
 const loading = ref(false)
 const historyLoading = ref(false)
+const reportLoading = ref(false)
 const agentSaving = ref(false)
 const errorMessage = ref('')
 const agents = ref<ArenaAgentConfig[]>(defaultAgents.map((agent) => ({ ...agent })))
@@ -344,6 +392,7 @@ const arenaResult = ref<ArenaRunPayload | null>(null)
 const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
 const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
 const backtestResult = ref<BacktestPayload | null>(null)
+const marketReports = ref<MarketReport[]>([])
 const refreshStartDate = ref('20260526')
 const refreshEndDate = ref('20260528')
 const maintenanceLookbackDays = ref(10)
@@ -441,6 +490,35 @@ async function loadAIMarketContext(): Promise<void> {
     errorMessage.value = error instanceof Error ? error.message : 'AI 上下文构建失败。'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMarketReports(): Promise<void> {
+  const payload = await api.listMarketReports({ limit: 6 })
+  marketReports.value = payload.items
+}
+
+async function generateReport(reportType: 'morning' | 'closing'): Promise<void> {
+  reportLoading.value = true
+  errorMessage.value = ''
+  try {
+    const report = await api.generateMarketReport({
+      report_type: reportType,
+      symbols: parseSymbols(),
+      limit: 10,
+      lookback_days: 20,
+    })
+    marketReports.value = [report, ...marketReports.value.filter((item) => item.id !== report.id)].slice(0, 6)
+    quantDataset.value = report.dataset as QuantDatasetPayload
+    candidates.value = (quantDataset.value.items ?? []) as QuantCandidate[]
+    aiMarketContext.value = {
+      context: report.context,
+      context_length: report.context.length,
+    }
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '报告生成失败。'
+  } finally {
+    reportLoading.value = false
   }
 }
 
@@ -565,9 +643,16 @@ function formatSignedPercent(value: number | null | undefined): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
 onMounted(async () => {
   try {
-    await Promise.all([loadSources(), loadAgents(), loadCandidates(), loadLeaderboard()])
+    await Promise.all([loadSources(), loadAgents(), loadCandidates(), loadLeaderboard(), loadMarketReports()])
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '页面初始化失败。'
   }
@@ -580,6 +665,7 @@ onMounted(async () => {
 }
 
 .arena-candidates-panel,
+.arena-reports-panel,
 .arena-orders-panel {
   grid-column: 1 / -1;
 }
@@ -688,6 +774,52 @@ onMounted(async () => {
   color: #b7c8e3;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.arena-report-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.arena-report-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 12px;
+}
+
+.arena-report-head,
+.arena-report-meta,
+.arena-report-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.arena-report-head {
+  justify-content: space-between;
+}
+
+.arena-report-card strong {
+  color: #f7fbff;
+}
+
+.arena-report-card p,
+.arena-report-card span {
+  color: #9cb2cf;
+  font-size: 13px;
+  margin: 0;
+}
+
+.arena-report-picks span {
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: #dbe7f8;
 }
 
 .arena-field {
@@ -808,6 +940,7 @@ onMounted(async () => {
   .arena-form-grid,
   .arena-history-grid,
   .arena-dataset-summary,
+  .arena-report-list,
   .arena-agent-grid {
     grid-template-columns: 1fr;
   }

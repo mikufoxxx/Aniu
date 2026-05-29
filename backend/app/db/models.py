@@ -198,6 +198,25 @@ class BacktestRun(Base):
     )
 
 
+class MarketReport(Base):
+    __tablename__ = "market_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    report_type: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    symbols_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    lookback_days: Mapped[int] = mapped_column(Integer, default=20)
+    data_sources_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    coverage_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    recommendations_payload: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    dataset_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    context_text: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+
+
 class ArenaRun(Base):
     __tablename__ = "arena_runs"
 

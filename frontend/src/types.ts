@@ -243,6 +243,36 @@ export interface AIMarketContextPayload {
   context_length: number
 }
 
+export interface MarketReportRecommendation {
+  symbol: string
+  name: string
+  action: string
+  score: number
+  price: number | null
+  change_pct: number | null
+  daily_momentum_pct: number
+  reason: string
+}
+
+export interface MarketReport {
+  id: number
+  report_type: string
+  title: string
+  symbols: string[]
+  lookback_days: number
+  data_sources: string[]
+  coverage: Record<string, number>
+  recommendations: MarketReportRecommendation[]
+  dataset: QuantDatasetPayload
+  context: string
+  summary: string
+  created_at: string
+}
+
+export interface MarketReportListPayload {
+  items: MarketReport[]
+}
+
 export interface DailyRefreshPayload {
   trade_date: string
   source: string

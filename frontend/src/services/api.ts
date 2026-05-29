@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataMaintenancePayload, MarketReport, MarketReportListPayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -390,6 +390,21 @@ export const api = {
       body: JSON.stringify(payload),
       timeoutMs: 60000,
     })
+  },
+  generateMarketReport(payload: { report_type: 'morning' | 'closing'; symbols?: string[]; limit?: number; lookback_days?: number }) {
+    return request<MarketReport>(`${API_PREFIX}/market/reports`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  listMarketReports(options: { report_type?: 'morning' | 'closing'; limit?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('limit', String(options.limit ?? 10))
+    if (options.report_type) {
+      params.set('report_type', options.report_type)
+    }
+    return request<MarketReportListPayload>(`${API_PREFIX}/market/reports?${params.toString()}`)
   },
   refreshDailyBars(payload: { trade_date: string; symbols?: string[] }) {
     return request<DailyRefreshPayload>(`${API_PREFIX}/market/daily/refresh`, {

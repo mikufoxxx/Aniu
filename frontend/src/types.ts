@@ -246,6 +246,19 @@ export interface QuantCandidate {
     list_date?: string | null
     is_hs?: string | null
   }
+  financial_factors: {
+    ann_date?: string | null
+    end_date?: string | null
+    roe?: number
+    roe_dt?: number
+    grossprofit_margin?: number
+    netprofit_margin?: number
+    netprofit_yoy?: number
+    or_yoy?: number
+    debt_to_assets?: number
+    assets_turn?: number
+    current_ratio?: number
+  }
   daily_factors: {
     latest_trade_date?: string | null
     bars_used?: number
@@ -279,6 +292,12 @@ export interface MarketDataMaintenancePayload {
     source: string
     stored_count: number
     error?: string | null
+  } | null
+  financial_refresh?: {
+    source: string
+    stored_count: number
+    error?: string | null
+    requested_symbols?: string[]
   } | null
   refresh: DailyRangeRefreshPayload
   dataset: QuantDatasetPayload

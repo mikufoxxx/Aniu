@@ -366,6 +366,7 @@ class QuantCandidateRead(BaseModel):
     score: float
     factor_scores: dict[str, float]
     profile: dict[str, Any] = Field(default_factory=dict)
+    financial_factors: dict[str, Any] = Field(default_factory=dict)
     daily_factors: dict[str, Any] = Field(default_factory=dict)
     rationale: str
 
@@ -530,6 +531,7 @@ class MarketDataMaintenanceRunRequest(BaseModel):
 class MarketDataMaintenanceRunResponse(BaseModel):
     status: str
     profile_refresh: dict[str, Any] | None = None
+    financial_refresh: dict[str, Any] | None = None
     refresh: DailyRangeRefreshResponse
     dataset: QuantDatasetResponse
     report: MarketReportRead | None = None

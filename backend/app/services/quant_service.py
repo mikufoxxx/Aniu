@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyBar, SectorBar, SectorMember, StockProfile
+from app.db.models import DailyBar, FinancialIndicator, SectorBar, SectorMember, StockProfile
 from app.services.market_data_service import DEFAULT_UNIVERSE, market_data_service, normalize_symbol
 
 
@@ -40,11 +40,13 @@ class QuantService:
             lookback_days=lookback_days,
         )
         profiles = self._profiles_by_symbol(db, universe)
+        financials = self._financial_indicators_by_symbol(db, universe)
         candidates = [
             self._score_quote(
                 item,
                 daily_factors.get(normalize_symbol(str(item.get("symbol") or ""))),
                 profiles.get(normalize_symbol(str(item.get("symbol") or ""))),
+                financials.get(normalize_symbol(str(item.get("symbol") or ""))),
             )
             for item in quotes
         ]
@@ -64,6 +66,8 @@ class QuantService:
             data_sources.append("tushare_sector_member")
         if any(item.get("profile") for item in selected):
             data_sources.append("tushare_stock_basic")
+        if any(item.get("financial_factors") for item in selected):
+            data_sources.append("tushare_fina_indicator")
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -127,6 +131,7 @@ class QuantService:
             ),
             "symbols_with_price": sum(1 for item in items if item.get("price") is not None),
             "profile_symbols": sum(1 for item in items if item.get("profile")),
+            "financial_symbols": sum(1 for item in items if item.get("financial_factors")),
         }
         return {
             "universe_size": payload["universe_size"],
@@ -142,6 +147,7 @@ class QuantService:
         quote: dict[str, Any],
         daily_factors: dict[str, Any] | None = None,
         profile: dict[str, Any] | None = None,
+        financial_factors: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         change_pct = _number(quote.get("change_pct"))
         amount = max(_number(quote.get("amount")), 0.0)
@@ -149,6 +155,7 @@ class QuantService:
         volume_ratio = max(_number(quote.get("volume_ratio"), 1.0), 0.0)
         daily = daily_factors or self._empty_daily_factors()
         profile_payload = profile or {}
+        financial_payload = financial_factors or {}
         display_name = str(quote.get("name") or profile_payload.get("name") or "")
 
         factor_scores = {
@@ -174,6 +181,7 @@ class QuantService:
                 -1.0,
             ),
             "sector_heat": self._sector_heat_score(daily),
+            "financial_quality": self._financial_quality_score(financial_payload),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
         return {
@@ -191,6 +199,7 @@ class QuantService:
                 key: round(value, 4) for key, value in factor_scores.items()
             },
             "profile": profile_payload,
+            "financial_factors": financial_payload,
             "daily_factors": daily,
             "rationale": self._rationale(change_pct, amount, volume_ratio),
         }
@@ -218,6 +227,7 @@ class QuantService:
                 + factor_scores["moneyflow_net"] * 4
                 + factor_scores["moneyflow_large"] * 2
                 + factor_scores["sector_heat"] * 4
+                + factor_scores["financial_quality"] * 4
             )
         return round(score, 4)
 
@@ -239,6 +249,24 @@ class QuantService:
             return 0.0
         top = max(_number(item.get("pct_chg")) for item in sectors if isinstance(item, dict))
         return max(min(top / 5.0, 1.0), -1.0)
+
+    def _financial_quality_score(self, financial: dict[str, Any]) -> float:
+        if not financial:
+            return 0.0
+        scores: list[float] = []
+        roe = _number(financial.get("roe"))
+        gross_margin = _number(financial.get("grossprofit_margin"))
+        netprofit_yoy = _number(financial.get("netprofit_yoy"))
+        debt_to_assets = _number(financial.get("debt_to_assets"))
+        if roe:
+            scores.append(max(min(roe / 30.0, 1.0), -1.0))
+        if gross_margin:
+            scores.append(max(min(gross_margin / 60.0, 1.0), -1.0))
+        if netprofit_yoy:
+            scores.append(max(min(netprofit_yoy / 40.0, 1.0), -1.0))
+        if debt_to_assets:
+            scores.append(max(min((80.0 - debt_to_assets) / 80.0, 1.0), -1.0))
+        return sum(scores) / len(scores) if scores else 0.0
 
     def _daily_factors_by_symbol(
         self,
@@ -288,6 +316,42 @@ class QuantService:
                 "is_hs": row.is_hs,
             }
             for row in rows
+        }
+
+    def _financial_indicators_by_symbol(
+        self,
+        db: Session | None,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        if db is None:
+            return {}
+        rows = db.scalars(
+            select(FinancialIndicator)
+            .where(FinancialIndicator.symbol.in_(symbols))
+            .order_by(
+                FinancialIndicator.symbol,
+                desc(FinancialIndicator.end_date),
+                desc(FinancialIndicator.ann_date),
+            )
+        ).all()
+        latest: dict[str, FinancialIndicator] = {}
+        for row in rows:
+            latest.setdefault(row.symbol, row)
+        return {
+            symbol: {
+                "ann_date": row.ann_date,
+                "end_date": row.end_date,
+                "roe": _number(row.roe),
+                "roe_dt": _number(row.roe_dt),
+                "grossprofit_margin": _number(row.grossprofit_margin),
+                "netprofit_margin": _number(row.netprofit_margin),
+                "netprofit_yoy": _number(row.netprofit_yoy),
+                "or_yoy": _number(row.or_yoy),
+                "debt_to_assets": _number(row.debt_to_assets),
+                "assets_turn": _number(row.assets_turn),
+                "current_ratio": _number(row.current_ratio),
+            }
+            for symbol, row in latest.items()
         }
 
     def _sector_heat_by_symbol(

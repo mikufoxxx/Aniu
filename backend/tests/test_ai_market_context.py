@@ -13,6 +13,7 @@ from app.db.database import init_db, session_scope
 from app.db.models import (
     AppSettings,
     DailyBar,
+    FinancialIndicator,
     IndexBar,
     MarketDataMaintenanceRun,
     MarketReport,
@@ -167,6 +168,19 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     list_status="L",
                     list_date="20010827",
                 ),
+                FinancialIndicator(
+                    symbol="600519.SH",
+                    ann_date="20260402",
+                    end_date="20251231",
+                    roe=31.2,
+                    grossprofit_margin=91.2,
+                    netprofit_margin=52.3,
+                    netprofit_yoy=18.5,
+                    or_yoy=15.6,
+                    debt_to_assets=18.0,
+                    assets_turn=0.48,
+                    current_ratio=4.2,
+                ),
             ]
         )
         db.flush()
@@ -180,7 +194,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "AI量化市场上下文" in context
     assert (
         "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, "
-        "tushare_sector_member, tushare_stock_basic, tushare_index, tushare_sector"
+        "tushare_sector_member, tushare_stock_basic, tushare_fina_indicator, "
+        "tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -188,6 +203,10 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "日线动量 +10.50%" in context
     assert "换手 0.72%" in context
     assert "量比 1.34" in context
+    assert "ROE 31.20%" in context
+    assert "毛利 91.20%" in context
+    assert "净利同比 +18.50%" in context
+    assert "负债率 18.00%" in context
     assert "PE 23.50" in context
     assert "PB 7.80" in context
     assert "行业 白酒" in context

@@ -108,6 +108,16 @@ class MarketDataMaintenanceService:
             symbols=normalized_symbols,
             progress_callback=progress_callback,
         )
+        financial_symbols = normalized_symbols or quant_service._resolve_universe(
+            db,
+            None,
+            limit=normalized_limit,
+        )
+        financial_refresh = self._refresh_financial_indicators(
+            db,
+            financial_symbols,
+            progress_callback,
+        )
         if progress_callback:
             progress_callback(
                 {
@@ -132,6 +142,7 @@ class MarketDataMaintenanceService:
         result: dict[str, Any] = {
             "status": "completed",
             "profile_refresh": profile_refresh,
+            "financial_refresh": financial_refresh,
             "refresh": refresh,
             "dataset": dataset,
         }
@@ -171,6 +182,34 @@ class MarketDataMaintenanceService:
                 "source": "tushare_stock_basic",
                 "stored_count": 0,
                 "error": str(exc),
+            }
+
+    def _refresh_financial_indicators(
+        self,
+        db: Session,
+        symbols: list[str],
+        progress_callback=None,
+    ) -> dict[str, Any]:
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "refreshing_financials",
+                    "total_days": 0,
+                    "processed_days": 0,
+                    "current_trade_date": None,
+                    "stored_count": 0,
+                    "skipped_count": 0,
+                    "error_count": 0,
+                }
+            )
+        try:
+            return historical_data_service.refresh_financial_indicators(db, symbols)
+        except RuntimeError as exc:
+            return {
+                "source": "tushare_fina_indicator",
+                "stored_count": 0,
+                "error": str(exc),
+                "requested_symbols": symbols,
             }
 
     def list_runs(self, db: Session, *, limit: int = 20) -> dict[str, Any]:

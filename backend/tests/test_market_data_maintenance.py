@@ -314,11 +314,26 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
             "error": None,
         }
 
+    def fake_refresh_financial_indicators(db, symbols):
+        captured["financials"] = symbols
+        return {
+            "source": "tushare_fina_indicator",
+            "stored_count": 2,
+            "error": None,
+            "requested_symbols": symbols,
+        }
+
     monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
     monkeypatch.setattr(
         historical_data_service,
         "refresh_stock_profiles",
         fake_refresh_profiles,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        historical_data_service,
+        "refresh_financial_indicators",
+        fake_refresh_financial_indicators,
         raising=False,
     )
     monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
@@ -347,12 +362,14 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
         "tushare_sector_member": ["20260528: 2 个板块成分拉取失败"],
     }
     assert payload["profile_refresh"]["stored_count"] == 5300
+    assert payload["financial_refresh"]["stored_count"] == 2
     assert payload["dataset"]["coverage"]["daily_history_symbols"] == 3
     assert payload["report"]["report_type"] == "closing"
     assert captured["range"] == ("20260526", "20260528", ["000001.SZ", "600519.SH"])
     assert captured["dataset"] == (["000001.SZ", "600519.SH"], 20, True, 3)
     assert captured["report"] == ("closing", ["000001.SZ", "600519.SH"], 20, 3)
     assert captured["profiles"] is True
+    assert captured["financials"] == ["000001.SZ", "600519.SH"]
 
     _reset_state()
 

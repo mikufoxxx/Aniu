@@ -334,6 +334,7 @@
               <strong class="position-name">{{ item.name || item.symbol }}</strong>
               <span class="position-symbol">{{ item.symbol }}</span>
               <span v-if="profileText(item)" class="position-symbol">{{ profileText(item) }}</span>
+              <span v-if="financialText(item)" class="position-symbol">{{ financialText(item) }}</span>
             </div>
             <div>{{ item.score.toFixed(2) }}</div>
             <div>
@@ -840,6 +841,7 @@ function tierText(tier: string): string {
 function progressText(phase: string | undefined): string {
   const mapping: Record<string, string> = {
     refreshing_profiles: '刷新股票画像',
+    refreshing_financials: '刷新财务指标',
     refreshing_daily: '刷新日线',
     building_dataset: '构建数据集',
     completed: '已完成',
@@ -864,6 +866,19 @@ function profileText(item: QuantCandidate): string {
   const profile = item.profile
   if (!profile) return ''
   return [profile.industry, profile.area, profile.market].filter(Boolean).join(' · ')
+}
+
+function financialText(item: QuantCandidate): string {
+  const financial = item.financial_factors
+  if (!financial) return ''
+  const parts: string[] = []
+  if (typeof financial.roe === 'number' && financial.roe !== 0) {
+    parts.push(`ROE ${financial.roe.toFixed(1)}%`)
+  }
+  if (typeof financial.netprofit_yoy === 'number' && financial.netprofit_yoy !== 0) {
+    parts.push(`净利 ${formatSignedPercent(financial.netprofit_yoy)}`)
+  }
+  return parts.join(' · ')
 }
 
 function readinessText(value: boolean | undefined): string {

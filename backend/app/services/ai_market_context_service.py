@@ -124,8 +124,10 @@ class AIMarketContextService:
         for index, item in enumerate(items[:10], start=1):
             daily = item.get("daily_factors") or {}
             profile = item.get("profile") or {}
+            financial = item.get("financial_factors") or {}
             profile_parts = self._profile_parts(profile)
             daily_basic_parts = self._daily_basic_parts(daily)
+            financial_parts = self._financial_parts(financial)
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -136,6 +138,7 @@ class AIMarketContextService:
                     f"日线覆盖 {int(daily.get('bars_used') or 0)}日; "
                     f"{profile_parts}"
                     f"{daily_basic_parts}"
+                    f"{financial_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -338,6 +341,27 @@ class AIMarketContextService:
             parts.append(
                 f"热板块 {sector.get('name')} {float(sector.get('pct_chg') or 0):+.2f}%"
             )
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
+
+    def _financial_parts(self, financial: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for key, label, signed in (
+            ("roe", "ROE", False),
+            ("grossprofit_margin", "毛利", False),
+            ("netprofit_yoy", "净利同比", True),
+            ("debt_to_assets", "负债率", False),
+        ):
+            value = financial.get(key)
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if numeric == 0:
+                continue
+            sign = "+" if signed else ""
+            parts.append(f"{label} {numeric:{sign}.2f}%")
         if not parts:
             return ""
         return "; ".join(parts) + "; "

@@ -12,7 +12,15 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import BacktestRun, DailyBar, IndexBar, SectorBar, SectorMember, StockProfile
+from app.db.models import (
+    BacktestRun,
+    DailyBar,
+    FinancialIndicator,
+    IndexBar,
+    SectorBar,
+    SectorMember,
+    StockProfile,
+)
 from app.services.market_data_service import normalize_symbol
 
 _TUSHARE_DAILY_FIELDS = (
@@ -33,6 +41,10 @@ _TUSHARE_THS_DAILY_FIELDS = (
 _TUSHARE_THS_MEMBER_FIELDS = "ts_code,con_code,con_name,is_new"
 _TUSHARE_STOCK_BASIC_FIELDS = (
     "ts_code,symbol,name,area,industry,market,exchange,list_status,list_date,is_hs"
+)
+_TUSHARE_FINA_INDICATOR_FIELDS = (
+    "ts_code,ann_date,end_date,roe,roe_dt,grossprofit_margin,netprofit_margin,"
+    "netprofit_yoy,or_yoy,debt_to_assets,assets_turn,current_ratio"
 )
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_THS_MEMBER_WORKERS = 2
@@ -346,6 +358,17 @@ class HistoricalDataService:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare stock_basic 数据。")
         return self._request_tushare_stock_basic({"list_status": "L"})
 
+    def fetch_financial_indicator_rows(self, symbols: list[str]) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare fina_indicator 数据。")
+        rows: list[dict[str, Any]] = []
+        for symbol in symbols:
+            rows.extend(
+                self._request_tushare_fina_indicator({"ts_code": normalize_symbol(symbol)})
+            )
+        return rows
+
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return self._request_tushare_api(
             api_name="daily",
@@ -416,6 +439,14 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_STOCK_BASIC_FIELDS,
             label="stock_basic",
+        )
+
+    def _request_tushare_fina_indicator(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="fina_indicator",
+            params=params,
+            fields=_TUSHARE_FINA_INDICATOR_FIELDS,
+            label="fina_indicator",
         )
 
     def _request_tushare_api(
@@ -660,6 +691,49 @@ class HistoricalDataService:
             "source": "tushare_stock_basic",
             "stored_count": stored_count,
             "error": None,
+        }
+
+    def refresh_financial_indicators(
+        self,
+        db: Session,
+        symbols: list[str],
+    ) -> dict[str, Any]:
+        normalized_symbols = [normalize_symbol(symbol) for symbol in symbols]
+        rows = self.fetch_financial_indicator_rows(normalized_symbols)
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            end_date = str(row.get("end_date") or "").strip().replace("-", "")
+            if not symbol or len(end_date) != 8:
+                continue
+            existing = db.scalar(
+                select(FinancialIndicator).where(
+                    FinancialIndicator.symbol == symbol,
+                    FinancialIndicator.end_date == end_date,
+                )
+            )
+            indicator = existing or FinancialIndicator(symbol=symbol, end_date=end_date)
+            ann_date = str(row.get("ann_date") or "").strip().replace("-", "")
+            indicator.ann_date = ann_date if len(ann_date) == 8 else None
+            indicator.roe = _to_float(row.get("roe"))
+            indicator.roe_dt = _to_float(row.get("roe_dt"))
+            indicator.grossprofit_margin = _to_float(row.get("grossprofit_margin"))
+            indicator.netprofit_margin = _to_float(row.get("netprofit_margin"))
+            indicator.netprofit_yoy = _to_float(row.get("netprofit_yoy"))
+            indicator.or_yoy = _to_float(row.get("or_yoy"))
+            indicator.debt_to_assets = _to_float(row.get("debt_to_assets"))
+            indicator.assets_turn = _to_float(row.get("assets_turn"))
+            indicator.current_ratio = _to_float(row.get("current_ratio"))
+            indicator.source = "tushare_fina_indicator"
+            indicator.raw_payload = dict(row)
+            db.add(indicator)
+            stored_count += 1
+        db.commit()
+        return {
+            "source": "tushare_fina_indicator",
+            "stored_count": stored_count,
+            "error": None,
+            "requested_symbols": normalized_symbols,
         }
 
     def _store_index_rows(

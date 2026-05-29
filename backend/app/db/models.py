@@ -287,6 +287,33 @@ class StockProfile(Base):
     )
 
 
+class FinancialIndicator(Base):
+    __tablename__ = "financial_indicators"
+    __table_args__ = (
+        UniqueConstraint("symbol", "end_date", name="uq_financial_indicators_symbol_end_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    ann_date: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
+    end_date: Mapped[str] = mapped_column(String(8), index=True)
+    roe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roe_dt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    grossprofit_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    netprofit_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    netprofit_yoy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    or_yoy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    debt_to_assets: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assets_turn: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_fina_indicator")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

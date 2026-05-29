@@ -640,6 +640,72 @@ def test_refresh_stock_profiles_stores_tushare_stock_basic_rows(monkeypatch, tmp
     _reset_state()
 
 
+def test_refresh_financial_indicators_stores_tushare_fina_indicator_rows(monkeypatch, tmp_path) -> None:
+    from app.db.models import FinancialIndicator
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_financial_rows(symbols):
+        assert symbols == ["600519.SH", "000001.SZ"]
+        return [
+            {
+                "ts_code": "600519.SH",
+                "ann_date": "20260402",
+                "end_date": "20251231",
+                "roe": 31.2,
+                "roe_dt": 30.1,
+                "grossprofit_margin": 91.2,
+                "netprofit_margin": 52.3,
+                "netprofit_yoy": 18.5,
+                "or_yoy": 15.6,
+                "debt_to_assets": 18.0,
+                "assets_turn": 0.48,
+                "current_ratio": 4.2,
+            },
+            {
+                "ts_code": "000001.SZ",
+                "ann_date": "20260420",
+                "end_date": "20251231",
+                "roe": 12.1,
+                "grossprofit_margin": None,
+                "netprofit_yoy": 4.5,
+                "debt_to_assets": 91.0,
+            },
+        ]
+
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_financial_indicator_rows",
+        fake_fetch_financial_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_financial_indicators(
+                db,
+                ["600519.SH", "000001.SZ"],
+            )
+            rows = db.query(FinancialIndicator).order_by(FinancialIndicator.symbol).all()
+
+    assert result == {
+        "source": "tushare_fina_indicator",
+        "stored_count": 2,
+        "error": None,
+        "requested_symbols": ["600519.SH", "000001.SZ"],
+    }
+    assert [row.symbol for row in rows] == ["000001.SZ", "600519.SH"]
+    assert rows[1].ann_date == "20260402"
+    assert rows[1].end_date == "20251231"
+    assert rows[1].roe == 31.2
+    assert rows[1].grossprofit_margin == 91.2
+    assert rows[1].netprofit_yoy == 18.5
+    assert rows[1].debt_to_assets == 18.0
+    assert rows[1].source == "tushare_fina_indicator"
+    assert rows[1].raw_payload["ts_code"] == "600519.SH"
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

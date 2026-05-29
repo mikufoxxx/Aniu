@@ -162,6 +162,8 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
         with session_scope() as db:
+            from app.db.models import FinancialIndicator
+
             db.add_all(
                 [
                     DailyBar(symbol="600519.SH", trade_date="20260526", close=1200, amount=9000),
@@ -214,6 +216,19 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         list_status="L",
                         list_date="20010827",
                     ),
+                    FinancialIndicator(
+                        symbol="600519.SH",
+                        ann_date="20260402",
+                        end_date="20251231",
+                        roe=31.2,
+                        grossprofit_margin=91.2,
+                        netprofit_margin=52.3,
+                        netprofit_yoy=18.5,
+                        or_yoy=15.6,
+                        debt_to_assets=18.0,
+                        assets_turn=0.48,
+                        current_ratio=4.2,
+                    ),
                 ]
             )
 
@@ -240,6 +255,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         "tushare_moneyflow",
         "tushare_sector_member",
         "tushare_stock_basic",
+        "tushare_fina_indicator",
     } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
@@ -257,7 +273,13 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["profile"]["industry"] == "白酒"
     assert payload["items"][0]["profile"]["area"] == "贵州"
     assert payload["coverage"]["profile_symbols"] == 1
+    assert payload["coverage"]["financial_symbols"] == 1
+    assert payload["items"][0]["financial_factors"]["roe"] == 31.2
+    assert payload["items"][0]["financial_factors"]["grossprofit_margin"] == 91.2
+    assert payload["items"][0]["financial_factors"]["netprofit_yoy"] == 18.5
+    assert payload["items"][0]["financial_factors"]["debt_to_assets"] == 18.0
     assert "daily_momentum" in payload["items"][0]["factor_scores"]
+    assert "financial_quality" in payload["items"][0]["factor_scores"]
     assert "daily_turnover" in payload["items"][0]["factor_scores"]
     assert "valuation_sanity" in payload["items"][0]["factor_scores"]
     assert "moneyflow_net" in payload["items"][0]["factor_scores"]

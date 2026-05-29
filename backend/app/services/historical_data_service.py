@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import json
 import subprocess
+import time
 from typing import Any
 
 from sqlalchemy import desc, func, select
@@ -31,7 +32,9 @@ _TUSHARE_THS_DAILY_FIELDS = (
 )
 _TUSHARE_THS_MEMBER_FIELDS = "ts_code,con_code,con_name,is_new"
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
-_TUSHARE_THS_MEMBER_WORKERS = 8
+_TUSHARE_THS_MEMBER_WORKERS = 2
+_TUSHARE_THS_MEMBER_RETRIES = 3
+_TUSHARE_THS_MEMBER_RETRY_DELAY_SECONDS = 2.0
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -371,12 +374,20 @@ class HistoricalDataService:
         )
 
     def _request_tushare_ths_member(self, params: dict[str, Any]) -> list[dict[str, Any]]:
-        return self._request_tushare_api(
-            api_name="ths_member",
-            params=params,
-            fields=_TUSHARE_THS_MEMBER_FIELDS,
-            label="ths_member",
-        )
+        for attempt in range(_TUSHARE_THS_MEMBER_RETRIES + 1):
+            try:
+                return self._request_tushare_api(
+                    api_name="ths_member",
+                    params=params,
+                    fields=_TUSHARE_THS_MEMBER_FIELDS,
+                    label="ths_member",
+                )
+            except RuntimeError as exc:
+                message = str(exc)
+                if "429" not in message or attempt >= _TUSHARE_THS_MEMBER_RETRIES:
+                    raise
+                time.sleep(_TUSHARE_THS_MEMBER_RETRY_DELAY_SECONDS * (attempt + 1))
+        return []
 
     def _request_tushare_api(
         self,

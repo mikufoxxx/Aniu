@@ -169,6 +169,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                 FinancialIndicator,
                 LimitEvent,
                 MarginDetail,
+                PledgeStat,
                 ShareholderNumber,
                 ShareholderTrade,
             )
@@ -351,6 +352,15 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         begin_date="20260510",
                         close_date="20260520",
                     ),
+                    PledgeStat(
+                        symbol="600519.SH",
+                        end_date="20260528",
+                        pledge_count=12,
+                        unrest_pledge=1200.0,
+                        rest_pledge=300.0,
+                        total_share=125619.78,
+                        pledge_ratio=3.2,
+                    ),
                 ]
             )
 
@@ -385,6 +395,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         "tushare_block_trade",
         "tushare_stk_holdernumber",
         "tushare_stk_holdertrade",
+        "tushare_pledge_stat",
     } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
@@ -413,6 +424,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["shareholder_number"]["holder_num_change_pct"] < 0
     assert payload["items"][0]["daily_factors"]["shareholder_trade"]["net_change_vol"] == 100.0
     assert payload["items"][0]["daily_factors"]["shareholder_trade"]["net_change_ratio"] == 0.15
+    assert payload["items"][0]["daily_factors"]["pledge_stat"]["pledge_ratio"] == 3.2
     assert payload["items"][0]["profile"]["industry"] == "白酒"
     assert payload["items"][0]["profile"]["area"] == "贵州"
     assert payload["coverage"]["profile_symbols"] == 1
@@ -423,6 +435,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["coverage"]["block_trade_symbols"] == 1
     assert payload["coverage"]["shareholder_number_symbols"] == 1
     assert payload["coverage"]["shareholder_trade_symbols"] == 1
+    assert payload["coverage"]["pledge_stat_symbols"] == 1
     assert payload["items"][0]["financial_factors"]["roe"] == 31.2
     assert payload["items"][0]["financial_factors"]["grossprofit_margin"] == 91.2
     assert payload["items"][0]["financial_factors"]["netprofit_yoy"] == 18.5
@@ -440,6 +453,7 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert "block_trade_flow" in payload["items"][0]["factor_scores"]
     assert "shareholder_structure" in payload["items"][0]["factor_scores"]
     assert "shareholder_trade" in payload["items"][0]["factor_scores"]
+    assert "pledge_risk" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

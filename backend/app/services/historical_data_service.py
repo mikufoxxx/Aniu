@@ -22,6 +22,7 @@ from app.db.models import (
     IndexBar,
     LimitEvent,
     MarginDetail,
+    PledgeStat,
     SectorBar,
     SectorMember,
     ShareholderNumber,
@@ -74,10 +75,14 @@ _TUSHARE_HOLDER_TRADE_FIELDS = (
     "ts_code,ann_date,holder_name,holder_type,in_de,change_vol,change_ratio,"
     "after_share,after_ratio,avg_price,total_share,begin_date,close_date"
 )
+_TUSHARE_PLEDGE_STAT_FIELDS = (
+    "ts_code,end_date,pledge_count,unrest_pledge,rest_pledge,total_share,pledge_ratio"
+)
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_THS_MEMBER_WORKERS = 2
 _TUSHARE_THS_MEMBER_RETRIES = 3
 _TUSHARE_THS_MEMBER_RETRY_DELAY_SECONDS = 2.0
+_TUSHARE_PLEDGE_STAT_LOOKBACK_DAYS = 10
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -447,6 +452,19 @@ class HistoricalDataService:
             {"ann_date": _normalize_trade_date(ann_date)}
         )
 
+    def fetch_pledge_stat_rows(self, end_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare pledge_stat 数据。")
+        normalized_date = _normalize_trade_date(end_date)
+        base_date = datetime.strptime(normalized_date, "%Y%m%d")
+        for offset in range(_TUSHARE_PLEDGE_STAT_LOOKBACK_DAYS + 1):
+            probe_date = (base_date - timedelta(days=offset)).strftime("%Y%m%d")
+            rows = self._request_tushare_pledge_stat({"end_date": probe_date})
+            if rows:
+                return rows
+        return []
+
     def fetch_financial_indicator_rows(self, symbols: list[str]) -> list[dict[str, Any]]:
         settings = get_settings()
         if not settings.tushare_token:
@@ -592,6 +610,14 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_HOLDER_TRADE_FIELDS,
             label="stk_holdertrade",
+        )
+
+    def _request_tushare_pledge_stat(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="pledge_stat",
+            params=params,
+            fields=_TUSHARE_PLEDGE_STAT_FIELDS,
+            label="pledge_stat",
         )
 
     def _request_tushare_api(
@@ -820,6 +846,18 @@ class HistoricalDataService:
         except RuntimeError as exc:
             shareholder_trade_error = str(exc)
 
+        pledge_stat_error = None
+        pledge_stat_count = 0
+        try:
+            pledge_stat_count = self._store_pledge_stat_rows(
+                db,
+                normalized_date,
+                self.fetch_pledge_stat_rows(normalized_date),
+                normalized_symbols,
+            )
+        except RuntimeError as exc:
+            pledge_stat_error = str(exc)
+
         stored_count = 0
         skipped_count = 0
         for row in rows:
@@ -906,6 +944,8 @@ class HistoricalDataService:
             "shareholder_number_error": shareholder_number_error,
             "shareholder_trade_count": shareholder_trade_count,
             "shareholder_trade_error": shareholder_trade_error,
+            "pledge_stat_count": pledge_stat_count,
+            "pledge_stat_error": pledge_stat_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -1482,6 +1522,38 @@ class HistoricalDataService:
             stored_count += 1
         return stored_count
 
+    def _store_pledge_stat_rows(
+        self,
+        db: Session,
+        end_date: str,
+        rows: list[dict[str, Any]],
+        symbols: list[str] | None,
+    ) -> int:
+        symbol_filter = set(symbols or [])
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            if symbol_filter and symbol not in symbol_filter:
+                continue
+            row_end_date = _normalize_trade_date(str(row.get("end_date") or end_date))
+            existing = db.scalar(
+                select(PledgeStat).where(
+                    PledgeStat.symbol == symbol,
+                    PledgeStat.end_date == row_end_date,
+                )
+            )
+            item = existing or PledgeStat(symbol=symbol, end_date=row_end_date)
+            item.pledge_count = _to_int(row.get("pledge_count"))
+            item.unrest_pledge = _to_float(row.get("unrest_pledge"))
+            item.rest_pledge = _to_float(row.get("rest_pledge"))
+            item.total_share = _to_float(row.get("total_share"))
+            item.pledge_ratio = _to_float(row.get("pledge_ratio"))
+            item.source = "tushare_pledge_stat"
+            item.raw_payload = dict(row)
+            db.add(item)
+            stored_count += 1
+        return stored_count
+
     def refresh_daily_range(
         self,
         db: Session,
@@ -1539,6 +1611,8 @@ class HistoricalDataService:
                     "shareholder_number_error": None,
                     "shareholder_trade_count": 0,
                     "shareholder_trade_error": None,
+                    "pledge_stat_count": 0,
+                    "pledge_stat_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -1603,6 +1677,8 @@ class HistoricalDataService:
                             "shareholder_number_error": None,
                             "shareholder_trade_count": 0,
                             "shareholder_trade_error": None,
+                            "pledge_stat_count": 0,
+                            "pledge_stat_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"
@@ -1662,6 +1738,7 @@ class HistoricalDataService:
             "tushare_block_trade": 0,
             "tushare_stk_holdernumber": 0,
             "tushare_stk_holdertrade": 0,
+            "tushare_pledge_stat": 0,
         }
         errors: dict[str, list[str]] = defaultdict(list)
         for item in daily_results:
@@ -1681,6 +1758,7 @@ class HistoricalDataService:
                 item.get("shareholder_number_count") or 0
             )
             counts["tushare_stk_holdertrade"] += int(item.get("shareholder_trade_count") or 0)
+            counts["tushare_pledge_stat"] += int(item.get("pledge_stat_count") or 0)
             for key, source in (
                 ("error", "tushare_daily"),
                 ("daily_basic_error", "tushare_daily_basic"),
@@ -1695,6 +1773,7 @@ class HistoricalDataService:
                 ("block_trade_error", "tushare_block_trade"),
                 ("shareholder_number_error", "tushare_stk_holdernumber"),
                 ("shareholder_trade_error", "tushare_stk_holdertrade"),
+                ("pledge_stat_error", "tushare_pledge_stat"),
             ):
                 message = item.get(key)
                 if message:

@@ -537,6 +537,32 @@ class ShareholderTrade(Base):
     )
 
 
+class PledgeStat(Base):
+    __tablename__ = "pledge_stats"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "end_date",
+            name="uq_pledge_stats_symbol_end_date",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    end_date: Mapped[str] = mapped_column(String(8), index=True)
+    pledge_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    unrest_pledge: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rest_pledge: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_share: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pledge_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_pledge_stat")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

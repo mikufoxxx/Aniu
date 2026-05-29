@@ -14,6 +14,7 @@ from app.db.models import (
     FinancialIndicator,
     LimitEvent,
     MarginDetail,
+    PledgeStat,
     SectorBar,
     SectorMember,
     ShareholderNumber,
@@ -93,6 +94,8 @@ class QuantService:
             data_sources.append("tushare_stk_holdernumber")
         if any(item.get("daily_factors", {}).get("shareholder_trade") for item in selected):
             data_sources.append("tushare_stk_holdertrade")
+        if any(item.get("daily_factors", {}).get("pledge_stat") for item in selected):
+            data_sources.append("tushare_pledge_stat")
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -179,6 +182,9 @@ class QuantService:
                 for item in items
                 if item.get("daily_factors", {}).get("shareholder_trade")
             ),
+            "pledge_stat_symbols": sum(
+                1 for item in items if item.get("daily_factors", {}).get("pledge_stat")
+            ),
         }
         return {
             "universe_size": payload["universe_size"],
@@ -234,6 +240,7 @@ class QuantService:
             "block_trade_flow": self._block_trade_flow_score(daily),
             "shareholder_structure": self._shareholder_structure_score(daily),
             "shareholder_trade": self._shareholder_trade_score(daily),
+            "pledge_risk": self._pledge_risk_score(daily),
             "financial_quality": self._financial_quality_score(financial_payload),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
@@ -286,6 +293,7 @@ class QuantService:
                 + factor_scores["block_trade_flow"] * 3
                 + factor_scores["shareholder_structure"] * 3
                 + factor_scores["shareholder_trade"] * 3
+                + factor_scores["pledge_risk"] * 3
                 + factor_scores["financial_quality"] * 4
             )
         return round(score, 4)
@@ -367,6 +375,12 @@ class QuantService:
             return 0.0
         return max(min(_number(item.get("net_change_ratio")) / 1.0, 1.0), -1.0)
 
+    def _pledge_risk_score(self, daily: dict[str, Any]) -> float:
+        item = daily.get("pledge_stat") or {}
+        if not isinstance(item, dict):
+            return 0.0
+        return -max(min(_number(item.get("pledge_ratio")) / 50.0, 1.0), 0.0)
+
     def _financial_quality_score(self, financial: dict[str, Any]) -> float:
         if not financial:
             return 0.0
@@ -427,6 +441,9 @@ class QuantService:
         shareholder_trades = self._shareholder_trades_by_symbol(db, symbols)
         for symbol, item in shareholder_trades.items():
             factors.setdefault(symbol, self._empty_daily_factors())["shareholder_trade"] = item
+        pledge_stats = self._pledge_stats_by_symbol(db, symbols)
+        for symbol, item in pledge_stats.items():
+            factors.setdefault(symbol, self._empty_daily_factors())["pledge_stat"] = item
         return factors
 
     def _profiles_by_symbol(
@@ -738,6 +755,31 @@ class QuantService:
             }
         return result
 
+    def _pledge_stats_by_symbol(
+        self,
+        db: Session,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        rows = db.scalars(
+            select(PledgeStat)
+            .where(PledgeStat.symbol.in_(symbols))
+            .order_by(PledgeStat.symbol, desc(PledgeStat.end_date))
+        ).all()
+        latest: dict[str, PledgeStat] = {}
+        for row in rows:
+            latest.setdefault(row.symbol, row)
+        return {
+            symbol: {
+                "end_date": row.end_date,
+                "pledge_count": int(row.pledge_count or 0),
+                "unrest_pledge": _number(row.unrest_pledge),
+                "rest_pledge": _number(row.rest_pledge),
+                "total_share": _number(row.total_share),
+                "pledge_ratio": _number(row.pledge_ratio),
+            }
+            for symbol, row in latest.items()
+        }
+
     def _sector_heat_by_symbol(
         self,
         db: Session,
@@ -827,6 +869,7 @@ class QuantService:
             "block_trade": None,
             "shareholder_number": None,
             "shareholder_trade": None,
+            "pledge_stat": None,
         }
 
     def _empty_daily_factors(self) -> dict[str, Any]:
@@ -858,6 +901,7 @@ class QuantService:
             "block_trade": None,
             "shareholder_number": None,
             "shareholder_trade": None,
+            "pledge_stat": None,
         }
 
     def _stddev(self, values: list[float]) -> float:

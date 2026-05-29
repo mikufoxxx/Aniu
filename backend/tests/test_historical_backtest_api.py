@@ -1238,6 +1238,112 @@ def test_refresh_daily_bars_stores_tushare_shareholder_rows(monkeypatch, tmp_pat
     _reset_state()
 
 
+def test_refresh_daily_bars_stores_tushare_pledge_stats(monkeypatch, tmp_path) -> None:
+    from app.db.models import PledgeStat
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date, symbols=None):
+        return [
+            {"ts_code": "600519.SH", "trade_date": trade_date, "close": 100, "amount": 9000},
+            {"ts_code": "000001.SZ", "trade_date": trade_date, "close": 10, "amount": 1000},
+        ]
+
+    def fake_pledge_rows(end_date):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "end_date": end_date,
+                "pledge_count": 12,
+                "unrest_pledge": 1200.0,
+                "rest_pledge": 300.0,
+                "total_share": 125619.78,
+                "pledge_ratio": 3.2,
+            },
+            {
+                "ts_code": "300750.SZ",
+                "end_date": end_date,
+                "pledge_count": 8,
+                "unrest_pledge": 900.0,
+                "rest_pledge": 100.0,
+                "total_share": 440000.0,
+                "pledge_ratio": 12.5,
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_index_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_limit_list_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_margin_detail_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_top_list_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_top_inst_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_block_trade_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_shareholder_number_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_shareholder_trade_rows", lambda *args: [])
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_pledge_stat_rows",
+        fake_pledge_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_daily_bars(
+                db,
+                trade_date="20260528",
+                symbols=["600519.SH", "000001.SZ"],
+            )
+            rows = db.query(PledgeStat).all()
+
+    assert result["pledge_stat_count"] == 1
+    assert result["pledge_stat_error"] is None
+    assert rows[0].symbol == "600519.SH"
+    assert rows[0].end_date == "20260528"
+    assert rows[0].pledge_count == 12
+    assert rows[0].unrest_pledge == 1200.0
+    assert rows[0].rest_pledge == 300.0
+    assert rows[0].total_share == 125619.78
+    assert rows[0].pledge_ratio == 3.2
+    assert rows[0].source == "tushare_pledge_stat"
+
+    _reset_state()
+
+
+def test_fetch_pledge_stat_rows_uses_recent_available_end_date(monkeypatch) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
+    get_settings.cache_clear()
+    calls: list[str] = []
+
+    def fake_request(params):
+        end_date = str(params["end_date"])
+        calls.append(end_date)
+        if end_date == "20260526":
+            return [
+                {
+                    "ts_code": "600519.SH",
+                    "end_date": end_date,
+                    "pledge_count": 12,
+                    "pledge_ratio": 3.2,
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(historical_data_service, "_request_tushare_pledge_stat", fake_request)
+
+    rows = historical_data_service.fetch_pledge_stat_rows("20260528")
+
+    assert calls == ["20260528", "20260527", "20260526"]
+    assert rows[0]["end_date"] == "20260526"
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 
@@ -1306,6 +1412,7 @@ def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_p
         "tushare_block_trade": 0,
         "tushare_stk_holdernumber": 0,
         "tushare_stk_holdertrade": 0,
+        "tushare_pledge_stat": 0,
     }
     assert payload["data_source_errors"] == {
         "tushare_moneyflow_ths": ["20260528: moneyflow partial"],

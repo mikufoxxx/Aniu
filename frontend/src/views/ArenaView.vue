@@ -340,6 +340,7 @@
               <span v-if="dragonTigerText(item)" class="position-symbol">{{ dragonTigerText(item) }}</span>
               <span v-if="blockTradeText(item)" class="position-symbol">{{ blockTradeText(item) }}</span>
               <span v-if="shareholderText(item)" class="position-symbol">{{ shareholderText(item) }}</span>
+              <span v-if="pledgeText(item)" class="position-symbol">{{ pledgeText(item) }}</span>
             </div>
             <div>{{ item.score.toFixed(2) }}</div>
             <div>
@@ -869,6 +870,7 @@ function sourceCountsText(counts: Record<string, number> | undefined): string {
     ['大宗', counts.tushare_block_trade],
     ['股东户数', counts.tushare_stk_holdernumber],
     ['增减持', counts.tushare_stk_holdertrade],
+    ['质押', counts.tushare_pledge_stat],
   ].filter(([, value]) => typeof value === 'number' && value > 0)
   if (!items.length) return '--'
   return items.map(([label, value]) => `${label}${formatInteger(value as number)}`).join(' / ')
@@ -964,6 +966,12 @@ function shareholderText(item: QuantCandidate): string {
     parts.push(`股东 ${formatSignedPercent(trade.net_change_ratio)}`)
   }
   return parts.join(' · ')
+}
+
+function pledgeText(item: QuantCandidate): string {
+  const pledge = item.daily_factors?.pledge_stat
+  if (typeof pledge?.pledge_ratio !== 'number' || pledge.pledge_ratio <= 0) return ''
+  return `质押 ${pledge.pledge_ratio.toFixed(1)}%`
 }
 
 function readinessText(value: boolean | undefined): string {

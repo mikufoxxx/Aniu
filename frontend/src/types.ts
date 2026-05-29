@@ -328,6 +328,14 @@ export interface QuantCandidate {
       net_change_ratio?: number
       top_holder?: string | null
     } | null
+    pledge_stat?: {
+      end_date?: string | null
+      pledge_count?: number
+      unrest_pledge?: number
+      rest_pledge?: number
+      total_share?: number
+      pledge_ratio?: number
+    } | null
   }
   rationale: string
 }

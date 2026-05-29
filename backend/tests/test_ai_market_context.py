@@ -22,6 +22,7 @@ from app.db.models import (
     MarginDetail,
     MarketDataMaintenanceRun,
     MarketReport,
+    PledgeStat,
     SectorBar,
     SectorMember,
     ShareholderNumber,
@@ -301,6 +302,15 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     begin_date="20260510",
                     close_date="20260520",
                 ),
+                PledgeStat(
+                    symbol="600519.SH",
+                    end_date="20260528",
+                    pledge_count=12,
+                    unrest_pledge=1200.0,
+                    rest_pledge=300.0,
+                    total_share=125619.78,
+                    pledge_ratio=3.2,
+                ),
             ]
         )
         db.flush()
@@ -317,7 +327,7 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
         "tushare_sector_member, tushare_stock_basic, tushare_fina_indicator, "
         "tushare_limit_list_d, tushare_margin_detail, tushare_top_list, "
         "tushare_top_inst, tushare_block_trade, tushare_stk_holdernumber, "
-        "tushare_stk_holdertrade, tushare_index, tushare_sector"
+        "tushare_stk_holdertrade, tushare_pledge_stat, tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -342,6 +352,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "户数变化 -8.33%" in context
     assert "重要股东净增持 100.00万股" in context
     assert "净变动 0.15%" in context
+    assert "质押比例 3.20%" in context
+    assert "质押 12笔" in context
     assert "PE 23.50" in context
     assert "PB 7.80" in context
     assert "行业 白酒" in context

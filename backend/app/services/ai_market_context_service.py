@@ -138,6 +138,7 @@ class AIMarketContextService:
             shareholder_trade_parts = self._shareholder_trade_parts(
                 daily.get("shareholder_trade") or {}
             )
+            pledge_parts = self._pledge_parts(daily.get("pledge_stat") or {})
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -155,6 +156,7 @@ class AIMarketContextService:
                     f"{block_trade_parts}"
                     f"{shareholder_number_parts}"
                     f"{shareholder_trade_parts}"
+                    f"{pledge_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -499,6 +501,27 @@ class AIMarketContextService:
             parts.append(f"重要股东净减持 {abs(vol_number):.2f}万股")
         if ratio_number:
             parts.append(f"净变动 {ratio_number:.2f}%")
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
+
+    def _pledge_parts(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        try:
+            pledge_ratio = float(item.get("pledge_ratio") or 0)
+        except (TypeError, ValueError):
+            pledge_ratio = 0.0
+        pledge_count = int(item.get("pledge_count") or 0)
+        try:
+            unrest_pledge = float(item.get("unrest_pledge") or 0)
+        except (TypeError, ValueError):
+            unrest_pledge = 0.0
+        if pledge_ratio > 0:
+            parts.append(f"质押比例 {pledge_ratio:.2f}%")
+        if pledge_count > 0:
+            parts.append(f"质押 {pledge_count}笔")
+        if unrest_pledge > 0:
+            parts.append(f"未解押 {unrest_pledge:.2f}万股")
         if not parts:
             return ""
         return "; ".join(parts) + "; "

@@ -147,9 +147,25 @@ class MarketDataService:
         ):
             return [dict(item) for item in self._quote_cache]
 
-        quotes = self._get_easy_tdx_quotes(normalized_symbols) if prefer_realtime else []
-        if not quotes:
-            quotes = self._get_tencent_quotes(normalized_symbols)
+        quote_by_symbol: dict[str, dict[str, Any]] = {}
+        if prefer_realtime:
+            for quote in self._get_easy_tdx_quotes(normalized_symbols):
+                symbol = normalize_symbol(str(quote.get("symbol") or ""))
+                quote_by_symbol[symbol] = quote
+
+        missing_symbols = [
+            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
+        ]
+        if missing_symbols:
+            for quote in self._get_tencent_quotes(missing_symbols):
+                symbol = normalize_symbol(str(quote.get("symbol") or ""))
+                quote_by_symbol[symbol] = quote
+
+        quotes = [
+            quote_by_symbol[symbol]
+            for symbol in normalized_symbols
+            if symbol in quote_by_symbol
+        ]
 
         self._quote_cache = [dict(item) for item in quotes]
         self._quote_cache_key = cache_key

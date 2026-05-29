@@ -232,20 +232,20 @@ class AIMarketContextService:
 
     def _daily_basic_parts(self, daily: dict[str, Any]) -> str:
         parts: list[str] = []
-        for key, label, suffix in (
-            ("turnover_rate", "换手", "%"),
-            ("volume_ratio", "量比", ""),
-            ("pe_ttm", "PE", ""),
-            ("pb", "PB", ""),
-            ("moneyflow_net_amount", "净流入", "万"),
-            ("moneyflow_buy_lg_amount_rate", "大单", "%"),
+        for key, label, suffix, allow_negative in (
+            ("turnover_rate", "换手", "%", False),
+            ("volume_ratio", "量比", "", False),
+            ("pe_ttm", "PE", "", False),
+            ("pb", "PB", "", False),
+            ("moneyflow_net_amount", "净流入", "万", True),
+            ("moneyflow_buy_lg_amount_rate", "大单", "%", True),
         ):
             value = daily.get(key)
             try:
                 numeric = float(value)
             except (TypeError, ValueError):
                 continue
-            if numeric <= 0:
+            if numeric == 0 or (numeric < 0 and not allow_negative):
                 continue
             parts.append(f"{label} {numeric:.2f}{suffix}")
         if not parts:

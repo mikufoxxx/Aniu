@@ -103,8 +103,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     volume_ratio=1.34,
                     pe_ttm=23.5,
                     pb=7.8,
-                    moneyflow_net_amount=8123.4,
-                    moneyflow_buy_lg_amount_rate=6.2,
+                    moneyflow_net_amount=-8123.4,
+                    moneyflow_buy_lg_amount_rate=-6.2,
                 ),
                 DailyBar(symbol="000001.SZ", trade_date="20260526", close=10.0, amount=1000),
                 DailyBar(symbol="000001.SZ", trade_date="20260527", close=10.1, amount=1100),
@@ -128,8 +128,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "量比 1.34" in context
     assert "PE 23.50" in context
     assert "PB 7.80" in context
-    assert "净流入 8123.40万" in context
-    assert "大单 6.20%" in context
+    assert "净流入 -8123.40万" in context
+    assert "大单 -6.20%" in context
     assert "000001.SZ 平安银行" in context
 
     _reset_state()

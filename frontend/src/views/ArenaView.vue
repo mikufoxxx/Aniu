@@ -569,6 +569,12 @@ async function runMaintenance(): Promise<void> {
     dailyRefreshResult.value = payload.refresh
     quantDataset.value = payload.dataset
     candidates.value = payload.dataset.items
+    if (payload.report) {
+      marketReports.value = [
+        payload.report,
+        ...marketReports.value.filter((item) => item.id !== payload.report?.id),
+      ].slice(0, 6)
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据维护失败。'
   } finally {

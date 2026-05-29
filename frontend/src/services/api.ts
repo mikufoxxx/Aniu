@@ -420,7 +420,7 @@ export const api = {
       timeoutMs: 5 * 60 * 1000,
     })
   },
-  runMarketDataMaintenance(payload: { end_date?: string; lookback_days?: number; symbols?: string[]; dataset_limit?: number }) {
+  runMarketDataMaintenance(payload: { end_date?: string; lookback_days?: number; symbols?: string[]; dataset_limit?: number; report_type?: 'morning' | 'closing' }) {
     return request<MarketDataMaintenancePayload>(`${API_PREFIX}/market/maintenance/run`, {
       method: 'POST',
       body: JSON.stringify(payload),

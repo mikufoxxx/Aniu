@@ -420,12 +420,14 @@ class MarketDataMaintenanceRunRequest(BaseModel):
     lookback_days: int = Field(default=10, ge=1, le=120)
     symbols: list[str] | None = None
     dataset_limit: int = Field(default=100, ge=1, le=500)
+    report_type: Literal["morning", "closing"] | None = None
 
 
 class MarketDataMaintenanceRunResponse(BaseModel):
     status: str
     refresh: DailyRangeRefreshResponse
     dataset: QuantDatasetResponse
+    report: MarketReportRead | None = None
 
 
 class BacktestRequest(BaseModel):

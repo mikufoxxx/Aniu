@@ -236,6 +236,7 @@ export interface MarketDataMaintenancePayload {
   status: string
   refresh: DailyRangeRefreshPayload
   dataset: QuantDatasetPayload
+  report?: MarketReport
 }
 
 export interface AIMarketContextPayload {

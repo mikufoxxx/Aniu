@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.db.database import session_scope
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_service import DEFAULT_UNIVERSE, normalize_symbol
+from app.services.market_report_service import market_report_service
 from app.services.quant_service import quant_service
 
 
@@ -43,6 +44,7 @@ class MarketDataMaintenanceService:
                 lookback_days=settings.market_data_maintenance_lookback_days,
                 symbols=None,
                 dataset_limit=settings.market_data_maintenance_dataset_limit,
+                report_type=self._report_type_for_time(due_time),
             )
         self._completed_slots.add(slot_key)
         return {"status": "completed", "slot": slot_key, "result": result}
@@ -55,11 +57,16 @@ class MarketDataMaintenanceService:
         lookback_days: int | None = None,
         symbols: list[str] | None = None,
         dataset_limit: int | None = None,
+        report_type: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         normalized_lookback = max(
             1,
             min(120, int(lookback_days or settings.market_data_maintenance_lookback_days)),
+        )
+        normalized_limit = max(
+            1,
+            min(500, int(dataset_limit or settings.market_data_maintenance_dataset_limit)),
         )
         normalized_end = self._normalize_end_date(end_date)
         start_date = (
@@ -77,15 +84,24 @@ class MarketDataMaintenanceService:
         dataset = quant_service.build_dataset(
             db,
             symbols=dataset_symbols,
-            limit=max(1, min(500, int(dataset_limit or settings.market_data_maintenance_dataset_limit))),
+            limit=normalized_limit,
             prefer_realtime=True,
             lookback_days=normalized_lookback,
         )
-        return {
+        result: dict[str, Any] = {
             "status": "completed",
             "refresh": refresh,
             "dataset": dataset,
         }
+        if report_type:
+            result["report"] = market_report_service.generate_report(
+                db,
+                report_type=report_type,
+                symbols=dataset_symbols,
+                limit=min(50, normalized_limit),
+                lookback_days=normalized_lookback,
+            )
+        return result
 
     def _normalize_end_date(self, end_date: str | None) -> str:
         if not end_date:
@@ -109,6 +125,11 @@ class MarketDataMaintenanceService:
             if 0 <= current_minutes - target_minutes < 10:
                 due.append(f"{int(hour_text):02d}:{int(minute_text):02d}")
         return due[-1] if due else None
+
+    def _report_type_for_time(self, time_text: str) -> str:
+        hour_text, _, minute_text = time_text.partition(":")
+        minutes = int(hour_text) * 60 + int(minute_text)
+        return "morning" if minutes < 12 * 60 else "closing"
 
 
 market_data_maintenance_service = MarketDataMaintenanceService()

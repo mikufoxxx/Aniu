@@ -49,6 +49,7 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
     tmp_path,
 ) -> None:
     from app.services.historical_data_service import historical_data_service
+    from app.services.market_report_service import market_report_service
     from app.services.quant_service import quant_service
 
     captured: dict[str, object] = {}
@@ -82,8 +83,26 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
             "items": [],
         }
 
+    def fake_generate_report(db, *, report_type: str, symbols=None, limit=10, lookback_days=20):
+        captured["report"] = (report_type, symbols, limit, lookback_days)
+        return {
+            "id": 7,
+            "report_type": report_type,
+            "title": "收盘分析",
+            "symbols": symbols or [],
+            "lookback_days": lookback_days,
+            "data_sources": ["easy_tdx", "tushare_daily"],
+            "coverage": {"realtime_symbols": 3, "daily_history_symbols": 3},
+            "recommendations": [],
+            "dataset": {},
+            "context": "context",
+            "summary": "summary",
+            "created_at": "2026-05-29T15:30:00",
+        }
+
     monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
     monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+    monkeypatch.setattr(market_report_service, "generate_report", fake_generate_report)
 
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
@@ -95,6 +114,7 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
                 "lookback_days": 3,
                 "symbols": ["000001.SZ", "600519.SH"],
                 "dataset_limit": 20,
+                "report_type": "closing",
             },
         )
 
@@ -103,8 +123,10 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
     assert payload["refresh"]["start_date"] == "20260526"
     assert payload["refresh"]["stored_count"] == 300
     assert payload["dataset"]["coverage"]["daily_history_symbols"] == 3
+    assert payload["report"]["report_type"] == "closing"
     assert captured["range"] == ("20260526", "20260528", ["000001.SZ", "600519.SH"])
     assert captured["dataset"] == (["000001.SZ", "600519.SH"], 20, True, 3)
+    assert captured["report"] == ("closing", ["000001.SZ", "600519.SH"], 20, 3)
 
     _reset_state()
 
@@ -140,6 +162,7 @@ def test_market_data_maintenance_process_due_jobs_runs_once_per_slot(
     assert len(calls) == 1
     assert calls[0]["lookback_days"] == 5
     assert calls[0]["dataset_limit"] == 30
+    assert calls[0]["report_type"] == "closing"
 
     market_data_maintenance_service.reset_runtime_state()
     _reset_state()

@@ -187,6 +187,7 @@ def run_market_data_maintenance(
             lookback_days=payload.lookback_days,
             symbols=payload.symbols,
             dataset_limit=payload.dataset_limit,
+            report_type=payload.report_type,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

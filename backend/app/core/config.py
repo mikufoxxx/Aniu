@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     mx_api_url: str = Field(
         default="https://mkapi2.dfcfs.com/finskillshub", alias="MX_API_URL"
     )
+    tushare_token: str | None = Field(default=None, alias="TUSHARE_TOKEN")
+    tushare_api_url: str | None = Field(default=None, alias="TUSHARE_API_URL")
+    realtime_quote_cache_ttl_seconds: int = Field(
+        default=5, alias="REALTIME_QUOTE_CACHE_TTL_SECONDS"
+    )
 
     openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
@@ -54,6 +59,8 @@ class Settings(BaseSettings):
 
     @field_validator(
         "mx_apikey",
+        "tushare_token",
+        "tushare_api_url",
         "openai_base_url",
         "openai_api_key",
         "app_login_password",

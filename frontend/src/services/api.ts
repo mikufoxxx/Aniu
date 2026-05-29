@@ -1,4 +1,4 @@
-import type { AccountOverview, AppSettings, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, LoginRequest, LoginResponse, PersistentSession, PersistentSessionMessagesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaRunPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -364,6 +364,23 @@ export const api = {
     }
     const suffix = params.size > 0 ? `?${params.toString()}` : ''
     return request<AccountOverview>(`${API_PREFIX}/account${suffix}`, {
+      timeoutMs: 60000,
+    })
+  },
+  getMarketSourceHealth() {
+    return request<MarketSourceHealthPayload>(`${API_PREFIX}/market/sources/health`)
+  },
+  generateQuantCandidates(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean }) {
+    return request<QuantCandidatesPayload>(`${API_PREFIX}/quant/candidates`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  runArena(payload: { symbols?: string[]; agents?: ArenaAgentConfig[]; initial_cash?: number }) {
+    return request<ArenaRunPayload>(`${API_PREFIX}/arena/run`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
       timeoutMs: 60000,
     })
   },

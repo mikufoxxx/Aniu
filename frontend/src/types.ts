@@ -179,6 +179,83 @@ export interface AccountOverview {
   errors: string[]
 }
 
+export interface MarketSourceHealth {
+  id: string
+  name: string
+  tier: 'daily' | 'low_frequency' | 'quasi_high_frequency' | 'supplemental'
+  status: string
+  cadence: string
+  risk: string
+}
+
+export interface MarketSourceHealthPayload {
+  sources: MarketSourceHealth[]
+  recommended_usage: Record<string, string>
+}
+
+export interface QuantCandidate {
+  symbol: string
+  name: string
+  price: number | null
+  change_pct: number
+  amount: number
+  turnover: number
+  volume_ratio: number
+  source: string | null
+  timestamp: string | null
+  score: number
+  factor_scores: Record<string, number>
+  rationale: string
+}
+
+export interface QuantCandidatesPayload {
+  universe_size: number
+  candidate_count: number
+  data_sources: string[]
+  candidates: QuantCandidate[]
+}
+
+export interface ArenaAgentConfig {
+  id: string
+  name: string
+  style: 'momentum' | 'balanced' | 'risk_control'
+}
+
+export interface ArenaOrder {
+  id: number
+  agent_id: string
+  agent_name: string
+  style: string
+  action: string
+  symbol: string
+  name: string
+  quantity: number
+  price: number
+  amount: number
+  remaining_cash: number
+  reason: string
+}
+
+export interface ArenaLeaderboardItem {
+  agent_id: string
+  agent_name: string
+  style: string
+  cash: number
+  position_value: number
+  total_assets: number
+  return_ratio: number
+  order_count: number
+}
+
+export interface ArenaRunPayload {
+  run_id: number
+  candidate_count: number
+  candidates: QuantCandidate[]
+  leaderboard: ArenaLeaderboardItem[]
+  orders: ArenaOrder[]
+  data_sources: string[]
+}
+
 export interface ChatToolCall {
   tool_call_id?: string | null
   tool_name: string

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.routes.account import router as account_router
+from app.api.routes.market import router as market_router
 from app.api.routes.persistent_session import router as persistent_session_router
 from app.api.routes.runs import router as runs_router
 from app.api.routes.schedules import router as schedule_router
@@ -57,6 +58,7 @@ from app.services.skill_admin_service import (
 
 router = APIRouter(prefix="/api/aniu", tags=["aniu"])
 router.include_router(account_router)
+router.include_router(market_router)
 router.include_router(persistent_session_router)
 router.include_router(settings_router)
 router.include_router(schedule_router)

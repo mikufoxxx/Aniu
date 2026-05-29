@@ -279,6 +279,95 @@ class AccountOverviewDebugRead(AccountOverviewRead):
     raw_orders: dict[str, Any] | None = None
 
 
+class MarketSourceHealthRead(BaseModel):
+    id: str
+    name: str
+    tier: Literal["daily", "low_frequency", "quasi_high_frequency", "supplemental"]
+    status: str
+    cadence: str
+    risk: str
+
+
+class MarketSourceHealthResponse(BaseModel):
+    sources: list[MarketSourceHealthRead]
+    recommended_usage: dict[str, str]
+
+
+class QuantCandidatesRequest(BaseModel):
+    symbols: list[str] | None = None
+    limit: int = Field(default=20, ge=1, le=200)
+    prefer_realtime: bool = True
+
+
+class QuantCandidateRead(BaseModel):
+    symbol: str
+    name: str
+    price: float | None = None
+    change_pct: float
+    amount: float
+    turnover: float
+    volume_ratio: float
+    source: str | None = None
+    timestamp: str | None = None
+    score: float
+    factor_scores: dict[str, float]
+    rationale: str
+
+
+class QuantCandidatesResponse(BaseModel):
+    universe_size: int
+    candidate_count: int
+    data_sources: list[str]
+    candidates: list[QuantCandidateRead]
+
+
+class ArenaAgentRequest(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
+    style: Literal["momentum", "balanced", "risk_control"] = "balanced"
+
+
+class ArenaRunRequest(BaseModel):
+    symbols: list[str] | None = None
+    agents: list[ArenaAgentRequest] | None = None
+    initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
+
+
+class ArenaOrderRead(BaseModel):
+    id: int
+    agent_id: str
+    agent_name: str
+    style: str
+    action: str
+    symbol: str
+    name: str
+    quantity: int
+    price: float
+    amount: float
+    remaining_cash: float
+    reason: str
+
+
+class ArenaLeaderboardItemRead(BaseModel):
+    agent_id: str
+    agent_name: str
+    style: str
+    cash: float
+    position_value: float
+    total_assets: float
+    return_ratio: float
+    order_count: int
+
+
+class ArenaRunResponse(BaseModel):
+    run_id: int
+    candidate_count: int
+    candidates: list[QuantCandidateRead]
+    leaderboard: list[ArenaLeaderboardItemRead]
+    orders: list[ArenaOrderRead]
+    data_sources: list[str]
+
+
 class ChatAttachmentRef(BaseModel):
     """Reference to a previously uploaded attachment.
 

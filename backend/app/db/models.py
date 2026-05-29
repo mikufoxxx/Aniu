@@ -152,6 +152,51 @@ class TradeOrder(Base):
     run: Mapped[StrategyRun] = relationship(back_populates="trade_orders")
 
 
+class ArenaRun(Base):
+    __tablename__ = "arena_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    initial_cash: Mapped[float] = mapped_column(Float, default=200000.0)
+    universe_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    candidate_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    leaderboard_payload: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+
+    orders: Mapped[list["ArenaOrder"]] = relationship(
+        back_populates="arena_run",
+        cascade="all, delete-orphan",
+        order_by="ArenaOrder.id",
+    )
+
+
+class ArenaOrder(Base):
+    __tablename__ = "arena_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    arena_run_id: Mapped[int] = mapped_column(
+        ForeignKey("arena_runs.id", ondelete="CASCADE"), index=True
+    )
+    agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_name: Mapped[str] = mapped_column(String(120))
+    style: Mapped[str] = mapped_column(String(32), default="balanced")
+    action: Mapped[str] = mapped_column(String(16), default="BUY")
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    name: Mapped[str] = mapped_column(String(64), default="")
+    quantity: Mapped[int] = mapped_column(Integer)
+    price: Mapped[float] = mapped_column(Float)
+    amount: Mapped[float] = mapped_column(Float)
+    remaining_cash: Mapped[float] = mapped_column(Float)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    arena_run: Mapped[ArenaRun] = relationship(back_populates="orders")
+
+
 class RunEvent(Base):
     __tablename__ = "run_events"
 

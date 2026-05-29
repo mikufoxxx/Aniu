@@ -33,6 +33,7 @@ class ArenaService:
     ) -> dict[str, Any]:
         active_agents = agents or self.enabled_agents(db)
         candidate_payload = quant_service.generate_candidates(
+            db=db,
             symbols=symbols,
             limit=max(5, len(active_agents)),
             prefer_realtime=True,

@@ -297,6 +297,11 @@ class QuantCandidatesRequest(BaseModel):
     symbols: list[str] | None = None
     limit: int = Field(default=20, ge=1, le=200)
     prefer_realtime: bool = True
+    lookback_days: int = Field(default=20, ge=1, le=120)
+
+
+class QuantDatasetRequest(QuantCandidatesRequest):
+    pass
 
 
 class QuantCandidateRead(BaseModel):
@@ -311,6 +316,7 @@ class QuantCandidateRead(BaseModel):
     timestamp: str | None = None
     score: float
     factor_scores: dict[str, float]
+    daily_factors: dict[str, Any] = Field(default_factory=dict)
     rationale: str
 
 
@@ -319,6 +325,15 @@ class QuantCandidatesResponse(BaseModel):
     candidate_count: int
     data_sources: list[str]
     candidates: list[QuantCandidateRead]
+
+
+class QuantDatasetResponse(BaseModel):
+    universe_size: int
+    item_count: int
+    lookback_days: int
+    data_sources: list[str]
+    coverage: dict[str, int]
+    items: list[QuantCandidateRead]
 
 
 class DailyRefreshRequest(BaseModel):

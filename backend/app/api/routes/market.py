@@ -18,6 +18,8 @@ from app.schemas.aniu import (
     MarketSourceHealthResponse,
     QuantCandidatesRequest,
     QuantCandidatesResponse,
+    QuantDatasetRequest,
+    QuantDatasetResponse,
 )
 from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
@@ -37,13 +39,34 @@ def get_market_source_health(
 @router.post("/quant/candidates", response_model=QuantCandidatesResponse)
 def generate_quant_candidates(
     payload: QuantCandidatesRequest,
+    db: Session = Depends(get_db),
     _user: str = Depends(get_current_user),
 ) -> QuantCandidatesResponse:
     try:
         return quant_service.generate_candidates(
+            db=db,
             symbols=payload.symbols,
             limit=payload.limit,
             prefer_realtime=payload.prefer_realtime,
+            lookback_days=payload.lookback_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/quant/dataset", response_model=QuantDatasetResponse)
+def build_quant_dataset(
+    payload: QuantDatasetRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> QuantDatasetResponse:
+    try:
+        return quant_service.build_dataset(
+            db,
+            symbols=payload.symbols,
+            limit=payload.limit,
+            prefer_realtime=payload.prefer_realtime,
+            lookback_days=payload.lookback_days,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

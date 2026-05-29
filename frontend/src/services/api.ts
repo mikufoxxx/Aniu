@@ -1,4 +1,4 @@
-import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -372,6 +372,13 @@ export const api = {
   },
   generateQuantCandidates(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean }) {
     return request<QuantCandidatesPayload>(`${API_PREFIX}/quant/candidates`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  buildQuantDataset(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean; lookback_days?: number }) {
+    return request<QuantDatasetPayload>(`${API_PREFIX}/quant/dataset`, {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 60000,

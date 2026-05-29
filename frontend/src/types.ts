@@ -205,6 +205,14 @@ export interface QuantCandidate {
   timestamp: string | null
   score: number
   factor_scores: Record<string, number>
+  daily_factors: {
+    latest_trade_date?: string | null
+    bars_used?: number
+    latest_close?: number | null
+    momentum_pct?: number
+    avg_amount?: number
+    volatility_pct?: number
+  }
   rationale: string
 }
 
@@ -213,6 +221,15 @@ export interface QuantCandidatesPayload {
   candidate_count: number
   data_sources: string[]
   candidates: QuantCandidate[]
+}
+
+export interface QuantDatasetPayload {
+  universe_size: number
+  item_count: number
+  lookback_days: number
+  data_sources: string[]
+  coverage: Record<string, number>
+  items: QuantCandidate[]
 }
 
 export interface DailyRefreshPayload {

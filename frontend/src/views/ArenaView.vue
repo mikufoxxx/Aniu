@@ -164,6 +164,31 @@
             >
               刷新候选
             </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="loading"
+              @click="loadQuantDataset"
+            >
+              构建数据集
+            </button>
+          </div>
+        </div>
+        <div v-if="quantDataset" class="arena-dataset-summary">
+          <div>
+            <strong>{{ quantDataset.item_count }}</strong>
+            <span>标的</span>
+          </div>
+          <div>
+            <strong>{{ quantDataset.coverage.realtime_symbols ?? 0 }}</strong>
+            <span>实时覆盖</span>
+          </div>
+          <div>
+            <strong>{{ quantDataset.coverage.daily_history_symbols ?? 0 }}</strong>
+            <span>日线覆盖</span>
+          </div>
+          <div>
+            <strong>{{ quantDataset.lookback_days }}</strong>
+            <span>回看日</span>
           </div>
         </div>
         <div class="positions-surface" v-if="candidates.length">
@@ -171,6 +196,7 @@
             <div>名称 / 代码</div>
             <div>评分</div>
             <div>价格 / 涨幅</div>
+            <div>日线信号</div>
             <div>成交额</div>
             <div>来源</div>
           </div>
@@ -185,6 +211,12 @@
               <span class="metric-sub" :class="profitClass(item.change_pct)">
                 {{ item.change_pct.toFixed(2) }}%
               </span>
+            </div>
+            <div>
+              <span :class="profitClass(item.daily_factors?.momentum_pct)">
+                {{ formatSignedPercent(item.daily_factors?.momentum_pct) }}
+              </span>
+              <span class="metric-sub">{{ item.daily_factors?.bars_used ?? 0 }}日</span>
             </div>
             <div>{{ formatAmount(item.amount) }}</div>
             <div>{{ item.source || '--' }}</div>
@@ -256,7 +288,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRefreshPayload, MarketSourceHealthPayload, QuantCandidate } from '@/types'
+import type { ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRefreshPayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -274,6 +306,7 @@ const errorMessage = ref('')
 const agents = ref<ArenaAgentConfig[]>(defaultAgents.map((agent) => ({ ...agent })))
 const sourceHealth = ref<MarketSourceHealthPayload | null>(null)
 const candidates = ref<QuantCandidate[]>([])
+const quantDataset = ref<QuantDatasetPayload | null>(null)
 const arenaResult = ref<ArenaRunPayload | null>(null)
 const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
 const dailyRefreshResult = ref<DailyRefreshPayload | null>(null)
@@ -338,6 +371,25 @@ async function loadCandidates(): Promise<void> {
     candidates.value = payload.candidates
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '候选池刷新失败。'
+  }
+}
+
+async function loadQuantDataset(): Promise<void> {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    const payload = await api.buildQuantDataset({
+      symbols: parseSymbols(),
+      limit: 20,
+      prefer_realtime: true,
+      lookback_days: 20,
+    })
+    quantDataset.value = payload
+    candidates.value = payload.items
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '量化数据集构建失败。'
+  } finally {
+    loading.value = false
   }
 }
 
@@ -436,6 +488,11 @@ function formatPercent(value: number | null | undefined): string {
   return `${(value * 100).toFixed(2)}%`
 }
 
+function formatSignedPercent(value: number | null | undefined): string {
+  if (typeof value !== 'number') return '--'
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`
+}
+
 onMounted(async () => {
   try {
     await Promise.all([loadSources(), loadAgents(), loadCandidates(), loadLeaderboard()])
@@ -509,6 +566,32 @@ onMounted(async () => {
 .arena-history-result span {
   color: #b7c8e3;
   font-size: 13px;
+}
+
+.arena-dataset-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.arena-dataset-summary div {
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px 12px;
+}
+
+.arena-dataset-summary strong {
+  display: block;
+  color: #f7fbff;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.arena-dataset-summary span {
+  color: #9cb2cf;
+  font-size: 12px;
 }
 
 .arena-field {
@@ -609,7 +692,7 @@ onMounted(async () => {
 }
 
 .arena-table-row {
-  grid-template-columns: 1.5fr 0.7fr 1fr 1fr 0.8fr;
+  grid-template-columns: 1.45fr 0.65fr 0.95fr 0.85fr 0.95fr 0.75fr;
 }
 
 .arena-order-row {
@@ -628,6 +711,7 @@ onMounted(async () => {
   .arena-grid,
   .arena-form-grid,
   .arena-history-grid,
+  .arena-dataset-summary,
   .arena-agent-grid {
     grid-template-columns: 1fr;
   }

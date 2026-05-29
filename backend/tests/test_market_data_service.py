@@ -94,3 +94,26 @@ def test_realtime_quotes_fill_easy_tdx_gaps_with_tencent(monkeypatch) -> None:
     assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
     assert [item["source"] for item in quotes] == ["easy_tdx", "tencent", "tencent"]
     assert captured["missing"] == ["000002.SZ", "000003.SZ"]
+
+
+def test_tencent_quotes_fill_partial_batch_gaps_with_fallback(monkeypatch) -> None:
+    from app.services import market_data_service as module
+    from app.services.market_data_service import market_data_service
+
+    class FakeResponse:
+        content = (
+            'v_sz000001="~平安银行~000001~10.00~9.80~~~~~~~~~~~~~~~~~~~~~~~~~~~~'
+            '2026-05-29 15:00:00~~2.04~~~~1000~1.1";'
+        ).encode("gbk")
+
+        def raise_for_status(self) -> None:
+            return None
+
+    monkeypatch.setattr(module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(module.httpx, "get", lambda *args, **kwargs: FakeResponse())
+    market_data_service._quote_cache = None
+
+    quotes = market_data_service.get_quotes(["000001.SZ", "000002.SZ", "000003.SZ"])
+
+    assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert [item["source"] for item in quotes] == ["tencent", "fallback", "fallback"]

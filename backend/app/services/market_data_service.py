@@ -237,7 +237,17 @@ class MarketDataService:
         for start in range(0, len(symbols), _TENCENT_QUOTE_BATCH_SIZE):
             batch = symbols[start : start + _TENCENT_QUOTE_BATCH_SIZE]
             batch_results = self._request_tencent_quote_batch(batch)
-            results.extend(batch_results or self._fallback_quotes(batch))
+            batch_by_symbol = {
+                normalize_symbol(str(item.get("symbol") or "")): item
+                for item in batch_results
+                if item.get("symbol")
+            }
+            fallback_by_symbol = {
+                item["symbol"]: item for item in self._fallback_quotes(batch)
+            }
+            for symbol in batch:
+                normalized = normalize_symbol(symbol)
+                results.append(batch_by_symbol.get(normalized) or fallback_by_symbol[normalized])
         return results
 
     def _request_tencent_quote_batch(self, symbols: list[str]) -> list[dict[str, Any]]:

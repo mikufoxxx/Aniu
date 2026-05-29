@@ -4,12 +4,18 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import BacktestRun, DailyBar
 from app.services.market_data_service import normalize_symbol
+
+_TUSHARE_DAILY_FIELDS = (
+    "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
+)
+_TUSHARE_HTTP_TIMEOUT_SECONDS = 20.0
 
 
 def _to_float(value: Any) -> float | None:
@@ -37,33 +43,63 @@ class HistoricalDataService:
         settings = get_settings()
         if not settings.tushare_token:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新日频数据。")
-        try:
-            import tushare as ts
-        except ImportError as exc:
-            raise RuntimeError("当前环境未安装 tushare。") from exc
-
-        pro = ts.pro_api(settings.tushare_token)
-        if settings.tushare_api_url:
-            pro._DataApi__http_url = settings.tushare_api_url
 
         normalized_date = _normalize_trade_date(trade_date)
-        frames = []
         if symbols:
+            rows: list[dict[str, Any]] = []
             for symbol in symbols:
-                frame = pro.daily(
-                    ts_code=normalize_symbol(symbol),
-                    start_date=normalized_date,
-                    end_date=normalized_date,
+                rows.extend(
+                    self._request_tushare_daily(
+                        {
+                            "ts_code": normalize_symbol(symbol),
+                            "start_date": normalized_date,
+                            "end_date": normalized_date,
+                        }
+                    )
                 )
-                frames.append(frame)
-        else:
-            frames.append(pro.daily(trade_date=normalized_date))
+            return rows
+        return self._request_tushare_daily({"trade_date": normalized_date})
+
+    def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        settings = get_settings()
+        url = settings.tushare_api_url or "http://api.tushare.pro"
+        payload = {
+            "api_name": "daily",
+            "token": settings.tushare_token,
+            "params": params,
+            "fields": _TUSHARE_DAILY_FIELDS,
+        }
+        try:
+            response = httpx.post(
+                url,
+                json=payload,
+                timeout=_TUSHARE_HTTP_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            body = response.json()
+        except httpx.TimeoutException as exc:
+            raise RuntimeError(f"Tushare 日线请求超时: {params}") from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Tushare 日线请求失败: {exc}") from exc
+        except ValueError as exc:
+            raise RuntimeError("Tushare 日线响应不是合法 JSON。") from exc
+
+        code = int(body.get("code") or 0)
+        if code != 0:
+            message = str(body.get("msg") or "unknown error")
+            raise RuntimeError(f"Tushare 日线接口错误: {message}")
+
+        data = body.get("data") or {}
+        fields = data.get("fields") or []
+        items = data.get("items") or []
+        if not isinstance(fields, list) or not isinstance(items, list):
+            raise RuntimeError("Tushare 日线响应结构不正确。")
 
         rows: list[dict[str, Any]] = []
-        for frame in frames:
-            if frame is None:
+        for item in items:
+            if not isinstance(item, list):
                 continue
-            rows.extend(frame.to_dict("records"))
+            rows.append(dict(zip(fields, item, strict=False)))
         return rows
 
     def refresh_daily_bars(

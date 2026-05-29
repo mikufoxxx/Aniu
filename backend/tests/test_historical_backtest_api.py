@@ -48,6 +48,57 @@ def _reset_state() -> None:
     get_settings.cache_clear()
 
 
+def test_fetch_daily_rows_uses_tushare_http_protocol_with_timeout(monkeypatch) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    monkeypatch.setenv("TUSHARE_TOKEN", "test-token")
+    monkeypatch.setenv("TUSHARE_API_URL", "http://tushare-proxy.test")
+    get_settings.cache_clear()
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "code": 0,
+                "data": {
+                    "fields": ["ts_code", "trade_date", "close", "amount"],
+                    "items": [["600519.SH", "20260528", 1326.0, 10037388.288]],
+                },
+            }
+
+    def fake_post(url, *, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.historical_data_service.httpx.post", fake_post)
+
+    rows = historical_data_service.fetch_daily_rows("20260528")
+
+    assert rows == [
+        {
+            "ts_code": "600519.SH",
+            "trade_date": "20260528",
+            "close": 1326.0,
+            "amount": 10037388.288,
+        }
+    ]
+    assert captured["url"] == "http://tushare-proxy.test"
+    assert captured["timeout"] == 20.0
+    assert captured["json"] == {
+        "api_name": "daily",
+        "token": "test-token",
+        "params": {"trade_date": "20260528"},
+        "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
+    }
+
+    _reset_state()
+
+
 def test_refresh_daily_bars_stores_normalized_tushare_rows(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

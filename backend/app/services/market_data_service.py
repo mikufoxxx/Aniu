@@ -76,9 +76,7 @@ class MarketDataService:
         easy_tdx_available = bool(shutil.which("easy-tdx")) or (
             importlib.util.find_spec("easy_tdx") is not None
         )
-        tushare_available = bool(settings.tushare_token) and (
-            importlib.util.find_spec("tushare") is not None
-        )
+        tushare_available = bool(settings.tushare_token)
 
         sources = [
             {

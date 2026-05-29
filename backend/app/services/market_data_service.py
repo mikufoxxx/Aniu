@@ -26,6 +26,8 @@ DEFAULT_UNIVERSE = [
     "601012.SH",
 ]
 
+_TENCENT_QUOTE_BATCH_SIZE = 60
+
 
 def normalize_symbol(symbol: str) -> str:
     text = str(symbol or "").strip().upper()
@@ -215,6 +217,14 @@ class MarketDataService:
         return results
 
     def _get_tencent_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for start in range(0, len(symbols), _TENCENT_QUOTE_BATCH_SIZE):
+            batch = symbols[start : start + _TENCENT_QUOTE_BATCH_SIZE]
+            batch_results = self._request_tencent_quote_batch(batch)
+            results.extend(batch_results or self._fallback_quotes(batch))
+        return results
+
+    def _request_tencent_quote_batch(self, symbols: list[str]) -> list[dict[str, Any]]:
         query = ",".join(symbol_to_tencent(symbol) for symbol in symbols)
         try:
             response = httpx.get(
@@ -224,7 +234,7 @@ class MarketDataService:
             )
             response.raise_for_status()
         except Exception:
-            return self._fallback_quotes(symbols)
+            return []
 
         text = response.content.decode("gbk", errors="ignore")
         results: list[dict[str, Any]] = []
@@ -256,7 +266,7 @@ class MarketDataService:
                     "timestamp": fields[30] if len(fields) > 30 else None,
                 }
             )
-        return results or self._fallback_quotes(symbols)
+        return results
 
     def _fallback_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         return [

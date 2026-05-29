@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core import rate_limit as rate_limit_module
 from app.db import database as database_module
 from app.db.database import session_scope
-from app.db.models import DailyBar
+from app.db.models import DailyBar, IndexBar
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -300,6 +300,77 @@ def test_refresh_daily_bars_merges_tushare_moneyflow_rows(monkeypatch, tmp_path)
             assert bar.moneyflow_buy_md_amount == 1800.0
             assert bar.moneyflow_buy_sm_amount == -900.0
             assert bar.raw_payload["moneyflow"]["net_amount"] == 8123.4
+
+    _reset_state()
+
+
+def test_refresh_daily_bars_stores_tushare_index_daily_rows(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "close": 1326.0,
+                "amount": 10037388.288,
+            }
+        ]
+
+    def fake_fetch_daily_basic_rows(trade_date: str, symbols: list[str] | None = None):
+        return []
+
+    def fake_fetch_moneyflow_rows(trade_date: str, symbols: list[str] | None = None):
+        return []
+
+    def fake_fetch_index_daily_rows(trade_date: str):
+        assert trade_date == "20260528"
+        return [
+            {
+                "ts_code": "000001.SH",
+                "trade_date": "20260528",
+                "close": 3351.23,
+                "pct_chg": 0.78,
+                "amount": 488888888.0,
+            },
+            {
+                "ts_code": "399006.SZ",
+                "trade_date": "20260528",
+                "close": 2198.12,
+                "pct_chg": -1.23,
+                "amount": 288888888.0,
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", fake_fetch_daily_basic_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", fake_fetch_moneyflow_rows)
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_index_daily_rows",
+        fake_fetch_index_daily_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh",
+            headers=headers,
+            json={"trade_date": "20260528", "symbols": None},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["stored_count"] == 1
+        assert payload["index_count"] == 2
+
+        with session_scope() as db:
+            rows = db.query(IndexBar).order_by(IndexBar.symbol).all()
+            assert [(row.symbol, row.close, row.pct_chg) for row in rows] == [
+                ("000001.SH", 3351.23, 0.78),
+                ("399006.SZ", 2198.12, -1.23),
+            ]
 
     _reset_state()
 

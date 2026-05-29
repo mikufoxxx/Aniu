@@ -10,7 +10,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import BacktestRun, DailyBar
+from app.db.models import BacktestRun, DailyBar, IndexBar
 from app.services.market_data_service import normalize_symbol
 
 _TUSHARE_DAILY_FIELDS = (
@@ -23,6 +23,8 @@ _TUSHARE_MONEYFLOW_THS_FIELDS = (
     "ts_code,trade_date,net_amount,net_d5_amount,buy_lg_amount,buy_lg_amount_rate,"
     "buy_md_amount,buy_md_amount_rate,buy_sm_amount,buy_sm_amount_rate"
 )
+_TUSHARE_INDEX_DAILY_FIELDS = "ts_code,trade_date,close,pct_chg,amount"
+_DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -259,6 +261,25 @@ class HistoricalDataService:
             return rows
         return self._request_tushare_moneyflow_ths({"trade_date": normalized_date})
 
+    def fetch_index_daily_rows(self, trade_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare index_daily 数据。")
+
+        normalized_date = _normalize_trade_date(trade_date)
+        rows: list[dict[str, Any]] = []
+        for symbol in _DEFAULT_INDEX_SYMBOLS:
+            rows.extend(
+                self._request_tushare_index_daily(
+                    {
+                        "ts_code": symbol,
+                        "start_date": normalized_date,
+                        "end_date": normalized_date,
+                    }
+                )
+            )
+        return rows
+
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return self._request_tushare_api(
             api_name="daily",
@@ -281,6 +302,14 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_MONEYFLOW_THS_FIELDS,
             label="moneyflow_ths",
+        )
+
+    def _request_tushare_index_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="index_daily",
+            params=params,
+            fields=_TUSHARE_INDEX_DAILY_FIELDS,
+            label="index_daily",
         )
 
     def _request_tushare_api(
@@ -388,6 +417,13 @@ class HistoricalDataService:
             if _normalize_trade_date(str(row.get("trade_date") or normalized_date))
             == normalized_date
         }
+        index_rows: list[dict[str, Any]] = []
+        index_error = None
+        try:
+            index_rows = self.fetch_index_daily_rows(normalized_date)
+        except RuntimeError as exc:
+            index_error = str(exc)
+        index_count = self._store_index_rows(db, normalized_date, index_rows)
 
         stored_count = 0
         skipped_count = 0
@@ -455,8 +491,38 @@ class HistoricalDataService:
             "daily_basic_error": daily_basic_error,
             "moneyflow_count": len(moneyflow_by_symbol),
             "moneyflow_error": moneyflow_error,
+            "index_count": index_count,
+            "index_error": index_error,
             "requested_symbols": normalized_symbols or [],
         }
+
+    def _store_index_rows(
+        self,
+        db: Session,
+        trade_date: str,
+        rows: list[dict[str, Any]],
+    ) -> int:
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            row_trade_date = _normalize_trade_date(str(row.get("trade_date") or trade_date))
+            if row_trade_date != trade_date:
+                continue
+            existing = db.scalar(
+                select(IndexBar).where(
+                    IndexBar.symbol == symbol,
+                    IndexBar.trade_date == row_trade_date,
+                )
+            )
+            bar = existing or IndexBar(symbol=symbol, trade_date=row_trade_date)
+            bar.close = _to_float(row.get("close"))
+            bar.pct_chg = _to_float(row.get("pct_chg"))
+            bar.amount = _to_float(row.get("amount"))
+            bar.source = "tushare_index"
+            bar.raw_payload = dict(row)
+            db.add(bar)
+            stored_count += 1
+        return stored_count
 
     def refresh_daily_range(
         self,
@@ -495,6 +561,8 @@ class HistoricalDataService:
                     "daily_basic_error": None,
                     "moneyflow_count": 0,
                     "moneyflow_error": None,
+                    "index_count": 0,
+                    "index_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -533,6 +601,8 @@ class HistoricalDataService:
                             "daily_basic_error": None,
                             "moneyflow_count": 0,
                             "moneyflow_error": None,
+                            "index_count": 0,
+                            "index_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"

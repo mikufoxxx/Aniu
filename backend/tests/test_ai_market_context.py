@@ -10,7 +10,13 @@ from app.core import rate_limit as rate_limit_module
 from app.core.config import get_settings
 from app.db import database as database_module
 from app.db.database import init_db, session_scope
-from app.db.models import AppSettings, DailyBar, MarketDataMaintenanceRun, MarketReport
+from app.db.models import (
+    AppSettings,
+    DailyBar,
+    IndexBar,
+    MarketDataMaintenanceRun,
+    MarketReport,
+)
 from app.services.automation_session_service import automation_session_service
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -109,6 +115,20 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                 DailyBar(symbol="000001.SZ", trade_date="20260526", close=10.0, amount=1000),
                 DailyBar(symbol="000001.SZ", trade_date="20260527", close=10.1, amount=1100),
                 DailyBar(symbol="000001.SZ", trade_date="20260528", close=10.0, amount=900),
+                IndexBar(
+                    symbol="000001.SH",
+                    trade_date="20260528",
+                    close=3351.23,
+                    pct_chg=0.78,
+                    amount=488888888.0,
+                ),
+                IndexBar(
+                    symbol="399006.SZ",
+                    trade_date="20260528",
+                    close=2198.12,
+                    pct_chg=-1.23,
+                    amount=288888888.0,
+                ),
             ]
         )
         db.flush()
@@ -120,7 +140,10 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
         )
 
     assert "AI量化市场上下文" in context
-    assert "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow" in context
+    assert (
+        "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, tushare_index"
+        in context
+    )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
     assert "600519.SH 贵州茅台" in context
     assert "日线动量 +10.50%" in context
@@ -130,6 +153,9 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "PB 7.80" in context
     assert "净流入 -8123.40万" in context
     assert "大单 -6.20%" in context
+    assert "指数环境:" in context
+    assert "上证指数 3351.23 (+0.78%)" in context
+    assert "创业板指 2198.12 (-1.23%)" in context
     assert "000001.SZ 平安银行" in context
 
     _reset_state()

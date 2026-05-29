@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import DailyBar, MarketDataMaintenanceRun, MarketReport
+from app.db.models import DailyBar, IndexBar, MarketDataMaintenanceRun, MarketReport
 from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
 from app.services.settings_service import settings_service
@@ -54,6 +54,7 @@ class AIMarketContextService:
             return f"AI量化市场上下文\n- 数据集构建失败: {exc}"
         return self._format_dataset(
             dataset,
+            self._latest_index_snapshot(db),
             self._recent_report_performance(db),
             self._latest_data_quality(db),
             self._mx_supplemental_context(db),
@@ -62,11 +63,15 @@ class AIMarketContextService:
     def _format_dataset(
         self,
         dataset: dict[str, Any],
+        index_snapshot: list[dict[str, Any]] | None = None,
         report_performance: list[dict[str, Any]] | None = None,
         data_quality: dict[str, Any] | None = None,
         mx_supplement: dict[str, Any] | None = None,
     ) -> str:
-        sources = ", ".join(dataset.get("data_sources") or []) or "--"
+        source_items = list(dataset.get("data_sources") or [])
+        if index_snapshot and "tushare_index" not in source_items:
+            source_items.append("tushare_index")
+        sources = ", ".join(source_items) or "--"
         coverage = dataset.get("coverage") or {}
         items = dataset.get("items") or []
         universe_size = int(dataset.get("universe_size") or len(items))
@@ -93,6 +98,15 @@ class AIMarketContextService:
                     ),
                 ]
             )
+        if index_snapshot:
+            lines.append("指数环境:")
+            for item in index_snapshot:
+                lines.append(
+                    (
+                        f"- {item['name']} {item['close']:.2f} "
+                        f"({item['pct_chg']:+.2f}%)"
+                    )
+                )
         lines.append("候选信号:")
         for index, item in enumerate(items[:10], start=1):
             daily = item.get("daily_factors") or {}
@@ -135,10 +149,40 @@ class AIMarketContextService:
     def format_dataset_context(self, db: Session, dataset: dict[str, Any]) -> str:
         return self._format_dataset(
             dataset,
+            self._latest_index_snapshot(db),
             self._recent_report_performance(db),
             self._latest_data_quality(db),
             self._mx_supplemental_context(db),
         )
+
+    def _latest_index_snapshot(self, db: Session) -> list[dict[str, Any]]:
+        trade_date = db.scalar(
+            select(IndexBar.trade_date).order_by(desc(IndexBar.trade_date)).limit(1)
+        )
+        if not trade_date:
+            return []
+        rows = db.scalars(
+            select(IndexBar)
+            .where(IndexBar.trade_date == trade_date)
+            .order_by(IndexBar.symbol)
+        ).all()
+        names = {
+            "000001.SH": "上证指数",
+            "399001.SZ": "深证成指",
+            "399006.SZ": "创业板指",
+            "000300.SH": "沪深300",
+            "000905.SH": "中证500",
+        }
+        return [
+            {
+                "symbol": row.symbol,
+                "name": names.get(row.symbol, row.symbol),
+                "close": float(row.close or 0),
+                "pct_chg": float(row.pct_chg or 0),
+            }
+            for row in rows
+            if row.close is not None
+        ][:5]
 
     def _mx_supplemental_context(self, db: Session) -> dict[str, Any] | None:
         app_settings = settings_service.get_or_create_settings(db)

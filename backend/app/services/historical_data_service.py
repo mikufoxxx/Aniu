@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import json
 import subprocess
@@ -30,6 +31,7 @@ _TUSHARE_THS_DAILY_FIELDS = (
 )
 _TUSHARE_THS_MEMBER_FIELDS = "ts_code,con_code,con_name,is_new"
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
+_TUSHARE_THS_MEMBER_WORKERS = 8
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
 _MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES = 3
@@ -303,9 +305,21 @@ class HistoricalDataService:
         settings = get_settings()
         if not settings.tushare_token:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_member 数据。")
+        if len(sector_symbols) <= 1:
+            rows: list[dict[str, Any]] = []
+            for symbol in sector_symbols:
+                rows.extend(self._request_tushare_ths_member({"ts_code": symbol}))
+            return rows
+
         rows: list[dict[str, Any]] = []
-        for symbol in sector_symbols:
-            rows.extend(self._request_tushare_ths_member({"ts_code": symbol}))
+        worker_count = min(_TUSHARE_THS_MEMBER_WORKERS, len(sector_symbols))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [
+                executor.submit(self._request_tushare_ths_member, {"ts_code": symbol})
+                for symbol in sector_symbols
+            ]
+            for future in as_completed(futures):
+                rows.extend(future.result())
         return rows
 
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:

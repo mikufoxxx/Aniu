@@ -250,6 +250,13 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
             "skipped_count": 0,
             "unique_symbols": 100,
             "requested_symbols": symbols or [],
+            "data_source_counts": {
+                "tushare_daily": 300,
+                "tushare_sector_member": 210000,
+            },
+            "data_source_errors": {
+                "tushare_sector_member": ["20260528: 2 个板块成分拉取失败"],
+            },
             "daily_results": [],
         }
 
@@ -307,6 +314,10 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
     payload = response.json()
     assert payload["refresh"]["start_date"] == "20260526"
     assert payload["refresh"]["stored_count"] == 300
+    assert payload["refresh"]["data_source_counts"]["tushare_sector_member"] == 210000
+    assert payload["refresh"]["data_source_errors"] == {
+        "tushare_sector_member": ["20260528: 2 个板块成分拉取失败"],
+    }
     assert payload["dataset"]["coverage"]["daily_history_symbols"] == 3
     assert payload["report"]["report_type"] == "closing"
     assert captured["range"] == ("20260526", "20260528", ["000001.SZ", "600519.SH"])

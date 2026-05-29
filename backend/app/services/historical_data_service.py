@@ -801,6 +801,7 @@ class HistoricalDataService:
             total_stored += int(result["stored_count"])
             total_skipped += int(result["skipped_count"])
             if progress_callback:
+                source_summary = self._data_source_summary(daily_results)
                 progress_callback(
                     {
                         "phase": "refreshing_daily",
@@ -810,6 +811,11 @@ class HistoricalDataService:
                         "stored_count": total_stored,
                         "skipped_count": total_skipped,
                         "error_count": sum(1 for item in daily_results if item.get("error")),
+                        "data_source_counts": source_summary["data_source_counts"],
+                        "data_source_error_count": sum(
+                            len(items)
+                            for items in source_summary["data_source_errors"].values()
+                        ),
                     }
                 )
             stored_symbols.update(
@@ -847,6 +853,7 @@ class HistoricalDataService:
                     )
                 total_skipped += len(remaining_dates)
                 if progress_callback:
+                    source_summary = self._data_source_summary(daily_results)
                     progress_callback(
                         {
                             "phase": "refreshing_daily",
@@ -858,10 +865,16 @@ class HistoricalDataService:
                             "error_count": sum(
                                 1 for item in daily_results if item.get("error")
                             ),
+                            "data_source_counts": source_summary["data_source_counts"],
+                            "data_source_error_count": sum(
+                                len(items)
+                                for items in source_summary["data_source_errors"].values()
+                            ),
                         }
                     )
                 break
 
+        source_summary = self._data_source_summary(daily_results)
         return {
             "start_date": dates[0],
             "end_date": dates[-1],
@@ -871,7 +884,42 @@ class HistoricalDataService:
             "skipped_count": total_skipped,
             "unique_symbols": len(stored_symbols),
             "requested_symbols": normalized_symbols or [],
+            **source_summary,
             "daily_results": daily_results,
+        }
+
+    def _data_source_summary(self, daily_results: list[dict[str, Any]]) -> dict[str, Any]:
+        counts = {
+            "tushare_daily": 0,
+            "tushare_daily_basic": 0,
+            "tushare_moneyflow_ths": 0,
+            "tushare_index_daily": 0,
+            "tushare_sector": 0,
+            "tushare_sector_member": 0,
+        }
+        errors: dict[str, list[str]] = defaultdict(list)
+        for item in daily_results:
+            trade_date = str(item.get("trade_date") or "")
+            counts["tushare_daily"] += int(item.get("stored_count") or 0)
+            counts["tushare_daily_basic"] += int(item.get("daily_basic_count") or 0)
+            counts["tushare_moneyflow_ths"] += int(item.get("moneyflow_count") or 0)
+            counts["tushare_index_daily"] += int(item.get("index_count") or 0)
+            counts["tushare_sector"] += int(item.get("sector_count") or 0)
+            counts["tushare_sector_member"] += int(item.get("sector_member_count") or 0)
+            for key, source in (
+                ("error", "tushare_daily"),
+                ("daily_basic_error", "tushare_daily_basic"),
+                ("moneyflow_error", "tushare_moneyflow_ths"),
+                ("index_error", "tushare_index_daily"),
+                ("sector_error", "tushare_sector"),
+                ("sector_member_error", "tushare_sector_member"),
+            ):
+                message = item.get(key)
+                if message:
+                    errors[source].append(f"{trade_date}: {message}")
+        return {
+            "data_source_counts": counts,
+            "data_source_errors": dict(errors),
         }
 
     def run_daily_momentum_backtest(

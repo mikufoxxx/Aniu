@@ -513,6 +513,8 @@ class DailyRangeRefreshResponse(BaseModel):
     skipped_count: int = 0
     unique_symbols: int
     requested_symbols: list[str] = Field(default_factory=list)
+    data_source_counts: dict[str, int] = Field(default_factory=dict)
+    data_source_errors: dict[str, list[str]] = Field(default_factory=dict)
     daily_results: list[DailyRefreshResponse] = Field(default_factory=list)
 
 

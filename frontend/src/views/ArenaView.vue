@@ -222,6 +222,8 @@
               入库 {{ maintenanceJob.progress.stored_count ?? 0 }} ·
               跳过 {{ maintenanceJob.progress.skipped_count ?? 0 }} ·
               错误 {{ maintenanceJob.progress.error_count ?? 0 }} ·
+              扩展源 {{ sourceCountsText(maintenanceJob.progress.data_source_counts) }} ·
+              源错误 {{ maintenanceJob.progress.data_source_error_count ?? 0 }} ·
             </template>
             {{ formatDateTime(maintenanceJob.submitted_at) }}
             <template v-if="maintenanceJob.completed_at">
@@ -841,6 +843,19 @@ function progressText(phase: string | undefined): string {
     completed: '已完成',
   }
   return phase ? mapping[phase] ?? phase : '--'
+}
+
+function sourceCountsText(counts: Record<string, number> | undefined): string {
+  if (!counts) return '--'
+  const items = [
+    ['基础', counts.tushare_daily_basic],
+    ['资金', counts.tushare_moneyflow_ths],
+    ['指数', counts.tushare_index_daily],
+    ['板块', counts.tushare_sector],
+    ['成分', counts.tushare_sector_member],
+  ].filter(([, value]) => typeof value === 'number' && value > 0)
+  if (!items.length) return '--'
+  return items.map(([label, value]) => `${label}${formatInteger(value as number)}`).join(' / ')
 }
 
 function readinessText(value: boolean | undefined): string {

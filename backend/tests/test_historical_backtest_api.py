@@ -583,6 +583,78 @@ def test_fetch_sector_member_rows_keeps_partial_success(monkeypatch) -> None:
     _reset_state()
 
 
+def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    results_by_date = {
+        "20260527": {
+            "trade_date": "20260527",
+            "source": "tushare",
+            "stored_count": 2,
+            "skipped_count": 0,
+            "daily_basic_count": 2,
+            "daily_basic_error": None,
+            "moneyflow_count": 2,
+            "moneyflow_error": None,
+            "index_count": 5,
+            "index_error": None,
+            "sector_count": 1508,
+            "sector_error": None,
+            "sector_member_count": 120000,
+            "sector_member_error": None,
+            "requested_symbols": [],
+        },
+        "20260528": {
+            "trade_date": "20260528",
+            "source": "tushare",
+            "stored_count": 3,
+            "skipped_count": 0,
+            "daily_basic_count": 3,
+            "daily_basic_error": None,
+            "moneyflow_count": 2,
+            "moneyflow_error": "moneyflow partial",
+            "index_count": 5,
+            "index_error": None,
+            "sector_count": 1508,
+            "sector_error": None,
+            "sector_member_count": 90000,
+            "sector_member_error": "2 个板块成分拉取失败",
+            "requested_symbols": [],
+        },
+    }
+
+    def fake_refresh_daily_bars(db, *, trade_date: str, symbols=None):
+        return results_by_date[trade_date]
+
+    progress_updates: list[dict[str, object]] = []
+    monkeypatch.setattr(historical_data_service, "refresh_daily_bars", fake_refresh_daily_bars)
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            payload = historical_data_service.refresh_daily_range(
+                db,
+                start_date="20260527",
+                end_date="20260528",
+                progress_callback=progress_updates.append,
+            )
+
+    assert payload["data_source_counts"] == {
+        "tushare_daily": 5,
+        "tushare_daily_basic": 5,
+        "tushare_moneyflow_ths": 4,
+        "tushare_index_daily": 10,
+        "tushare_sector": 3016,
+        "tushare_sector_member": 210000,
+    }
+    assert payload["data_source_errors"] == {
+        "tushare_moneyflow_ths": ["20260528: moneyflow partial"],
+        "tushare_sector_member": ["20260528: 2 个板块成分拉取失败"],
+    }
+    assert progress_updates[-1]["data_source_counts"]["tushare_sector_member"] == 210000
+    assert progress_updates[-1]["data_source_error_count"] == 2
+
+    _reset_state()
+
+
 def test_refresh_daily_range_processes_each_date_and_summarizes_coverage(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 

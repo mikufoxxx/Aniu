@@ -309,6 +309,8 @@ export interface MarketDataMaintenanceJobPayload {
     stored_count?: number
     skipped_count?: number
     error_count?: number
+    data_source_counts?: Record<string, number>
+    data_source_error_count?: number
   } | null
   result?: MarketDataMaintenancePayload | null
   error?: string | null
@@ -391,6 +393,16 @@ export interface DailyRefreshPayload {
   source: string
   stored_count: number
   skipped_count: number
+  daily_basic_count?: number
+  daily_basic_error?: string | null
+  moneyflow_count?: number
+  moneyflow_error?: string | null
+  index_count?: number
+  index_error?: string | null
+  sector_count?: number
+  sector_error?: string | null
+  sector_member_count?: number
+  sector_member_error?: string | null
   requested_symbols: string[]
 }
 
@@ -403,6 +415,8 @@ export interface DailyRangeRefreshPayload {
   skipped_count: number
   unique_symbols: number
   requested_symbols: string[]
+  data_source_counts: Record<string, number>
+  data_source_errors: Record<string, string[]>
   daily_results: DailyRefreshPayload[]
 }
 

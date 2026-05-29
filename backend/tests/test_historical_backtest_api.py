@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core import rate_limit as rate_limit_module
 from app.db import database as database_module
 from app.db.database import session_scope
-from app.db.models import DailyBar, IndexBar
+from app.db.models import DailyBar, IndexBar, SectorBar
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -370,6 +370,97 @@ def test_refresh_daily_bars_stores_tushare_index_daily_rows(monkeypatch, tmp_pat
             assert [(row.symbol, row.close, row.pct_chg) for row in rows] == [
                 ("000001.SH", 3351.23, 0.78),
                 ("399006.SZ", 2198.12, -1.23),
+            ]
+
+    _reset_state()
+
+
+def test_refresh_daily_bars_stores_tushare_sector_rows(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "close": 1326.0,
+                "amount": 10037388.288,
+            }
+        ]
+
+    def fake_fetch_daily_basic_rows(trade_date: str, symbols: list[str] | None = None):
+        return []
+
+    def fake_fetch_moneyflow_rows(trade_date: str, symbols: list[str] | None = None):
+        return []
+
+    def fake_fetch_index_daily_rows(trade_date: str):
+        return []
+
+    def fake_fetch_sector_index_rows():
+        return [
+            {"ts_code": "885001.TI", "name": "白酒概念", "type": "N"},
+            {"ts_code": "881155.TI", "name": "半导体", "type": "I"},
+        ]
+
+    def fake_fetch_sector_daily_rows(trade_date: str):
+        assert trade_date == "20260528"
+        return [
+            {
+                "ts_code": "885001.TI",
+                "trade_date": "20260528",
+                "close": 1332.1,
+                "pct_change": 3.21,
+                "turnover_rate": 2.4,
+                "total_mv": 123456789.0,
+                "float_mv": 98765432.0,
+            },
+            {
+                "ts_code": "881155.TI",
+                "trade_date": "20260528",
+                "close": 998.7,
+                "pct_change": -1.12,
+                "turnover_rate": 1.6,
+                "total_mv": 223456789.0,
+                "float_mv": 187654321.0,
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", fake_fetch_daily_basic_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", fake_fetch_moneyflow_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", fake_fetch_index_daily_rows)
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_sector_index_rows",
+        fake_fetch_sector_index_rows,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_sector_daily_rows",
+        fake_fetch_sector_daily_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh",
+            headers=headers,
+            json={"trade_date": "20260528", "symbols": None},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["stored_count"] == 1
+        assert payload["sector_count"] == 2
+
+        with session_scope() as db:
+            rows = db.query(SectorBar).order_by(SectorBar.symbol).all()
+            assert [(row.symbol, row.name, row.sector_type, row.pct_chg) for row in rows] == [
+                ("881155.TI", "半导体", "I", -1.12),
+                ("885001.TI", "白酒概念", "N", 3.21),
             ]
 
     _reset_state()

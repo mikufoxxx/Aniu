@@ -10,7 +10,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import BacktestRun, DailyBar, IndexBar
+from app.db.models import BacktestRun, DailyBar, IndexBar, SectorBar
 from app.services.market_data_service import normalize_symbol
 
 _TUSHARE_DAILY_FIELDS = (
@@ -24,6 +24,10 @@ _TUSHARE_MONEYFLOW_THS_FIELDS = (
     "buy_md_amount,buy_md_amount_rate,buy_sm_amount,buy_sm_amount_rate"
 )
 _TUSHARE_INDEX_DAILY_FIELDS = "ts_code,trade_date,close,pct_chg,amount"
+_TUSHARE_THS_INDEX_FIELDS = "ts_code,name,type"
+_TUSHARE_THS_DAILY_FIELDS = (
+    "ts_code,trade_date,close,pct_change,turnover_rate,total_mv,float_mv"
+)
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_HTTP_TIMEOUT_SECONDS = 20
 _TUSHARE_CURL_TIMEOUT_SECONDS = _TUSHARE_HTTP_TIMEOUT_SECONDS + 5
@@ -280,6 +284,20 @@ class HistoricalDataService:
             )
         return rows
 
+    def fetch_sector_index_rows(self) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_index 数据。")
+        return self._request_tushare_ths_index({"exchange": "A"})
+
+    def fetch_sector_daily_rows(self, trade_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_daily 数据。")
+        return self._request_tushare_ths_daily(
+            {"trade_date": _normalize_trade_date(trade_date)}
+        )
+
     def _request_tushare_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         return self._request_tushare_api(
             api_name="daily",
@@ -310,6 +328,22 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_INDEX_DAILY_FIELDS,
             label="index_daily",
+        )
+
+    def _request_tushare_ths_index(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="ths_index",
+            params=params,
+            fields=_TUSHARE_THS_INDEX_FIELDS,
+            label="ths_index",
+        )
+
+    def _request_tushare_ths_daily(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="ths_daily",
+            params=params,
+            fields=_TUSHARE_THS_DAILY_FIELDS,
+            label="ths_daily",
         )
 
     def _request_tushare_api(
@@ -424,6 +458,17 @@ class HistoricalDataService:
         except RuntimeError as exc:
             index_error = str(exc)
         index_count = self._store_index_rows(db, normalized_date, index_rows)
+        sector_error = None
+        sector_count = 0
+        try:
+            sector_count = self._store_sector_rows(
+                db,
+                normalized_date,
+                self.fetch_sector_daily_rows(normalized_date),
+                self.fetch_sector_index_rows(),
+            )
+        except RuntimeError as exc:
+            sector_error = str(exc)
 
         stored_count = 0
         skipped_count = 0
@@ -493,6 +538,8 @@ class HistoricalDataService:
             "moneyflow_error": moneyflow_error,
             "index_count": index_count,
             "index_error": index_error,
+            "sector_count": sector_count,
+            "sector_error": sector_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -520,6 +567,47 @@ class HistoricalDataService:
             bar.amount = _to_float(row.get("amount"))
             bar.source = "tushare_index"
             bar.raw_payload = dict(row)
+            db.add(bar)
+            stored_count += 1
+        return stored_count
+
+    def _store_sector_rows(
+        self,
+        db: Session,
+        trade_date: str,
+        rows: list[dict[str, Any]],
+        index_rows: list[dict[str, Any]],
+    ) -> int:
+        metadata = {
+            normalize_symbol(str(row.get("ts_code") or row.get("symbol") or "")): row
+            for row in index_rows
+        }
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            row_trade_date = _normalize_trade_date(str(row.get("trade_date") or trade_date))
+            if row_trade_date != trade_date:
+                continue
+            info = metadata.get(symbol) or {}
+            existing = db.scalar(
+                select(SectorBar).where(
+                    SectorBar.symbol == symbol,
+                    SectorBar.trade_date == row_trade_date,
+                )
+            )
+            bar = existing or SectorBar(symbol=symbol, trade_date=row_trade_date)
+            bar.name = str(info.get("name") or row.get("name") or symbol)
+            bar.sector_type = str(info.get("type") or row.get("type") or "") or None
+            bar.close = _to_float(row.get("close"))
+            bar.pct_chg = _to_float(row.get("pct_change") or row.get("pct_chg"))
+            bar.turnover_rate = _to_float(row.get("turnover_rate"))
+            bar.total_mv = _to_float(row.get("total_mv"))
+            bar.float_mv = _to_float(row.get("float_mv"))
+            bar.source = "tushare_ths"
+            bar.raw_payload = {
+                **dict(row),
+                **({"index": dict(info)} if info else {}),
+            }
             db.add(bar)
             stored_count += 1
         return stored_count
@@ -563,6 +651,8 @@ class HistoricalDataService:
                     "moneyflow_error": None,
                     "index_count": 0,
                     "index_error": None,
+                    "sector_count": 0,
+                    "sector_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -603,6 +693,8 @@ class HistoricalDataService:
                             "moneyflow_error": None,
                             "index_count": 0,
                             "index_error": None,
+                            "sector_count": 0,
+                            "sector_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"

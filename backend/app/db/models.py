@@ -214,6 +214,30 @@ class IndexBar(Base):
     )
 
 
+class SectorBar(Base):
+    __tablename__ = "sector_bars"
+    __table_args__ = (
+        UniqueConstraint("symbol", "trade_date", name="uq_sector_bars_symbol_trade_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    sector_type: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    trade_date: Mapped[str] = mapped_column(String(8), index=True)
+    close: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pct_chg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    turnover_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_mv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    float_mv: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_ths")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

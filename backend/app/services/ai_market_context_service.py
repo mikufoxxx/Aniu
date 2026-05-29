@@ -7,7 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import DailyBar, IndexBar, MarketDataMaintenanceRun, MarketReport
+from app.db.models import DailyBar, IndexBar, MarketDataMaintenanceRun, MarketReport, SectorBar
 from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
 from app.services.settings_service import settings_service
@@ -55,6 +55,7 @@ class AIMarketContextService:
         return self._format_dataset(
             dataset,
             self._latest_index_snapshot(db),
+            self._latest_sector_heat(db),
             self._recent_report_performance(db),
             self._latest_data_quality(db),
             self._mx_supplemental_context(db),
@@ -64,6 +65,7 @@ class AIMarketContextService:
         self,
         dataset: dict[str, Any],
         index_snapshot: list[dict[str, Any]] | None = None,
+        sector_heat: list[dict[str, Any]] | None = None,
         report_performance: list[dict[str, Any]] | None = None,
         data_quality: dict[str, Any] | None = None,
         mx_supplement: dict[str, Any] | None = None,
@@ -71,6 +73,8 @@ class AIMarketContextService:
         source_items = list(dataset.get("data_sources") or [])
         if index_snapshot and "tushare_index" not in source_items:
             source_items.append("tushare_index")
+        if sector_heat and "tushare_sector" not in source_items:
+            source_items.append("tushare_sector")
         sources = ", ".join(source_items) or "--"
         coverage = dataset.get("coverage") or {}
         items = dataset.get("items") or []
@@ -105,6 +109,15 @@ class AIMarketContextService:
                     (
                         f"- {item['name']} {item['close']:.2f} "
                         f"({item['pct_chg']:+.2f}%)"
+                    )
+                )
+        if sector_heat:
+            lines.append("板块热度:")
+            for item in sector_heat:
+                lines.append(
+                    (
+                        f"- {item['name']} {item['pct_chg']:+.2f}% "
+                        f"换手 {item['turnover_rate']:.2f}%"
                     )
                 )
         lines.append("候选信号:")
@@ -150,6 +163,7 @@ class AIMarketContextService:
         return self._format_dataset(
             dataset,
             self._latest_index_snapshot(db),
+            self._latest_sector_heat(db),
             self._recent_report_performance(db),
             self._latest_data_quality(db),
             self._mx_supplemental_context(db),
@@ -183,6 +197,29 @@ class AIMarketContextService:
             for row in rows
             if row.close is not None
         ][:5]
+
+    def _latest_sector_heat(self, db: Session) -> list[dict[str, Any]]:
+        trade_date = db.scalar(
+            select(SectorBar.trade_date).order_by(desc(SectorBar.trade_date)).limit(1)
+        )
+        if not trade_date:
+            return []
+        rows = db.scalars(
+            select(SectorBar)
+            .where(SectorBar.trade_date == trade_date)
+            .order_by(desc(SectorBar.pct_chg))
+            .limit(5)
+        ).all()
+        return [
+            {
+                "symbol": row.symbol,
+                "name": row.name or row.symbol,
+                "pct_chg": float(row.pct_chg or 0),
+                "turnover_rate": float(row.turnover_rate or 0),
+            }
+            for row in rows
+            if row.pct_chg is not None
+        ]
 
     def _mx_supplemental_context(self, db: Session) -> dict[str, Any] | None:
         app_settings = settings_service.get_or_create_settings(db)

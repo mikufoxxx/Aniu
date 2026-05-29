@@ -16,6 +16,7 @@ from app.db.models import (
     IndexBar,
     MarketDataMaintenanceRun,
     MarketReport,
+    SectorBar,
 )
 from app.services.automation_session_service import automation_session_service
 from app.services.scheduler_service import scheduler_service
@@ -129,6 +130,24 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     pct_chg=-1.23,
                     amount=288888888.0,
                 ),
+                SectorBar(
+                    symbol="885001.TI",
+                    name="白酒概念",
+                    sector_type="N",
+                    trade_date="20260528",
+                    close=1332.1,
+                    pct_chg=3.21,
+                    turnover_rate=2.4,
+                ),
+                SectorBar(
+                    symbol="881155.TI",
+                    name="半导体",
+                    sector_type="I",
+                    trade_date="20260528",
+                    close=998.7,
+                    pct_chg=-1.12,
+                    turnover_rate=1.6,
+                ),
             ]
         )
         db.flush()
@@ -141,7 +160,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
 
     assert "AI量化市场上下文" in context
     assert (
-        "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, tushare_index"
+        "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, "
+        "tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -156,6 +176,9 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "指数环境:" in context
     assert "上证指数 3351.23 (+0.78%)" in context
     assert "创业板指 2198.12 (-1.23%)" in context
+    assert "板块热度:" in context
+    assert "白酒概念 +3.21%" in context
+    assert "半导体 -1.12%" in context
     assert "000001.SZ 平安银行" in context
 
     _reset_state()

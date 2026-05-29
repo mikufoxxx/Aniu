@@ -490,6 +490,8 @@ class DailyRefreshResponse(BaseModel):
     moneyflow_error: str | None = None
     index_count: int = 0
     index_error: str | None = None
+    sector_count: int = 0
+    sector_error: str | None = None
     requested_symbols: list[str] = Field(default_factory=list)
     error: str | None = None
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -111,6 +112,50 @@ class HistoricalDataService:
             "stored_count": stored_count,
             "skipped_count": skipped_count,
             "requested_symbols": normalized_symbols or [],
+        }
+
+    def refresh_daily_range(
+        self,
+        db: Session,
+        *,
+        start_date: str,
+        end_date: str,
+        symbols: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dates = self._date_range(start_date, end_date)
+        normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
+        daily_results: list[dict[str, Any]] = []
+        stored_symbols: set[str] = set()
+        total_stored = 0
+        total_skipped = 0
+
+        for trade_date in dates:
+            result = self.refresh_daily_bars(
+                db,
+                trade_date=trade_date,
+                symbols=normalized_symbols,
+            )
+            daily_results.append(result)
+            total_stored += int(result["stored_count"])
+            total_skipped += int(result["skipped_count"])
+            stored_symbols.update(
+                db.scalars(
+                    select(DailyBar.symbol)
+                    .where(DailyBar.trade_date == trade_date)
+                    .distinct()
+                ).all()
+            )
+
+        return {
+            "start_date": dates[0],
+            "end_date": dates[-1],
+            "source": "tushare",
+            "processed_days": len(dates),
+            "stored_count": total_stored,
+            "skipped_count": total_skipped,
+            "unique_symbols": len(stored_symbols),
+            "requested_symbols": normalized_symbols or [],
+            "daily_results": daily_results,
         }
 
     def run_daily_momentum_backtest(
@@ -233,6 +278,19 @@ class HistoricalDataService:
             if peak > 0:
                 max_drawdown = min(max_drawdown, (value - peak) / peak)
         return max_drawdown
+
+    def _date_range(self, start_date: str, end_date: str) -> list[str]:
+        start = datetime.strptime(_normalize_trade_date(start_date), "%Y%m%d").date()
+        end = datetime.strptime(_normalize_trade_date(end_date), "%Y%m%d").date()
+        if start > end:
+            raise ValueError("开始日期不能晚于结束日期。")
+        days = (end - start).days + 1
+        if days > 120:
+            raise ValueError("单次最多刷新 120 个自然日。")
+        return [
+            (start + timedelta(days=offset)).strftime("%Y%m%d")
+            for offset in range(days)
+        ]
 
 
 historical_data_service = HistoricalDataService()

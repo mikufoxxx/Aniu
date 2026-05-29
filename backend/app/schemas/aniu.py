@@ -349,6 +349,24 @@ class DailyRefreshResponse(BaseModel):
     requested_symbols: list[str] = Field(default_factory=list)
 
 
+class DailyRangeRefreshRequest(BaseModel):
+    start_date: str = Field(min_length=8, max_length=10)
+    end_date: str = Field(min_length=8, max_length=10)
+    symbols: list[str] | None = None
+
+
+class DailyRangeRefreshResponse(BaseModel):
+    start_date: str
+    end_date: str
+    source: str
+    processed_days: int
+    stored_count: int
+    skipped_count: int = 0
+    unique_symbols: int
+    requested_symbols: list[str] = Field(default_factory=list)
+    daily_results: list[DailyRefreshResponse] = Field(default_factory=list)
+
+
 class BacktestRequest(BaseModel):
     symbols: list[str] = Field(min_length=1, max_length=200)
     start_date: str = Field(min_length=8, max_length=10)

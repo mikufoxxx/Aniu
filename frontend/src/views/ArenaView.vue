@@ -121,8 +121,12 @@
             </label>
           </label>
           <label class="arena-field">
-            <span>交易日</span>
-            <input v-model="tradeDate" type="text" placeholder="20260528" />
+            <span>刷新开始</span>
+            <input v-model="refreshStartDate" type="text" placeholder="20260526" />
+          </label>
+          <label class="arena-field">
+            <span>刷新结束</span>
+            <input v-model="refreshEndDate" type="text" placeholder="20260528" />
           </label>
           <label class="arena-field">
             <span>开始日期</span>
@@ -136,7 +140,13 @@
 
         <div v-if="dailyRefreshResult" class="arena-history-result">
           <strong>日线入库</strong>
-          <span>{{ dailyRefreshResult.trade_date }} · {{ dailyRefreshResult.stored_count }} 条 · {{ dailyRefreshResult.source }}</span>
+          <span>
+            {{ dailyRefreshResult.start_date }}-{{ dailyRefreshResult.end_date }} ·
+            {{ dailyRefreshResult.processed_days }} 天 ·
+            {{ dailyRefreshResult.stored_count }} 条 ·
+            {{ dailyRefreshResult.unique_symbols }} 只 ·
+            {{ dailyRefreshResult.source }}
+          </span>
         </div>
 
         <div v-if="backtestResult" class="arena-history-result">
@@ -288,7 +298,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRefreshPayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -309,9 +319,10 @@ const candidates = ref<QuantCandidate[]>([])
 const quantDataset = ref<QuantDatasetPayload | null>(null)
 const arenaResult = ref<ArenaRunPayload | null>(null)
 const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
-const dailyRefreshResult = ref<DailyRefreshPayload | null>(null)
+const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
 const backtestResult = ref<BacktestPayload | null>(null)
-const tradeDate = ref('20260528')
+const refreshStartDate = ref('20260526')
+const refreshEndDate = ref('20260528')
 const backtestStartDate = ref('20260526')
 const backtestEndDate = ref('20260528')
 const refreshFullMarket = ref(true)
@@ -415,8 +426,9 @@ async function refreshDaily(): Promise<void> {
   historyLoading.value = true
   errorMessage.value = ''
   try {
-    dailyRefreshResult.value = await api.refreshDailyBars({
-      trade_date: tradeDate.value,
+    dailyRefreshResult.value = await api.refreshDailyRange({
+      start_date: refreshStartDate.value,
+      end_date: refreshEndDate.value,
       symbols: refreshFullMarket.value ? undefined : parseSymbols(),
     })
   } catch (error) {
@@ -520,7 +532,7 @@ onMounted(async () => {
 
 .arena-history-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 

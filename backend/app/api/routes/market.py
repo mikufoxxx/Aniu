@@ -13,6 +13,8 @@ from app.schemas.aniu import (
     ArenaAgentsUpdateRequest,
     BacktestRequest,
     BacktestResponse,
+    DailyRangeRefreshRequest,
+    DailyRangeRefreshResponse,
     DailyRefreshRequest,
     DailyRefreshResponse,
     MarketSourceHealthResponse,
@@ -82,6 +84,25 @@ def refresh_daily_bars(
         return historical_data_service.refresh_daily_bars(
             db,
             trade_date=payload.trade_date,
+            symbols=payload.symbols,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/market/daily/refresh-range", response_model=DailyRangeRefreshResponse)
+def refresh_daily_bar_range(
+    payload: DailyRangeRefreshRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> DailyRangeRefreshResponse:
+    try:
+        return historical_data_service.refresh_daily_range(
+            db,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
             symbols=payload.symbols,
         )
     except ValueError as exc:

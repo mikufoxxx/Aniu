@@ -240,6 +240,18 @@ export interface DailyRefreshPayload {
   requested_symbols: string[]
 }
 
+export interface DailyRangeRefreshPayload {
+  start_date: string
+  end_date: string
+  source: string
+  processed_days: number
+  stored_count: number
+  skipped_count: number
+  unique_symbols: number
+  requested_symbols: string[]
+  daily_results: DailyRefreshPayload[]
+}
+
 export interface BacktestTrade {
   action: string
   symbol: string

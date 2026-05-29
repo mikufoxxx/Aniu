@@ -106,6 +106,91 @@ def test_refresh_daily_bars_stores_normalized_tushare_rows(monkeypatch, tmp_path
     _reset_state()
 
 
+def test_refresh_daily_range_processes_each_date_and_summarizes_coverage(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    rows_by_date = {
+        "20260526": [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260526",
+                "open": 1200.0,
+                "high": 1210.0,
+                "low": 1190.0,
+                "close": 1205.0,
+                "pre_close": 1198.0,
+                "pct_chg": 0.5843,
+                "vol": 70000,
+                "amount": 9000,
+            }
+        ],
+        "20260527": [],
+        "20260528": [
+            {
+                "ts_code": "600519.SH",
+                "trade_date": "20260528",
+                "open": 1270.0,
+                "high": 1329.0,
+                "low": 1270.0,
+                "close": 1326.0,
+                "pre_close": 1275.98,
+                "pct_chg": 3.919,
+                "vol": 76478,
+                "amount": 10037388.288,
+            },
+            {
+                "ts_code": "000001.SZ",
+                "trade_date": "20260528",
+                "open": 10.65,
+                "high": 10.93,
+                "low": 10.62,
+                "close": 10.93,
+                "pre_close": 10.66,
+                "pct_chg": 2.533,
+                "vol": 1399367,
+                "amount": 1515692.032,
+            },
+        ],
+    }
+
+    def fake_fetch_daily_rows(trade_date: str, symbols: list[str] | None = None):
+        assert symbols is None
+        return rows_by_date[trade_date]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/daily/refresh-range",
+            headers=headers,
+            json={
+                "start_date": "20260526",
+                "end_date": "20260528",
+                "symbols": None,
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["start_date"] == "20260526"
+        assert payload["end_date"] == "20260528"
+        assert payload["processed_days"] == 3
+        assert payload["stored_count"] == 3
+        assert payload["unique_symbols"] == 2
+        assert [item["stored_count"] for item in payload["daily_results"]] == [1, 0, 2]
+
+        with session_scope() as db:
+            bars = db.query(DailyBar).order_by(DailyBar.trade_date, DailyBar.symbol).all()
+            assert [(bar.trade_date, bar.symbol) for bar in bars] == [
+                ("20260526", "600519.SH"),
+                ("20260528", "000001.SZ"),
+                ("20260528", "600519.SH"),
+            ]
+
+    _reset_state()
+
+
 def test_backtest_uses_stored_daily_bars_and_persists_metrics(monkeypatch, tmp_path) -> None:
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)

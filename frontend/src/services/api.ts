@@ -1,4 +1,4 @@
-import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -389,6 +389,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 120000,
+    })
+  },
+  refreshDailyRange(payload: { start_date: string; end_date: string; symbols?: string[] }) {
+    return request<DailyRangeRefreshPayload>(`${API_PREFIX}/market/daily/refresh-range`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 5 * 60 * 1000,
     })
   },
   runBacktest(payload: { symbols: string[]; start_date: string; end_date: string; initial_cash?: number }) {

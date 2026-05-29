@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AppSettings, ArenaAgentConfig, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -446,6 +446,11 @@ export const api = {
     return request<MarketDataMaintenanceJobPayload>(`${API_PREFIX}/market/maintenance/jobs/${jobId}`, {
       timeoutMs: 60000,
     })
+  },
+  listMarketDataMaintenanceRuns(options: { limit?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('limit', String(options.limit ?? 5))
+    return request<MarketDataMaintenanceRunListPayload>(`${API_PREFIX}/market/maintenance/runs?${params.toString()}`)
   },
   runBacktest(payload: { symbols: string[]; start_date: string; end_date: string; initial_cash?: number }) {
     return request<BacktestPayload>(`${API_PREFIX}/quant/backtest`, {

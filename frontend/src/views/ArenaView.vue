@@ -233,6 +233,21 @@
           </span>
         </div>
 
+        <div v-if="maintenanceRuns.length" class="arena-maintenance-runs">
+          <div v-for="item in maintenanceRuns.slice(0, 3)" :key="item.id">
+            <strong>{{ formatDateTime(item.created_at) }}</strong>
+            <span>
+              {{ item.refresh_start_date ?? '--' }}-{{ item.refresh_end_date ?? '--' }} ·
+              入库 {{ formatInteger(item.stored_count) }} ·
+              最新 {{ item.latest_trade_date ?? '--' }} / {{ formatInteger(item.latest_trade_date_symbols) }}只 ·
+              数据集 {{ formatInteger(item.dataset_item_count) }}/{{ formatInteger(item.dataset_universe_size) }}
+            </span>
+            <b :class="item.refresh_needed ? 'profit-down' : 'profit-up'">
+              {{ item.refresh_needed ? item.refresh_reason || '需补数' : '覆盖充足' }}
+            </b>
+          </div>
+        </div>
+
         <div v-if="backtestResult" class="arena-history-result">
           <strong>回测结果</strong>
           <span>
@@ -452,7 +467,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunRecord, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const defaultAgents: ArenaAgentConfig[] = [
@@ -478,6 +493,7 @@ const arenaResult = ref<ArenaRunPayload | null>(null)
 const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
 const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
 const maintenanceJob = ref<MarketDataMaintenanceJobPayload | null>(null)
+const maintenanceRuns = ref<MarketDataMaintenanceRunRecord[]>([])
 const backtestResult = ref<BacktestPayload | null>(null)
 const marketReports = ref<MarketReport[]>([])
 const marketReportPerformance = ref<Record<number, MarketReportPerformancePayload>>({})
@@ -511,6 +527,11 @@ async function loadSources(): Promise<void> {
 
 async function loadDataCoverage(): Promise<void> {
   dataCoverage.value = await api.getMarketDataCoverage()
+}
+
+async function loadMaintenanceRuns(): Promise<void> {
+  const payload = await api.listMarketDataMaintenanceRuns({ limit: 5 })
+  maintenanceRuns.value = payload.items
 }
 
 function applyRefreshSuggestion(): void {
@@ -720,7 +741,7 @@ async function applyMaintenanceResult(payload: MarketDataMaintenancePayload): Pr
   dailyRefreshResult.value = payload.refresh
   quantDataset.value = payload.dataset
   candidates.value = payload.dataset.items
-  await loadDataCoverage()
+  await Promise.all([loadDataCoverage(), loadMaintenanceRuns()])
   if (payload.report) {
     marketReports.value = [
       payload.report,
@@ -838,6 +859,7 @@ onMounted(async () => {
     await Promise.all([
       loadSources(),
       loadDataCoverage(),
+      loadMaintenanceRuns(),
       loadAgents(),
       loadCandidates(),
       loadLeaderboard(),
@@ -919,6 +941,37 @@ onMounted(async () => {
 .arena-inline-action {
   justify-self: start;
   margin-top: 2px;
+}
+
+.arena-maintenance-runs {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.arena-maintenance-runs div {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px 12px;
+}
+
+.arena-maintenance-runs strong {
+  color: #f7fbff;
+  font-size: 13px;
+}
+
+.arena-maintenance-runs span {
+  color: #9cb2cf;
+  font-size: 12px;
+}
+
+.arena-maintenance-runs b {
+  font-size: 12px;
 }
 
 .arena-coverage-summary {
@@ -1198,7 +1251,8 @@ onMounted(async () => {
   }
 
   .arena-table-row,
-  .arena-order-row {
+  .arena-order-row,
+  .arena-maintenance-runs div {
     grid-template-columns: 1fr;
     gap: 4px;
     padding: 12px;

@@ -262,6 +262,110 @@ def test_market_data_maintenance_uses_coverage_gap_when_symbols_are_omitted(
     _reset_state()
 
 
+def test_market_data_maintenance_history_records_quality_snapshot(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.historical_data_service import historical_data_service
+    from app.services.quant_service import quant_service
+
+    def fake_refresh_range(
+        db,
+        *,
+        start_date: str,
+        end_date: str,
+        symbols=None,
+        progress_callback=None,
+    ):
+        return {
+            "start_date": start_date,
+            "end_date": end_date,
+            "source": "tushare",
+            "processed_days": 2,
+            "stored_count": 20,
+            "skipped_count": 1,
+            "unique_symbols": 10,
+            "requested_symbols": symbols or [],
+            "daily_results": [],
+        }
+
+    def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=20):
+        return {
+            "universe_size": 10,
+            "item_count": 5,
+            "lookback_days": lookback_days,
+            "data_sources": ["tencent", "tushare_daily"],
+            "coverage": {
+                "realtime_symbols": 5,
+                "daily_history_symbols": 5,
+                "symbols_with_price": 5,
+            },
+            "items": [],
+        }
+
+    def fake_coverage(db):
+        return {
+            "total_rows": 200,
+            "unique_symbols": 10,
+            "first_trade_date": "20260520",
+            "latest_trade_date": "20260528",
+            "latest_trade_date_symbols": 10,
+            "most_complete_trade_date": "20260528",
+            "most_complete_trade_date_symbols": 10,
+            "recent_trade_dates": [],
+            "source_counts": [{"source": "tushare", "row_count": 200}],
+            "refresh_suggestion": {
+                "needed": False,
+                "start_date": None,
+                "end_date": None,
+                "reason": "最新交易日覆盖充足",
+            },
+            "readiness": {
+                "has_daily_history": True,
+                "has_broad_universe": False,
+                "latest_day_complete": True,
+                "backtest_ready": True,
+            },
+        }
+
+    monkeypatch.setattr(historical_data_service, "refresh_daily_range", fake_refresh_range)
+    monkeypatch.setattr(historical_data_service, "summarize_daily_coverage", fake_coverage)
+    monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        run_response = client.post(
+            "/api/aniu/market/maintenance/run",
+            headers=headers,
+            json={
+                "end_date": "20260528",
+                "lookback_days": 2,
+                "symbols": ["000001.SZ"],
+                "dataset_limit": 5,
+            },
+        )
+        history_response = client.get(
+            "/api/aniu/market/maintenance/runs?limit=5",
+            headers=headers,
+        )
+
+    assert run_response.status_code == 200
+    assert history_response.status_code == 200
+    items = history_response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["status"] == "completed"
+    assert items[0]["refresh_start_date"] == "20260527"
+    assert items[0]["refresh_end_date"] == "20260528"
+    assert items[0]["stored_count"] == 20
+    assert items[0]["dataset_item_count"] == 5
+    assert items[0]["latest_trade_date"] == "20260528"
+    assert items[0]["latest_trade_date_symbols"] == 10
+    assert items[0]["refresh_needed"] is False
+    assert items[0]["coverage"]["total_rows"] == 200
+
+    _reset_state()
+
+
 def test_market_data_maintenance_job_starts_and_can_be_polled(
     monkeypatch,
     tmp_path,

@@ -21,6 +21,7 @@ from app.schemas.aniu import (
     DailyRefreshResponse,
     MarketDataCoverageResponse,
     MarketDataMaintenanceJobResponse,
+    MarketDataMaintenanceRunListResponse,
     MarketDataMaintenanceRunRequest,
     MarketDataMaintenanceRunResponse,
     MarketReportListResponse,
@@ -238,6 +239,15 @@ def start_market_data_maintenance_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market/maintenance/runs", response_model=MarketDataMaintenanceRunListResponse)
+def list_market_data_maintenance_runs(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> MarketDataMaintenanceRunListResponse:
+    return market_data_maintenance_service.list_runs(db, limit=limit)
 
 
 @router.get("/market/maintenance/jobs/{job_id}", response_model=MarketDataMaintenanceJobResponse)

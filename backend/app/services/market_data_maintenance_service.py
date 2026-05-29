@@ -6,10 +6,12 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.database import session_scope
+from app.db.models import MarketDataMaintenanceRun
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_service import normalize_symbol
 from app.services.market_report_service import market_report_service
@@ -128,7 +130,17 @@ class MarketDataMaintenanceService:
                 limit=min(50, normalized_limit),
                 lookback_days=normalized_lookback,
             )
+        coverage_after = historical_data_service.summarize_daily_coverage(db)
+        self._record_run(db, result=result, coverage=coverage_after)
         return result
+
+    def list_runs(self, db: Session, *, limit: int = 20) -> dict[str, Any]:
+        rows = db.scalars(
+            select(MarketDataMaintenanceRun)
+            .order_by(MarketDataMaintenanceRun.id.desc())
+            .limit(max(1, min(100, int(limit))))
+        ).all()
+        return {"items": [self._run_payload(row) for row in rows]}
 
     def start_job(
         self,
@@ -243,6 +255,63 @@ class MarketDataMaintenanceService:
             "stored_count": refresh.get("stored_count"),
             "skipped_count": refresh.get("skipped_count"),
             "error_count": sum(1 for item in daily_results if item.get("error")),
+        }
+
+    def _record_run(
+        self,
+        db: Session,
+        *,
+        result: dict[str, Any],
+        coverage: dict[str, Any],
+    ) -> None:
+        refresh = result.get("refresh") or {}
+        dataset = result.get("dataset") or {}
+        suggestion = coverage.get("refresh_suggestion") or {}
+        record = MarketDataMaintenanceRun(
+            status=str(result.get("status") or "completed"),
+            refresh_start_date=refresh.get("start_date"),
+            refresh_end_date=refresh.get("end_date"),
+            processed_days=int(refresh.get("processed_days") or 0),
+            stored_count=int(refresh.get("stored_count") or 0),
+            skipped_count=int(refresh.get("skipped_count") or 0),
+            refresh_unique_symbols=int(refresh.get("unique_symbols") or 0),
+            dataset_universe_size=int(dataset.get("universe_size") or 0),
+            dataset_item_count=int(dataset.get("item_count") or 0),
+            latest_trade_date=coverage.get("latest_trade_date"),
+            latest_trade_date_symbols=int(coverage.get("latest_trade_date_symbols") or 0),
+            most_complete_trade_date=coverage.get("most_complete_trade_date"),
+            most_complete_trade_date_symbols=int(
+                coverage.get("most_complete_trade_date_symbols") or 0
+            ),
+            refresh_needed=bool(suggestion.get("needed")),
+            refresh_reason=str(suggestion.get("reason") or ""),
+            coverage_payload=coverage,
+            result_payload=result,
+        )
+        db.add(record)
+        db.commit()
+
+    def _run_payload(self, row: MarketDataMaintenanceRun) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "status": row.status,
+            "refresh_start_date": row.refresh_start_date,
+            "refresh_end_date": row.refresh_end_date,
+            "processed_days": row.processed_days,
+            "stored_count": row.stored_count,
+            "skipped_count": row.skipped_count,
+            "refresh_unique_symbols": row.refresh_unique_symbols,
+            "dataset_universe_size": row.dataset_universe_size,
+            "dataset_item_count": row.dataset_item_count,
+            "latest_trade_date": row.latest_trade_date,
+            "latest_trade_date_symbols": row.latest_trade_date_symbols,
+            "most_complete_trade_date": row.most_complete_trade_date,
+            "most_complete_trade_date_symbols": row.most_complete_trade_date_symbols,
+            "refresh_needed": row.refresh_needed,
+            "refresh_reason": row.refresh_reason,
+            "coverage": row.coverage_payload or {},
+            "result": row.result_payload or {},
+            "created_at": row.created_at,
         }
 
     def _normalize_end_date(self, end_date: str | None) -> str:

@@ -499,6 +499,32 @@ class MarketDataMaintenanceJobResponse(BaseModel):
     error: str | None = None
 
 
+class MarketDataMaintenanceRunRead(BaseModel):
+    id: int
+    status: str
+    refresh_start_date: str | None = None
+    refresh_end_date: str | None = None
+    processed_days: int
+    stored_count: int
+    skipped_count: int
+    refresh_unique_symbols: int
+    dataset_universe_size: int
+    dataset_item_count: int
+    latest_trade_date: str | None = None
+    latest_trade_date_symbols: int
+    most_complete_trade_date: str | None = None
+    most_complete_trade_date_symbols: int
+    refresh_needed: bool
+    refresh_reason: str
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class MarketDataMaintenanceRunListResponse(BaseModel):
+    items: list[MarketDataMaintenanceRunRead] = Field(default_factory=list)
+
+
 class BacktestRequest(BaseModel):
     symbols: list[str] = Field(min_length=1, max_length=200)
     start_date: str = Field(min_length=8, max_length=10)

@@ -217,6 +217,32 @@ class MarketReport(Base):
     )
 
 
+class MarketDataMaintenanceRun(Base):
+    __tablename__ = "market_data_maintenance_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    refresh_start_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    refresh_end_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    processed_days: Mapped[int] = mapped_column(Integer, default=0)
+    stored_count: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
+    refresh_unique_symbols: Mapped[int] = mapped_column(Integer, default=0)
+    dataset_universe_size: Mapped[int] = mapped_column(Integer, default=0)
+    dataset_item_count: Mapped[int] = mapped_column(Integer, default=0)
+    latest_trade_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    latest_trade_date_symbols: Mapped[int] = mapped_column(Integer, default=0)
+    most_complete_trade_date: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    most_complete_trade_date_symbols: Mapped[int] = mapped_column(Integer, default=0)
+    refresh_needed: Mapped[bool] = mapped_column(Boolean, default=False)
+    refresh_reason: Mapped[str] = mapped_column(String(120), default="")
+    coverage_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+
+
 class ArenaRun(Base):
     __tablename__ = "arena_runs"
 

@@ -269,6 +269,32 @@ export interface MarketDataMaintenancePayload {
   report?: MarketReport
 }
 
+export interface MarketDataMaintenanceRunRecord {
+  id: number
+  status: string
+  refresh_start_date: string | null
+  refresh_end_date: string | null
+  processed_days: number
+  stored_count: number
+  skipped_count: number
+  refresh_unique_symbols: number
+  dataset_universe_size: number
+  dataset_item_count: number
+  latest_trade_date: string | null
+  latest_trade_date_symbols: number
+  most_complete_trade_date: string | null
+  most_complete_trade_date_symbols: number
+  refresh_needed: boolean
+  refresh_reason: string
+  coverage: Record<string, unknown>
+  result: Record<string, unknown>
+  created_at: string
+}
+
+export interface MarketDataMaintenanceRunListPayload {
+  items: MarketDataMaintenanceRunRecord[]
+}
+
 export interface MarketDataMaintenanceJobPayload {
   job_id: string
   status: 'queued' | 'running' | 'completed' | 'failed'

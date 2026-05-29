@@ -425,6 +425,75 @@ def test_arena_run_keeps_each_ai_account_independent(monkeypatch, tmp_path) -> N
     _reset_state()
 
 
+def test_arena_run_reuses_autonomous_stock_pick_snapshot(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        captured["symbols"] = symbols
+        return [
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "price": 10.0 + index,
+                "change_pct": 4.0 - index,
+                "amount": 10_000_000 - index * 100_000,
+                "turnover": 0.6,
+                "volume_ratio": 1.4,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            }
+            for index, symbol in enumerate(symbols)
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=3000),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=2000),
+                    DailyBar(symbol="300750.SZ", trade_date="20260528", close=200, amount=1000),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "initial_cash": 200000,
+                "agents": [
+                    {"id": "deepseek", "name": "DeepSeek", "style": "momentum"},
+                    {"id": "gpt", "name": "GPT", "style": "balanced"},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    snapshot = payload["stock_pick_snapshot"]
+    assert snapshot["snapshot_id"].startswith("ai-picks-")
+    assert snapshot["selection_mode"] == "auto_universe"
+    assert captured["symbols"] == ["600519.SH", "000001.SZ", "300750.SZ"]
+    assert payload["candidate_count"] == snapshot["dataset"]["item_count"]
+    assert [item["symbol"] for item in payload["candidates"]] == [
+        item["symbol"] for item in snapshot["recommendations"]
+    ]
+    for order in payload["orders"]:
+        context = order["decision_context"]
+        assert context["stock_pick_snapshot_id"] == snapshot["snapshot_id"]
+        assert context["selected_candidate"]["symbol"] in {
+            item["symbol"] for item in snapshot["recommendations"]
+        }
+
+    _reset_state()
+
+
 def test_arena_orders_store_shared_snapshot_and_agent_decision_context(
     monkeypatch,
     tmp_path,

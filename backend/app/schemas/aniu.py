@@ -662,6 +662,7 @@ class ArenaRunResponse(BaseModel):
     leaderboard: list[ArenaLeaderboardItemRead]
     orders: list[ArenaOrderRead]
     data_sources: list[str]
+    stock_pick_snapshot: AIStockPicksResponse | None = None
 
 
 class ChatAttachmentRef(BaseModel):

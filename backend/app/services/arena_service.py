@@ -15,7 +15,7 @@ from app.db.models import (
     ArenaRun,
 )
 from app.services.llm_service import llm_service
-from app.services.quant_service import quant_service
+from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.settings_service import settings_service
 
 
@@ -43,12 +43,21 @@ class ArenaService:
     ) -> dict[str, Any]:
         active_agents = agents or self.enabled_agents(db)
         app_settings = settings_service.get_or_create_settings(db)
-        candidate_payload = quant_service.generate_candidates(
+        stock_pick_snapshot = ai_stock_picker_service.build_snapshot(
             db=db,
             symbols=symbols,
-            limit=max(5, len(active_agents)),
+            limit=max(20, len(active_agents) * 5),
             prefer_realtime=True,
+            lookback_days=120,
         )
+        dataset = stock_pick_snapshot["dataset"]
+        candidate_payload = {
+            "universe_size": dataset["universe_size"],
+            "candidate_count": dataset["item_count"],
+            "data_sources": stock_pick_snapshot["data_sources"],
+            "candidates": stock_pick_snapshot["recommendations"],
+            "stock_pick_snapshot": stock_pick_snapshot,
+        }
         candidates = candidate_payload["candidates"]
         arena_run = ArenaRun(
             initial_cash=initial_cash,
@@ -78,6 +87,7 @@ class ArenaService:
                 agent_index=index,
                 available_cash=account.cash,
                 snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
                 data_sources=data_sources,
                 app_settings=app_settings,
             )
@@ -120,6 +130,7 @@ class ArenaService:
             "leaderboard": leaderboard,
             "orders": orders,
             "data_sources": candidate_payload["data_sources"],
+            "stock_pick_snapshot": stock_pick_snapshot,
         }
 
     def leaderboard(self, db: Session) -> dict[str, Any]:
@@ -230,6 +241,7 @@ class ArenaService:
         agent_index: int,
         available_cash: float,
         snapshot_id: str,
+        stock_pick_snapshot_id: str,
         data_sources: list[str],
         app_settings: AppSettings,
     ) -> dict[str, Any] | None:
@@ -254,6 +266,7 @@ class ArenaService:
                     sell_ratio=llm_decision["sell_ratio"],
                     reason=llm_decision["reason"],
                     snapshot_id=snapshot_id,
+                    stock_pick_snapshot_id=stock_pick_snapshot_id,
                     data_sources=data_sources,
                     llm_decision=llm_decision["context"],
                 )
@@ -265,6 +278,7 @@ class ArenaService:
                 allocation_ratio=llm_decision["allocation_ratio"],
                 reason=llm_decision["reason"],
                 snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot_id,
                 data_sources=data_sources,
                 llm_decision=llm_decision["context"],
                 agent_index=agent_index,
@@ -293,6 +307,7 @@ class ArenaService:
             allocation_ratio=allocation_ratio,
             reason=f"{style} 根据候选评分 {candidate['score']} 执行模拟买入。",
             snapshot_id=snapshot_id,
+            stock_pick_snapshot_id=stock_pick_snapshot_id,
             data_sources=data_sources,
             llm_decision=None,
             agent_index=agent_index,
@@ -308,6 +323,7 @@ class ArenaService:
         allocation_ratio: float,
         reason: str,
         snapshot_id: str,
+        stock_pick_snapshot_id: str,
         data_sources: list[str],
         llm_decision: dict[str, Any] | None,
         agent_index: int,
@@ -334,6 +350,7 @@ class ArenaService:
             "reason": reason,
             "decision_context": self._decision_context(
                 snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot_id,
                 agent=agent,
                 data_sources=data_sources,
                 candidate=candidate,
@@ -352,6 +369,7 @@ class ArenaService:
         sell_ratio: float,
         reason: str,
         snapshot_id: str,
+        stock_pick_snapshot_id: str,
         data_sources: list[str],
         llm_decision: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -377,6 +395,7 @@ class ArenaService:
             "reason": reason,
             "decision_context": self._decision_context(
                 snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot_id,
                 agent=agent,
                 data_sources=data_sources,
                 candidate=candidate,
@@ -662,6 +681,7 @@ class ArenaService:
         self,
         *,
         snapshot_id: str,
+        stock_pick_snapshot_id: str | None = None,
         agent: dict[str, str],
         data_sources: list[str],
         candidate: dict[str, Any],
@@ -670,6 +690,7 @@ class ArenaService:
     ) -> dict[str, Any]:
         return {
             "snapshot_id": snapshot_id,
+            "stock_pick_snapshot_id": stock_pick_snapshot_id,
             "agent": {
                 "id": str(agent.get("id") or ""),
                 "name": str(agent.get("name") or ""),

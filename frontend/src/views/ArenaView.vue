@@ -704,6 +704,13 @@ async function runArena(): Promise<void> {
     })
     arenaResult.value = payload
     candidates.value = payload.candidates
+    if (payload.stock_pick_snapshot) {
+      quantDataset.value = payload.stock_pick_snapshot.dataset
+      aiMarketContext.value = {
+        context: payload.stock_pick_snapshot.context,
+        context_length: payload.stock_pick_snapshot.context_length,
+      }
+    }
     await loadLeaderboard()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '竞技场运行失败。'

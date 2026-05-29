@@ -492,6 +492,7 @@ export interface ArenaRunPayload {
   leaderboard: ArenaLeaderboardItem[]
   orders: ArenaOrder[]
   data_sources: string[]
+  stock_pick_snapshot?: AIStockPicksPayload | null
 }
 
 export interface ChatToolCall {

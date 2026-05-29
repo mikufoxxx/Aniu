@@ -132,6 +132,12 @@ class AIMarketContextService:
             margin_parts = self._margin_parts(daily.get("margin_detail") or {})
             dragon_tiger_parts = self._dragon_tiger_parts(daily.get("dragon_tiger") or {})
             block_trade_parts = self._block_trade_parts(daily.get("block_trade") or {})
+            shareholder_number_parts = self._shareholder_number_parts(
+                daily.get("shareholder_number") or {}
+            )
+            shareholder_trade_parts = self._shareholder_trade_parts(
+                daily.get("shareholder_trade") or {}
+            )
             lines.append(
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
@@ -147,6 +153,8 @@ class AIMarketContextService:
                     f"{margin_parts}"
                     f"{dragon_tiger_parts}"
                     f"{block_trade_parts}"
+                    f"{shareholder_number_parts}"
+                    f"{shareholder_trade_parts}"
                     f"来源 {item.get('source') or '--'}"
                 ).strip()
             )
@@ -453,6 +461,44 @@ class AIMarketContextService:
             parts.append(f"{trade_count}笔")
         if price_vs_close_number:
             parts.append(f"折溢价 {price_vs_close_number:+.2f}%")
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
+
+    def _shareholder_number_parts(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        holder_num = int(item.get("holder_num") or 0)
+        if holder_num > 0:
+            parts.append(f"股东户数 {holder_num}")
+        change_pct = item.get("holder_num_change_pct")
+        try:
+            change_number = float(change_pct)
+        except (TypeError, ValueError):
+            change_number = 0.0
+        if change_number:
+            parts.append(f"户数变化 {change_number:+.2f}%")
+        if not parts:
+            return ""
+        return "; ".join(parts) + "; "
+
+    def _shareholder_trade_parts(self, item: dict[str, Any]) -> str:
+        parts: list[str] = []
+        net_change_vol = item.get("net_change_vol")
+        net_change_ratio = item.get("net_change_ratio")
+        try:
+            vol_number = float(net_change_vol)
+        except (TypeError, ValueError):
+            vol_number = 0.0
+        try:
+            ratio_number = float(net_change_ratio)
+        except (TypeError, ValueError):
+            ratio_number = 0.0
+        if vol_number > 0:
+            parts.append(f"重要股东净增持 {vol_number:.2f}万股")
+        elif vol_number < 0:
+            parts.append(f"重要股东净减持 {abs(vol_number):.2f}万股")
+        if ratio_number:
+            parts.append(f"净变动 {ratio_number:.2f}%")
         if not parts:
             return ""
         return "; ".join(parts) + "; "

@@ -1120,6 +1120,124 @@ def test_refresh_daily_bars_stores_tushare_block_trades(monkeypatch, tmp_path) -
     _reset_state()
 
 
+def test_refresh_daily_bars_stores_tushare_shareholder_rows(monkeypatch, tmp_path) -> None:
+    from app.db.models import ShareholderNumber, ShareholderTrade
+    from app.services.historical_data_service import historical_data_service
+
+    def fake_fetch_daily_rows(trade_date, symbols=None):
+        return [
+            {"ts_code": "600519.SH", "trade_date": trade_date, "close": 100, "amount": 9000},
+            {"ts_code": "000001.SZ", "trade_date": trade_date, "close": 10, "amount": 1000},
+        ]
+
+    def fake_holder_number_rows(ann_date):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "ann_date": ann_date,
+                "end_date": "20260331",
+                "holder_num": 88000,
+            },
+            {
+                "ts_code": "300750.SZ",
+                "ann_date": ann_date,
+                "end_date": "20260331",
+                "holder_num": 110000,
+            },
+        ]
+
+    def fake_holder_trade_rows(ann_date):
+        return [
+            {
+                "ts_code": "600519.SH",
+                "ann_date": ann_date,
+                "holder_name": "贵州国资公司",
+                "holder_type": "C",
+                "in_de": "IN",
+                "change_vol": 120.0,
+                "change_ratio": 0.18,
+                "after_share": 5000.0,
+                "after_ratio": 4.1,
+                "avg_price": 1320.0,
+                "total_share": 5000.0,
+                "begin_date": "20260501",
+                "close_date": "20260528",
+            },
+            {
+                "ts_code": "600519.SH",
+                "ann_date": ann_date,
+                "holder_name": "某高管",
+                "holder_type": "G",
+                "in_de": "DE",
+                "change_vol": 20.0,
+                "change_ratio": 0.03,
+                "after_share": 80.0,
+                "after_ratio": 0.06,
+                "avg_price": 1330.0,
+                "total_share": 80.0,
+                "begin_date": "20260510",
+                "close_date": "20260520",
+            },
+            {
+                "ts_code": "300750.SZ",
+                "ann_date": ann_date,
+                "holder_name": "宁德股东",
+                "holder_type": "C",
+                "in_de": "IN",
+                "change_vol": 50.0,
+                "change_ratio": 0.1,
+            },
+        ]
+
+    monkeypatch.setattr(historical_data_service, "fetch_daily_rows", fake_fetch_daily_rows)
+    monkeypatch.setattr(historical_data_service, "fetch_daily_basic_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_moneyflow_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_index_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_daily_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_sector_index_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_limit_list_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_margin_detail_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_top_list_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_top_inst_rows", lambda *args: [])
+    monkeypatch.setattr(historical_data_service, "fetch_block_trade_rows", lambda *args: [])
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_shareholder_number_rows",
+        fake_holder_number_rows,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        historical_data_service,
+        "fetch_shareholder_trade_rows",
+        fake_holder_trade_rows,
+        raising=False,
+    )
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            result = historical_data_service.refresh_daily_bars(
+                db,
+                trade_date="20260528",
+                symbols=["600519.SH", "000001.SZ"],
+            )
+            numbers = db.query(ShareholderNumber).all()
+            trades = db.query(ShareholderTrade).order_by(ShareholderTrade.change_vol.desc()).all()
+
+    assert result["shareholder_number_count"] == 1
+    assert result["shareholder_trade_count"] == 2
+    assert result["shareholder_number_error"] is None
+    assert result["shareholder_trade_error"] is None
+    assert numbers[0].symbol == "600519.SH"
+    assert numbers[0].holder_num == 88000
+    assert numbers[0].source == "tushare_stk_holdernumber"
+    assert trades[0].holder_name == "贵州国资公司"
+    assert trades[0].in_de == "IN"
+    assert trades[0].change_ratio == 0.18
+    assert trades[0].source == "tushare_stk_holdertrade"
+
+    _reset_state()
+
+
 def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_path) -> None:
     from app.services.historical_data_service import historical_data_service
 
@@ -1186,6 +1304,8 @@ def test_refresh_daily_range_summarizes_enriched_data_sources(monkeypatch, tmp_p
         "tushare_top_list": 0,
         "tushare_top_inst": 0,
         "tushare_block_trade": 0,
+        "tushare_stk_holdernumber": 0,
+        "tushare_stk_holdertrade": 0,
     }
     assert payload["data_source_errors"] == {
         "tushare_moneyflow_ths": ["20260528: moneyflow partial"],

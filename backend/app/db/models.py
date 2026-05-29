@@ -476,6 +476,67 @@ class BlockTrade(Base):
     )
 
 
+class ShareholderNumber(Base):
+    __tablename__ = "shareholder_numbers"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "ann_date",
+            "end_date",
+            name="uq_shareholder_numbers_symbol_ann_end",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    ann_date: Mapped[str] = mapped_column(String(8), index=True)
+    end_date: Mapped[str] = mapped_column(String(8), index=True)
+    holder_num: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="tushare_stk_holdernumber")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ShareholderTrade(Base):
+    __tablename__ = "shareholder_trades"
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "ann_date",
+            "holder_name",
+            "in_de",
+            "begin_date",
+            "close_date",
+            "change_vol",
+            name="uq_shareholder_trades_symbol_ann_holder_type_dates_vol",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    ann_date: Mapped[str] = mapped_column(String(8), index=True)
+    holder_name: Mapped[str] = mapped_column(String(255), default="")
+    holder_type: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    in_de: Mapped[str] = mapped_column(String(8), default="")
+    change_vol: Mapped[float | None] = mapped_column(Float, nullable=True)
+    change_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    after_share: Mapped[float | None] = mapped_column(Float, nullable=True)
+    after_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_share: Mapped[float | None] = mapped_column(Float, nullable=True)
+    begin_date: Mapped[str] = mapped_column(String(8), default="")
+    close_date: Mapped[str] = mapped_column(String(8), default="")
+    source: Mapped[str] = mapped_column(String(32), default="tushare_stk_holdertrade")
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BacktestRun(Base):
     __tablename__ = "backtest_runs"
 

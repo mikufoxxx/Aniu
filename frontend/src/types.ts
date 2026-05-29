@@ -312,6 +312,22 @@ export interface QuantCandidate {
       top_buyer?: string | null
       top_seller?: string | null
     } | null
+    shareholder_number?: {
+      ann_date?: string | null
+      end_date?: string | null
+      holder_num?: number
+      previous_holder_num?: number
+      holder_num_change_pct?: number
+    } | null
+    shareholder_trade?: {
+      ann_date?: string | null
+      trade_count?: number
+      increase_count?: number
+      decrease_count?: number
+      net_change_vol?: number
+      net_change_ratio?: number
+      top_holder?: string | null
+    } | null
   }
   rationale: string
 }

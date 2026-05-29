@@ -24,6 +24,8 @@ from app.db.models import (
     MarketReport,
     SectorBar,
     SectorMember,
+    ShareholderNumber,
+    ShareholderTrade,
     StockProfile,
 )
 from app.services.automation_session_service import automation_session_service
@@ -257,6 +259,48 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
                     buyer="华泰证券上海营业部",
                     seller="机构专用",
                 ),
+                ShareholderNumber(
+                    symbol="600519.SH",
+                    ann_date="20260528",
+                    end_date="20260331",
+                    holder_num=88000,
+                ),
+                ShareholderNumber(
+                    symbol="600519.SH",
+                    ann_date="20260428",
+                    end_date="20251231",
+                    holder_num=96000,
+                ),
+                ShareholderTrade(
+                    symbol="600519.SH",
+                    ann_date="20260528",
+                    holder_name="贵州国资公司",
+                    holder_type="C",
+                    in_de="IN",
+                    change_vol=120.0,
+                    change_ratio=0.18,
+                    after_share=5000.0,
+                    after_ratio=4.1,
+                    avg_price=1320.0,
+                    total_share=5000.0,
+                    begin_date="20260501",
+                    close_date="20260528",
+                ),
+                ShareholderTrade(
+                    symbol="600519.SH",
+                    ann_date="20260528",
+                    holder_name="某高管",
+                    holder_type="G",
+                    in_de="DE",
+                    change_vol=20.0,
+                    change_ratio=0.03,
+                    after_share=80.0,
+                    after_ratio=0.06,
+                    avg_price=1330.0,
+                    total_share=80.0,
+                    begin_date="20260510",
+                    close_date="20260520",
+                ),
             ]
         )
         db.flush()
@@ -272,7 +316,8 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
         "数据源: easy_tdx, tencent, tushare_daily, tushare_moneyflow, "
         "tushare_sector_member, tushare_stock_basic, tushare_fina_indicator, "
         "tushare_limit_list_d, tushare_margin_detail, tushare_top_list, "
-        "tushare_top_inst, tushare_block_trade, tushare_index, tushare_sector"
+        "tushare_top_inst, tushare_block_trade, tushare_stk_holdernumber, "
+        "tushare_stk_holdertrade, tushare_index, tushare_sector"
         in context
     )
     assert "覆盖: 实时 2/2, 日线 2/2" in context
@@ -293,6 +338,10 @@ def test_ai_market_context_summarizes_unified_dataset(monkeypatch, tmp_path) -> 
     assert "上榜 涨幅偏离值达7%的证券" in context
     assert "大宗成交 265800.00万" in context
     assert "2笔" in context
+    assert "股东户数 88000" in context
+    assert "户数变化 -8.33%" in context
+    assert "重要股东净增持 100.00万股" in context
+    assert "净变动 0.15%" in context
     assert "PE 23.50" in context
     assert "PB 7.80" in context
     assert "行业 白酒" in context

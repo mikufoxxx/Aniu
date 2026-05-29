@@ -24,6 +24,8 @@ from app.db.models import (
     MarginDetail,
     SectorBar,
     SectorMember,
+    ShareholderNumber,
+    ShareholderTrade,
     StockProfile,
 )
 from app.services.market_data_service import normalize_symbol
@@ -67,6 +69,11 @@ _TUSHARE_TOP_INST_FIELDS = (
     "trade_date,ts_code,exalter,side,buy,buy_rate,sell,sell_rate,net_buy,reason"
 )
 _TUSHARE_BLOCK_TRADE_FIELDS = "ts_code,trade_date,price,vol,amount,buyer,seller"
+_TUSHARE_HOLDER_NUMBER_FIELDS = "ts_code,ann_date,end_date,holder_num"
+_TUSHARE_HOLDER_TRADE_FIELDS = (
+    "ts_code,ann_date,holder_name,holder_type,in_de,change_vol,change_ratio,"
+    "after_share,after_ratio,avg_price,total_share,begin_date,close_date"
+)
 _DEFAULT_INDEX_SYMBOLS = ("000001.SH", "399001.SZ", "399006.SZ", "000300.SH", "000905.SH")
 _TUSHARE_THS_MEMBER_WORKERS = 2
 _TUSHARE_THS_MEMBER_RETRIES = 3
@@ -424,6 +431,22 @@ class HistoricalDataService:
             {"trade_date": _normalize_trade_date(trade_date)}
         )
 
+    def fetch_shareholder_number_rows(self, ann_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare stk_holdernumber 数据。")
+        return self._request_tushare_shareholder_number(
+            {"ann_date": _normalize_trade_date(ann_date)}
+        )
+
+    def fetch_shareholder_trade_rows(self, ann_date: str) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.tushare_token:
+            raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare stk_holdertrade 数据。")
+        return self._request_tushare_shareholder_trade(
+            {"ann_date": _normalize_trade_date(ann_date)}
+        )
+
     def fetch_financial_indicator_rows(self, symbols: list[str]) -> list[dict[str, Any]]:
         settings = get_settings()
         if not settings.tushare_token:
@@ -553,6 +576,22 @@ class HistoricalDataService:
             params=params,
             fields=_TUSHARE_BLOCK_TRADE_FIELDS,
             label="block_trade",
+        )
+
+    def _request_tushare_shareholder_number(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="stk_holdernumber",
+            params=params,
+            fields=_TUSHARE_HOLDER_NUMBER_FIELDS,
+            label="stk_holdernumber",
+        )
+
+    def _request_tushare_shareholder_trade(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._request_tushare_api(
+            api_name="stk_holdertrade",
+            params=params,
+            fields=_TUSHARE_HOLDER_TRADE_FIELDS,
+            label="stk_holdertrade",
         )
 
     def _request_tushare_api(
@@ -757,6 +796,30 @@ class HistoricalDataService:
         except RuntimeError as exc:
             block_trade_error = str(exc)
 
+        shareholder_number_error = None
+        shareholder_number_count = 0
+        try:
+            shareholder_number_count = self._store_shareholder_number_rows(
+                db,
+                normalized_date,
+                self.fetch_shareholder_number_rows(normalized_date),
+                normalized_symbols,
+            )
+        except RuntimeError as exc:
+            shareholder_number_error = str(exc)
+
+        shareholder_trade_error = None
+        shareholder_trade_count = 0
+        try:
+            shareholder_trade_count = self._store_shareholder_trade_rows(
+                db,
+                normalized_date,
+                self.fetch_shareholder_trade_rows(normalized_date),
+                normalized_symbols,
+            )
+        except RuntimeError as exc:
+            shareholder_trade_error = str(exc)
+
         stored_count = 0
         skipped_count = 0
         for row in rows:
@@ -839,6 +902,10 @@ class HistoricalDataService:
             "dragon_tiger_inst_error": dragon_tiger_inst_error,
             "block_trade_count": block_trade_count,
             "block_trade_error": block_trade_error,
+            "shareholder_number_count": shareholder_number_count,
+            "shareholder_number_error": shareholder_number_error,
+            "shareholder_trade_count": shareholder_trade_count,
+            "shareholder_trade_error": shareholder_trade_error,
             "requested_symbols": normalized_symbols or [],
         }
 
@@ -1320,6 +1387,101 @@ class HistoricalDataService:
             stored_count += 1
         return stored_count
 
+    def _store_shareholder_number_rows(
+        self,
+        db: Session,
+        ann_date: str,
+        rows: list[dict[str, Any]],
+        symbols: list[str] | None,
+    ) -> int:
+        symbol_filter = set(symbols or [])
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            if symbol_filter and symbol not in symbol_filter:
+                continue
+            row_ann_date = _normalize_trade_date(str(row.get("ann_date") or ann_date))
+            if row_ann_date != ann_date:
+                continue
+            end_date = _normalize_trade_date(str(row.get("end_date") or row.get("enddate")))
+            existing = db.scalar(
+                select(ShareholderNumber).where(
+                    ShareholderNumber.symbol == symbol,
+                    ShareholderNumber.ann_date == row_ann_date,
+                    ShareholderNumber.end_date == end_date,
+                )
+            )
+            item = existing or ShareholderNumber(
+                symbol=symbol,
+                ann_date=row_ann_date,
+                end_date=end_date,
+            )
+            item.holder_num = _to_int(row.get("holder_num"))
+            item.source = "tushare_stk_holdernumber"
+            item.raw_payload = dict(row)
+            db.add(item)
+            stored_count += 1
+        return stored_count
+
+    def _store_shareholder_trade_rows(
+        self,
+        db: Session,
+        ann_date: str,
+        rows: list[dict[str, Any]],
+        symbols: list[str] | None,
+    ) -> int:
+        symbol_filter = set(symbols or [])
+        seen_keys: set[tuple[str, str, str, str, str, str, float | None]] = set()
+        stored_count = 0
+        for row in rows:
+            symbol = normalize_symbol(str(row.get("ts_code") or row.get("symbol") or ""))
+            if symbol_filter and symbol not in symbol_filter:
+                continue
+            row_ann_date = _normalize_trade_date(str(row.get("ann_date") or ann_date))
+            if row_ann_date != ann_date:
+                continue
+            holder_name = str(row.get("holder_name") or "").strip()
+            in_de = str(row.get("in_de") or row.get("trade_type") or "").strip().upper()
+            begin_date = str(row.get("begin_date") or "").strip()
+            close_date = str(row.get("close_date") or "").strip()
+            change_vol = _to_float(row.get("change_vol"))
+            key = (symbol, row_ann_date, holder_name, in_de, begin_date, close_date, change_vol)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            existing = db.scalar(
+                select(ShareholderTrade).where(
+                    ShareholderTrade.symbol == symbol,
+                    ShareholderTrade.ann_date == row_ann_date,
+                    ShareholderTrade.holder_name == holder_name,
+                    ShareholderTrade.in_de == in_de,
+                    ShareholderTrade.begin_date == begin_date,
+                    ShareholderTrade.close_date == close_date,
+                    ShareholderTrade.change_vol == change_vol,
+                )
+            )
+            item = existing or ShareholderTrade(
+                symbol=symbol,
+                ann_date=row_ann_date,
+                holder_name=holder_name,
+                in_de=in_de,
+                begin_date=begin_date,
+                close_date=close_date,
+                change_vol=change_vol,
+            )
+            item.holder_type = str(row.get("holder_type") or "") or None
+            item.change_vol = change_vol
+            item.change_ratio = _to_float(row.get("change_ratio"))
+            item.after_share = _to_float(row.get("after_share"))
+            item.after_ratio = _to_float(row.get("after_ratio"))
+            item.avg_price = _to_float(row.get("avg_price"))
+            item.total_share = _to_float(row.get("total_share"))
+            item.source = "tushare_stk_holdertrade"
+            item.raw_payload = dict(row)
+            db.add(item)
+            stored_count += 1
+        return stored_count
+
     def refresh_daily_range(
         self,
         db: Session,
@@ -1373,6 +1535,10 @@ class HistoricalDataService:
                     "dragon_tiger_inst_error": None,
                     "block_trade_count": 0,
                     "block_trade_error": None,
+                    "shareholder_number_count": 0,
+                    "shareholder_number_error": None,
+                    "shareholder_trade_count": 0,
+                    "shareholder_trade_error": None,
                     "requested_symbols": normalized_symbols or [],
                     "error": str(exc),
                 }
@@ -1433,6 +1599,10 @@ class HistoricalDataService:
                             "dragon_tiger_inst_error": None,
                             "block_trade_count": 0,
                             "block_trade_error": None,
+                            "shareholder_number_count": 0,
+                            "shareholder_number_error": None,
+                            "shareholder_trade_count": 0,
+                            "shareholder_trade_error": None,
                             "requested_symbols": normalized_symbols or [],
                             "error": (
                                 f"连续 {_MAX_CONSECUTIVE_DAILY_REFRESH_FAILURES} 天刷新失败，"
@@ -1490,6 +1660,8 @@ class HistoricalDataService:
             "tushare_top_list": 0,
             "tushare_top_inst": 0,
             "tushare_block_trade": 0,
+            "tushare_stk_holdernumber": 0,
+            "tushare_stk_holdertrade": 0,
         }
         errors: dict[str, list[str]] = defaultdict(list)
         for item in daily_results:
@@ -1505,6 +1677,10 @@ class HistoricalDataService:
             counts["tushare_top_list"] += int(item.get("dragon_tiger_count") or 0)
             counts["tushare_top_inst"] += int(item.get("dragon_tiger_inst_count") or 0)
             counts["tushare_block_trade"] += int(item.get("block_trade_count") or 0)
+            counts["tushare_stk_holdernumber"] += int(
+                item.get("shareholder_number_count") or 0
+            )
+            counts["tushare_stk_holdertrade"] += int(item.get("shareholder_trade_count") or 0)
             for key, source in (
                 ("error", "tushare_daily"),
                 ("daily_basic_error", "tushare_daily_basic"),
@@ -1517,6 +1693,8 @@ class HistoricalDataService:
                 ("dragon_tiger_error", "tushare_top_list"),
                 ("dragon_tiger_inst_error", "tushare_top_inst"),
                 ("block_trade_error", "tushare_block_trade"),
+                ("shareholder_number_error", "tushare_stk_holdernumber"),
+                ("shareholder_trade_error", "tushare_stk_holdertrade"),
             ):
                 message = item.get(key)
                 if message:

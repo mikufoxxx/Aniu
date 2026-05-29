@@ -339,6 +339,7 @@
               <span v-if="marginText(item)" class="position-symbol">{{ marginText(item) }}</span>
               <span v-if="dragonTigerText(item)" class="position-symbol">{{ dragonTigerText(item) }}</span>
               <span v-if="blockTradeText(item)" class="position-symbol">{{ blockTradeText(item) }}</span>
+              <span v-if="shareholderText(item)" class="position-symbol">{{ shareholderText(item) }}</span>
             </div>
             <div>{{ item.score.toFixed(2) }}</div>
             <div>
@@ -866,6 +867,8 @@ function sourceCountsText(counts: Record<string, number> | undefined): string {
     ['龙虎榜', counts.tushare_top_list],
     ['机构席位', counts.tushare_top_inst],
     ['大宗', counts.tushare_block_trade],
+    ['股东户数', counts.tushare_stk_holdernumber],
+    ['增减持', counts.tushare_stk_holdertrade],
   ].filter(([, value]) => typeof value === 'number' && value > 0)
   if (!items.length) return '--'
   return items.map(([label, value]) => `${label}${formatInteger(value as number)}`).join(' / ')
@@ -946,6 +949,19 @@ function blockTradeText(item: QuantCandidate): string {
   }
   if (typeof blockTrade.trade_count === 'number' && blockTrade.trade_count > 0) {
     parts.push(`${blockTrade.trade_count}笔`)
+  }
+  return parts.join(' · ')
+}
+
+function shareholderText(item: QuantCandidate): string {
+  const number = item.daily_factors?.shareholder_number
+  const trade = item.daily_factors?.shareholder_trade
+  const parts: string[] = []
+  if (typeof number?.holder_num_change_pct === 'number' && number.holder_num_change_pct !== 0) {
+    parts.push(`户数 ${formatSignedPercent(number.holder_num_change_pct)}`)
+  }
+  if (typeof trade?.net_change_ratio === 'number' && trade.net_change_ratio !== 0) {
+    parts.push(`股东 ${formatSignedPercent(trade.net_change_ratio)}`)
   }
   return parts.join(' · ')
 }

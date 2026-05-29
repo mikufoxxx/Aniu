@@ -16,6 +16,8 @@ from app.db.models import (
     MarginDetail,
     SectorBar,
     SectorMember,
+    ShareholderNumber,
+    ShareholderTrade,
     StockProfile,
 )
 from app.services.market_data_service import DEFAULT_UNIVERSE, market_data_service, normalize_symbol
@@ -87,6 +89,10 @@ class QuantService:
             data_sources.extend(["tushare_top_list", "tushare_top_inst"])
         if any(item.get("daily_factors", {}).get("block_trade") for item in selected):
             data_sources.append("tushare_block_trade")
+        if any(item.get("daily_factors", {}).get("shareholder_number") for item in selected):
+            data_sources.append("tushare_stk_holdernumber")
+        if any(item.get("daily_factors", {}).get("shareholder_trade") for item in selected):
+            data_sources.append("tushare_stk_holdertrade")
         return {
             "universe_size": len(universe),
             "candidate_count": len(selected),
@@ -163,6 +169,16 @@ class QuantService:
             "block_trade_symbols": sum(
                 1 for item in items if item.get("daily_factors", {}).get("block_trade")
             ),
+            "shareholder_number_symbols": sum(
+                1
+                for item in items
+                if item.get("daily_factors", {}).get("shareholder_number")
+            ),
+            "shareholder_trade_symbols": sum(
+                1
+                for item in items
+                if item.get("daily_factors", {}).get("shareholder_trade")
+            ),
         }
         return {
             "universe_size": payload["universe_size"],
@@ -216,6 +232,8 @@ class QuantService:
             "margin_financing": self._margin_financing_score(daily),
             "dragon_tiger_flow": self._dragon_tiger_flow_score(daily),
             "block_trade_flow": self._block_trade_flow_score(daily),
+            "shareholder_structure": self._shareholder_structure_score(daily),
+            "shareholder_trade": self._shareholder_trade_score(daily),
             "financial_quality": self._financial_quality_score(financial_payload),
         }
         score = self._weighted_score(factor_scores, daily["bars_used"])
@@ -266,6 +284,8 @@ class QuantService:
                 + factor_scores["margin_financing"] * 3
                 + factor_scores["dragon_tiger_flow"] * 4
                 + factor_scores["block_trade_flow"] * 3
+                + factor_scores["shareholder_structure"] * 3
+                + factor_scores["shareholder_trade"] * 3
                 + factor_scores["financial_quality"] * 4
             )
         return round(score, 4)
@@ -334,6 +354,19 @@ class QuantService:
         premium_score = max(min(_number(item.get("price_vs_close_pct")) / 10.0, 0.35), -0.35)
         return max(min(amount_score + premium_score, 1.0), -1.0)
 
+    def _shareholder_structure_score(self, daily: dict[str, Any]) -> float:
+        item = daily.get("shareholder_number") or {}
+        if not isinstance(item, dict):
+            return 0.0
+        change_pct = _number(item.get("holder_num_change_pct"))
+        return max(min(-change_pct / 20.0, 1.0), -1.0)
+
+    def _shareholder_trade_score(self, daily: dict[str, Any]) -> float:
+        item = daily.get("shareholder_trade") or {}
+        if not isinstance(item, dict):
+            return 0.0
+        return max(min(_number(item.get("net_change_ratio")) / 1.0, 1.0), -1.0)
+
     def _financial_quality_score(self, financial: dict[str, Any]) -> float:
         if not financial:
             return 0.0
@@ -388,6 +421,12 @@ class QuantService:
         block_trades = self._block_trades_by_symbol(db, symbols)
         for symbol, item in block_trades.items():
             factors.setdefault(symbol, self._empty_daily_factors())["block_trade"] = item
+        shareholder_numbers = self._shareholder_numbers_by_symbol(db, symbols)
+        for symbol, item in shareholder_numbers.items():
+            factors.setdefault(symbol, self._empty_daily_factors())["shareholder_number"] = item
+        shareholder_trades = self._shareholder_trades_by_symbol(db, symbols)
+        for symbol, item in shareholder_trades.items():
+            factors.setdefault(symbol, self._empty_daily_factors())["shareholder_trade"] = item
         return factors
 
     def _profiles_by_symbol(
@@ -622,6 +661,83 @@ class QuantService:
             }
         return result
 
+    def _shareholder_numbers_by_symbol(
+        self,
+        db: Session,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        rows = db.scalars(
+            select(ShareholderNumber)
+            .where(ShareholderNumber.symbol.in_(symbols))
+            .order_by(
+                ShareholderNumber.symbol,
+                desc(ShareholderNumber.end_date),
+                desc(ShareholderNumber.ann_date),
+            )
+        ).all()
+        grouped: dict[str, list[ShareholderNumber]] = {}
+        for row in rows:
+            grouped.setdefault(row.symbol, []).append(row)
+        result: dict[str, dict[str, Any]] = {}
+        for symbol, items in grouped.items():
+            latest = items[0]
+            previous = items[1] if len(items) > 1 else None
+            holder_num = int(latest.holder_num or 0)
+            previous_holder_num = int(previous.holder_num or 0) if previous else 0
+            change_pct = 0.0
+            if previous_holder_num > 0:
+                change_pct = (holder_num - previous_holder_num) / previous_holder_num * 100.0
+            result[symbol] = {
+                "ann_date": latest.ann_date,
+                "end_date": latest.end_date,
+                "holder_num": holder_num,
+                "previous_holder_num": previous_holder_num,
+                "holder_num_change_pct": change_pct,
+            }
+        return result
+
+    def _shareholder_trades_by_symbol(
+        self,
+        db: Session,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        rows = db.scalars(
+            select(ShareholderTrade)
+            .where(ShareholderTrade.symbol.in_(symbols))
+            .order_by(ShareholderTrade.symbol, desc(ShareholderTrade.ann_date))
+        ).all()
+        latest_dates: dict[str, str] = {}
+        for row in rows:
+            latest_dates.setdefault(row.symbol, row.ann_date)
+        grouped: dict[str, list[ShareholderTrade]] = {}
+        for row in rows:
+            if row.ann_date == latest_dates.get(row.symbol):
+                grouped.setdefault(row.symbol, []).append(row)
+        result: dict[str, dict[str, Any]] = {}
+        for symbol, items in grouped.items():
+            net_change_vol = 0.0
+            net_change_ratio = 0.0
+            increase_count = 0
+            decrease_count = 0
+            for item in items:
+                sign = 1.0 if str(item.in_de or "").upper() == "IN" else -1.0
+                if sign > 0:
+                    increase_count += 1
+                else:
+                    decrease_count += 1
+                net_change_vol += sign * _number(item.change_vol)
+                net_change_ratio += sign * _number(item.change_ratio)
+            result[symbol] = {
+                "ann_date": latest_dates[symbol],
+                "trade_count": len(items),
+                "increase_count": increase_count,
+                "decrease_count": decrease_count,
+                "net_change_vol": net_change_vol,
+                "net_change_ratio": net_change_ratio,
+                "top_holder": items[0].holder_name,
+            }
+        return result
+
     def _sector_heat_by_symbol(
         self,
         db: Session,
@@ -709,6 +825,8 @@ class QuantService:
             "margin_detail": None,
             "dragon_tiger": None,
             "block_trade": None,
+            "shareholder_number": None,
+            "shareholder_trade": None,
         }
 
     def _empty_daily_factors(self) -> dict[str, Any]:
@@ -738,6 +856,8 @@ class QuantService:
             "margin_detail": None,
             "dragon_tiger": None,
             "block_trade": None,
+            "shareholder_number": None,
+            "shareholder_trade": None,
         }
 
     def _stddev(self, values: list[float]) -> float:

@@ -169,6 +169,8 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                 FinancialIndicator,
                 LimitEvent,
                 MarginDetail,
+                ShareholderNumber,
+                ShareholderTrade,
             )
 
             db.add_all(
@@ -307,6 +309,48 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
                         buyer="华泰证券上海营业部",
                         seller="机构专用",
                     ),
+                    ShareholderNumber(
+                        symbol="600519.SH",
+                        ann_date="20260528",
+                        end_date="20260331",
+                        holder_num=88000,
+                    ),
+                    ShareholderNumber(
+                        symbol="600519.SH",
+                        ann_date="20260428",
+                        end_date="20251231",
+                        holder_num=96000,
+                    ),
+                    ShareholderTrade(
+                        symbol="600519.SH",
+                        ann_date="20260528",
+                        holder_name="贵州国资公司",
+                        holder_type="C",
+                        in_de="IN",
+                        change_vol=120.0,
+                        change_ratio=0.18,
+                        after_share=5000.0,
+                        after_ratio=4.1,
+                        avg_price=1320.0,
+                        total_share=5000.0,
+                        begin_date="20260501",
+                        close_date="20260528",
+                    ),
+                    ShareholderTrade(
+                        symbol="600519.SH",
+                        ann_date="20260528",
+                        holder_name="某高管",
+                        holder_type="G",
+                        in_de="DE",
+                        change_vol=20.0,
+                        change_ratio=0.03,
+                        after_share=80.0,
+                        after_ratio=0.06,
+                        avg_price=1330.0,
+                        total_share=80.0,
+                        begin_date="20260510",
+                        close_date="20260520",
+                    ),
                 ]
             )
 
@@ -339,6 +383,8 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
         "tushare_top_list",
         "tushare_top_inst",
         "tushare_block_trade",
+        "tushare_stk_holdernumber",
+        "tushare_stk_holdertrade",
     } <= set(payload["data_sources"])
     assert payload["items"][0]["symbol"] == "600519.SH"
     assert payload["items"][0]["daily_factors"]["latest_trade_date"] == "20260528"
@@ -363,6 +409,10 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["items"][0]["daily_factors"]["block_trade"]["trade_count"] == 2
     assert payload["items"][0]["daily_factors"]["block_trade"]["total_amount"] == 265800.0
     assert payload["items"][0]["daily_factors"]["block_trade"]["price_vs_close_pct"] > 0
+    assert payload["items"][0]["daily_factors"]["shareholder_number"]["holder_num"] == 88000
+    assert payload["items"][0]["daily_factors"]["shareholder_number"]["holder_num_change_pct"] < 0
+    assert payload["items"][0]["daily_factors"]["shareholder_trade"]["net_change_vol"] == 100.0
+    assert payload["items"][0]["daily_factors"]["shareholder_trade"]["net_change_ratio"] == 0.15
     assert payload["items"][0]["profile"]["industry"] == "白酒"
     assert payload["items"][0]["profile"]["area"] == "贵州"
     assert payload["coverage"]["profile_symbols"] == 1
@@ -371,6 +421,8 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert payload["coverage"]["margin_detail_symbols"] == 1
     assert payload["coverage"]["dragon_tiger_symbols"] == 1
     assert payload["coverage"]["block_trade_symbols"] == 1
+    assert payload["coverage"]["shareholder_number_symbols"] == 1
+    assert payload["coverage"]["shareholder_trade_symbols"] == 1
     assert payload["items"][0]["financial_factors"]["roe"] == 31.2
     assert payload["items"][0]["financial_factors"]["grossprofit_margin"] == 91.2
     assert payload["items"][0]["financial_factors"]["netprofit_yoy"] == 18.5
@@ -386,6 +438,8 @@ def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, t
     assert "margin_financing" in payload["items"][0]["factor_scores"]
     assert "dragon_tiger_flow" in payload["items"][0]["factor_scores"]
     assert "block_trade_flow" in payload["items"][0]["factor_scores"]
+    assert "shareholder_structure" in payload["items"][0]["factor_scores"]
+    assert "shareholder_trade" in payload["items"][0]["factor_scores"]
 
     _reset_state()
 

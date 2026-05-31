@@ -16,8 +16,7 @@ const router = createRouter({
     },
     {
       path: '/overview',
-      name: 'overview',
-      component: () => import('@/views/OverviewView.vue')
+      redirect: '/arena'
     },
     {
       path: '/arena',
@@ -30,19 +29,26 @@ const router = createRouter({
       component: () => import('@/views/ArenaAgentDetailView.vue')
     },
     {
+      path: '/stock-analysis',
+      name: 'stock-analysis',
+      component: () => import('@/views/StockAnalysisView.vue')
+    },
+    {
+      path: '/data-lab',
+      name: 'data-lab',
+      component: () => import('@/views/DataLabView.vue')
+    },
+    {
       path: '/tasks',
-      name: 'tasks',
-      component: () => import('@/views/TasksView.vue')
+      redirect: '/arena'
     },
     {
       path: '/chat',
-      name: 'chat',
-      component: () => import('@/views/ChatView.vue')
+      redirect: '/stock-analysis'
     },
     {
       path: '/schedule',
-      name: 'schedule',
-      component: () => import('@/views/ScheduleView.vue')
+      redirect: '/data-lab'
     },
     {
       path: '/settings',

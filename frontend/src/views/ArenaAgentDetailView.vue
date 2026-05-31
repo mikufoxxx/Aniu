@@ -251,9 +251,9 @@ onMounted(() => {
 
 .arena-agent-detail-summary div,
 .arena-agent-section-list article {
-  border: 1px solid rgba(145, 170, 214, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
   padding: 12px;
 }
 
@@ -261,14 +261,14 @@ onMounted(() => {
 .arena-agent-section-head span,
 .arena-agent-section-list small,
 .arena-agent-section-list p {
-  color: #9cb2cf;
+  color: #6b7280;
   font-size: 13px;
 }
 
 .arena-agent-detail-summary strong,
 .arena-agent-section-list strong {
   display: block;
-  color: #f7fbff;
+  color: #111827;
 }
 
 .arena-agent-detail-grid {
@@ -300,10 +300,10 @@ onMounted(() => {
 }
 
 .arena-agent-picks span {
-  border: 1px solid rgba(145, 170, 214, 0.14);
-  border-radius: 8px;
-  background: rgba(7, 14, 27, 0.52);
-  color: #bfd0ea;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #f9fafb;
+  color: #374151;
   padding: 6px 8px;
   font-size: 12px;
 }

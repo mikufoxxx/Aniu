@@ -56,7 +56,7 @@ const errorMessage = ref('')
 const submitting = ref(false)
 
 function resolvePostLoginPath() {
-  return consumeStoredLoginRedirect() || '/overview'
+  return consumeStoredLoginRedirect() || '/arena'
 }
 
 onMounted(() => {

@@ -5,10 +5,8 @@ export interface AppNavItem {
 }
 
 export const appNavigation: AppNavItem[] = [
-  { id: 'overview', name: '总览', path: '/overview' },
   { id: 'arena', name: 'AI竞技场', path: '/arena' },
-  { id: 'tasks', name: 'AI分析', path: '/tasks' },
-  { id: 'chat', name: 'AI聊天', path: '/chat' },
-  { id: 'schedule', name: '定时设置', path: '/schedule' },
-  { id: 'settings', name: '功能设置', path: '/settings' },
+  { id: 'stock-analysis', name: '股票分析', path: '/stock-analysis' },
+  { id: 'data-lab', name: '数据实验室', path: '/data-lab' },
+  { id: 'settings', name: '设置', path: '/settings' },
 ]

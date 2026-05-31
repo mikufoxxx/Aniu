@@ -33,8 +33,15 @@
             role="button"
             tabindex="0"
             @click="openAgent(agent.id)"
-            @keydown.enter="openAgent(agent.id)"
+            @keydown.enter.self="openAgent(agent.id)"
           >
+            <button
+              class="button ghost small arena-card-config"
+              type="button"
+              @click.stop="focusAgentConfig(agent.id)"
+            >
+              配置
+            </button>
             <div class="arena-rank">#{{ index + 1 }}</div>
             <div class="arena-agent-main">
               <div class="arena-agent-title">
@@ -75,7 +82,13 @@
           <button class="button ghost small" :disabled="saving" @click="addAgent">新增</button>
         </div>
         <div class="arena-agent-editor-list">
-          <label v-for="agent in agents" :key="agent.id" class="arena-agent-editor">
+          <label
+            v-for="agent in agents"
+            :id="agentEditorId(agent.id)"
+            :key="agent.id"
+            class="arena-agent-editor"
+            :class="{ 'is-selected': selectedConfigAgentId === agent.id }"
+          >
             <span>ID</span>
             <input v-model="agent.id" />
             <span>名称</span>
@@ -103,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaLeaderboardPayload } from '@/types'
@@ -117,6 +130,7 @@ const leaderboard = ref<ArenaLeaderboardPayload>({ items: [] })
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
+const selectedConfigAgentId = ref('')
 
 const rankedAgents = computed(() => {
   return agents.value
@@ -192,11 +206,13 @@ async function saveAgents(): Promise<void> {
 
 function addAgent(): void {
   const next = agents.value.length + 1
-  agents.value.push(normalizeAgent({
+  const agent = normalizeAgent({
     id: `custom_ai_${next}`,
     name: `自定义 AI ${next}`,
     style: 'balanced',
-  }))
+  })
+  agents.value.push(agent)
+  focusAgentConfig(agent.id)
 }
 
 function removeAgent(agentId: string): void {
@@ -215,6 +231,19 @@ function normalizeAgent(agent: ArenaAgentConfig): ArenaAgentConfig {
 
 function openAgent(agentId: string): void {
   router.push({ name: 'arena-agent-detail', params: { agentId } })
+}
+
+function focusAgentConfig(agentId: string): void {
+  selectedConfigAgentId.value = agentId
+  nextTick(() => {
+    const element = document.getElementById(agentEditorId(agentId))
+    element?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    element?.querySelector('input')?.focus()
+  })
+}
+
+function agentEditorId(agentId: string): string {
+  return `arena-agent-editor-${agentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
 function styleText(style: string): string {
@@ -296,6 +325,7 @@ onMounted(() => {
 }
 
 .arena-agent-row {
+  position: relative;
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) minmax(280px, 0.8fr);
   gap: 16px;
@@ -303,8 +333,15 @@ onMounted(() => {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #ffffff;
-  padding: 14px;
+  padding: 14px 88px 14px 14px;
   cursor: pointer;
+}
+
+.arena-card-config {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
 }
 
 .arena-agent-row:hover {
@@ -373,6 +410,11 @@ onMounted(() => {
   padding: 12px;
   color: #6b7280;
   font-size: 12px;
+}
+
+.arena-agent-editor.is-selected {
+  border-color: #111827;
+  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
 }
 
 .arena-agent-editor input,

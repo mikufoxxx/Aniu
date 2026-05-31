@@ -596,6 +596,17 @@ export interface ArenaAgentRecommendation {
   decision_context?: Record<string, unknown>
 }
 
+export interface ArenaAgentMemory {
+  id: number
+  agent_id: string
+  agent_name: string
+  style: string
+  memory_type: string
+  summary: string
+  metrics: Record<string, unknown>
+  created_at?: string | null
+}
+
 export interface ArenaLeaderboardItem {
   agent_id: string
   agent_name: string
@@ -627,6 +638,7 @@ export interface ArenaRunPayload {
   candidate_count: number
   candidates: QuantCandidate[]
   agent_recommendations: ArenaAgentRecommendation[]
+  agent_reviews: ArenaAgentMemory[]
   leaderboard: ArenaLeaderboardItem[]
   orders: ArenaOrder[]
   data_sources: string[]

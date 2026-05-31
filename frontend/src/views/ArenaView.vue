@@ -38,6 +38,14 @@
             >
               {{ loading ? '运行中…' : '盘中模拟' }}
             </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :class="{ 'is-loading': loading }"
+              :disabled="loading"
+              @click="runArena('closing_review')"
+            >
+              {{ loading ? '运行中…' : '收盘复盘' }}
+            </button>
           </div>
         </div>
 
@@ -525,6 +533,27 @@
             </div>
           </div>
         </div>
+        <div class="positions-surface" v-else-if="arenaResult?.agent_reviews.length">
+          <div class="arena-order-row arena-table-head">
+            <div>AI</div>
+            <div>类型</div>
+            <div>收益</div>
+            <div>资产</div>
+            <div>持仓</div>
+            <div>复盘</div>
+          </div>
+          <div v-for="item in arenaResult.agent_reviews" :key="item.id" class="arena-order-row">
+            <div>{{ item.agent_name }}</div>
+            <div>{{ item.memory_type }}</div>
+            <div>{{ reviewReturnText(item.metrics) }}</div>
+            <div>{{ reviewAssetText(item.metrics) }}</div>
+            <div>{{ reviewPositionText(item.metrics) }}</div>
+            <div class="arena-order-reason">
+              <span>{{ item.summary }}</span>
+              <small>{{ item.created_at || '--' }}</small>
+            </div>
+          </div>
+        </div>
         <div v-else class="empty-state">
           <p>暂无模拟交易记录。</p>
         </div>
@@ -771,7 +800,7 @@ async function generateReport(reportType: 'morning' | 'closing'): Promise<void> 
   }
 }
 
-async function runArena(phase: 'morning_recommendation' | 'intraday_trade'): Promise<void> {
+async function runArena(phase: 'morning_recommendation' | 'intraday_trade' | 'closing_review'): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
@@ -795,6 +824,28 @@ async function runArena(phase: 'morning_recommendation' | 'intraday_trade'): Pro
   } finally {
     loading.value = false
   }
+}
+
+function reviewLeaderboard(metrics: Record<string, unknown> | undefined): Record<string, unknown> {
+  const leaderboard = metrics?.leaderboard
+  return leaderboard && typeof leaderboard === 'object'
+    ? (leaderboard as Record<string, unknown>)
+    : {}
+}
+
+function reviewReturnText(metrics: Record<string, unknown> | undefined): string {
+  const value = reviewLeaderboard(metrics).return_ratio
+  return typeof value === 'number' ? `${(value * 100).toFixed(2)}%` : '--'
+}
+
+function reviewAssetText(metrics: Record<string, unknown> | undefined): string {
+  const value = reviewLeaderboard(metrics).total_assets
+  return typeof value === 'number' ? formatAmount(value) : '--'
+}
+
+function reviewPositionText(metrics: Record<string, unknown> | undefined): string {
+  const positions = reviewLeaderboard(metrics).positions
+  return Array.isArray(positions) ? `${positions.length} 只` : '--'
 }
 
 async function refreshDaily(): Promise<void> {

@@ -10,6 +10,7 @@ from app.schemas.aniu import (
     AIMarketContextResponse,
     AIStockPicksRequest,
     AIStockPicksResponse,
+    ArenaAgentMemoriesResponse,
     ArenaAgentRequest,
     ArenaRunRequest,
     ArenaRunResponse,
@@ -410,3 +411,13 @@ def delete_arena_agent(
     if result is None:
         raise HTTPException(status_code=404, detail="AI 选手不存在。")
     return result
+
+
+@router.get("/arena/agents/{agent_id}/memories", response_model=ArenaAgentMemoriesResponse)
+def list_arena_agent_memories(
+    agent_id: str,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentMemoriesResponse:
+    return {"memories": arena_service.recent_agent_memories(db, agent_id=agent_id, limit=limit)}

@@ -12,6 +12,7 @@ from app.db.models import (
     AppSettings,
     ArenaAccount,
     ArenaAgentConfig,
+    ArenaAgentMemory,
     ArenaOrder,
     ArenaPosition,
     ArenaRun,
@@ -101,7 +102,38 @@ class ArenaService:
                 "candidate_count": candidate_payload["candidate_count"],
                 "candidates": candidates,
                 "agent_recommendations": recommendations,
+                "agent_reviews": [],
                 "leaderboard": [],
+                "orders": [],
+                "data_sources": candidate_payload["data_sources"],
+                "stock_pick_snapshot": stock_pick_snapshot,
+            }
+
+        if normalized_phase == "closing_review":
+            reviews = self._closing_reviews(
+                db=db,
+                agents=active_agents,
+                candidates=candidates,
+                snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
+                data_sources=data_sources,
+            )
+            leaderboard = self.leaderboard(db)["items"]
+            arena_run.candidate_payload = {
+                **candidate_payload,
+                "agent_reviews": reviews,
+            }
+            arena_run.leaderboard_payload = leaderboard
+            db.add(arena_run)
+            db.commit()
+            return {
+                "run_id": arena_run.id,
+                "phase": normalized_phase,
+                "candidate_count": candidate_payload["candidate_count"],
+                "candidates": candidates,
+                "agent_recommendations": [],
+                "agent_reviews": reviews,
+                "leaderboard": leaderboard,
                 "orders": [],
                 "data_sources": candidate_payload["data_sources"],
                 "stock_pick_snapshot": stock_pick_snapshot,
@@ -133,6 +165,11 @@ class ArenaService:
                 stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
                 data_sources=data_sources,
                 app_settings=app_settings,
+                recent_memories=self.recent_agent_memories(
+                    db,
+                    agent_id=str(agent.get("id") or f"agent_{index + 1}"),
+                    limit=5,
+                ),
             )
             decision_generated_at = self._utcnow()
             if decision is not None:
@@ -186,6 +223,7 @@ class ArenaService:
             "candidate_count": candidate_payload["candidate_count"],
             "candidates": candidates,
             "agent_recommendations": [],
+            "agent_reviews": [],
             "leaderboard": leaderboard,
             "orders": orders,
             "data_sources": candidate_payload["data_sources"],
@@ -194,8 +232,8 @@ class ArenaService:
 
     def _normalize_phase(self, phase: str) -> str:
         normalized = str(phase or "intraday_trade").strip().lower()
-        if normalized not in {"morning_recommendation", "intraday_trade"}:
-            raise ValueError("竞技场阶段必须是 morning_recommendation 或 intraday_trade。")
+        if normalized not in {"morning_recommendation", "intraday_trade", "closing_review"}:
+            raise ValueError("竞技场阶段必须是 morning_recommendation、intraday_trade 或 closing_review。")
         return normalized
 
     def _morning_recommendations(
@@ -241,6 +279,50 @@ class ArenaService:
             )
         return recommendations
 
+    def _closing_reviews(
+        self,
+        *,
+        db: Session,
+        agents: list[dict[str, str]],
+        candidates: list[dict[str, Any]],
+        snapshot_id: str,
+        stock_pick_snapshot_id: str,
+        data_sources: list[str],
+    ) -> list[dict[str, Any]]:
+        reviews: list[dict[str, Any]] = []
+        for index, agent in enumerate(agents):
+            agent_id = str(agent.get("id") or f"agent_{index + 1}")
+            account = db.scalar(
+                select(ArenaAccount)
+                .options(selectinload(ArenaAccount.positions))
+                .where(ArenaAccount.agent_id == agent_id)
+            )
+            if account is None:
+                continue
+            self._mark_positions(account, candidates)
+            metrics = self._leaderboard_item(account, include_positions=True)
+            recent_orders = self._recent_orders(db, agent_id=agent_id, limit=10)
+            metrics_payload = {
+                "snapshot_id": snapshot_id,
+                "stock_pick_snapshot_id": stock_pick_snapshot_id,
+                "data_sources": data_sources,
+                "leaderboard": metrics,
+                "recent_orders": recent_orders,
+            }
+            summary = self._closing_summary(metrics=metrics, recent_orders=recent_orders)
+            memory = ArenaAgentMemory(
+                agent_id=agent_id,
+                agent_name=str(agent.get("name") or account.agent_name),
+                style=str(agent.get("style") or account.style),
+                memory_type="closing_review",
+                summary=summary,
+                metrics_payload=metrics_payload,
+            )
+            db.add(memory)
+            db.flush()
+            reviews.append(self._memory_payload(memory))
+        return reviews
+
     def leaderboard(self, db: Session) -> dict[str, Any]:
         accounts = db.scalars(
             select(ArenaAccount)
@@ -250,6 +332,21 @@ class ArenaService:
         items = [self._leaderboard_item(account, include_positions=True) for account in accounts]
         items.sort(key=lambda item: item["total_assets"], reverse=True)
         return {"items": items}
+
+    def recent_agent_memories(
+        self,
+        db: Session,
+        *,
+        agent_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        memories = db.scalars(
+            select(ArenaAgentMemory)
+            .where(ArenaAgentMemory.agent_id == agent_id)
+            .order_by(ArenaAgentMemory.id.desc())
+            .limit(max(1, min(limit, 100)))
+        ).all()
+        return [self._memory_payload(memory) for memory in memories]
 
     def list_agents(self, db: Session) -> dict[str, Any]:
         stored = db.scalars(
@@ -399,6 +496,7 @@ class ArenaService:
         stock_pick_snapshot_id: str,
         data_sources: list[str],
         app_settings: AppSettings,
+        recent_memories: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         if not candidates:
             return None
@@ -410,6 +508,7 @@ class ArenaService:
             snapshot_id=snapshot_id,
             data_sources=data_sources,
             app_settings=app_settings,
+            recent_memories=recent_memories,
         )
         if llm_decision is not None:
             if llm_decision["action"] == "SELL":
@@ -568,6 +667,7 @@ class ArenaService:
         snapshot_id: str,
         data_sources: list[str],
         app_settings: AppSettings,
+        recent_memories: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
         llm_config = self._resolve_llm_config(agent=agent, app_settings=app_settings)
         if llm_config is None:
@@ -594,6 +694,7 @@ class ArenaService:
                         positions=positions,
                         snapshot_id=snapshot_id,
                         data_sources=data_sources,
+                        recent_memories=recent_memories,
                     ),
                 },
             ],
@@ -720,6 +821,7 @@ class ArenaService:
         positions: list[ArenaPosition],
         snapshot_id: str,
         data_sources: list[str],
+        recent_memories: list[dict[str, Any]],
     ) -> str:
         prompt_payload = {
             "snapshot_id": snapshot_id,
@@ -732,6 +834,7 @@ class ArenaService:
                 "prompt": agent.get("prompt"),
             },
             "data_sources": data_sources,
+            "recent_memories": recent_memories,
             "positions": [
                 {
                     "symbol": position.symbol,
@@ -1032,6 +1135,61 @@ class ArenaService:
         if include_positions:
             payload["positions"] = position_payloads
         return payload
+
+    def _recent_orders(
+        self,
+        db: Session,
+        *,
+        agent_id: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        orders = db.scalars(
+            select(ArenaOrder)
+            .where(ArenaOrder.agent_id == agent_id)
+            .order_by(ArenaOrder.id.desc())
+            .limit(limit)
+        ).all()
+        return [
+            {
+                "id": order.id,
+                "action": order.action,
+                "symbol": order.symbol,
+                "name": order.name,
+                "quantity": order.quantity,
+                "price": order.price,
+                "amount": order.amount,
+                "reason": order.reason,
+                "created_at": order.created_at.isoformat() if order.created_at else None,
+            }
+            for order in orders
+        ]
+
+    def _closing_summary(
+        self,
+        *,
+        metrics: dict[str, Any],
+        recent_orders: list[dict[str, Any]],
+    ) -> str:
+        return_pct = float(metrics.get("return_ratio") or 0) * 100
+        position_count = len(metrics.get("positions") or [])
+        trade_count = len(recent_orders)
+        return (
+            f"{metrics['agent_name']} 收盘复盘：总资产 {metrics['total_assets']:.2f}，"
+            f"收益 {return_pct:.2f}%，现金 {metrics['cash']:.2f}，"
+            f"持仓 {position_count} 只，最近成交 {trade_count} 笔。"
+        )
+
+    def _memory_payload(self, memory: ArenaAgentMemory) -> dict[str, Any]:
+        return {
+            "id": memory.id,
+            "agent_id": memory.agent_id,
+            "agent_name": memory.agent_name,
+            "style": memory.style,
+            "memory_type": memory.memory_type,
+            "summary": memory.summary,
+            "metrics": memory.metrics_payload or {},
+            "created_at": memory.created_at.isoformat() if memory.created_at else None,
+        }
 
     def _select_affordable_candidate(
         self,

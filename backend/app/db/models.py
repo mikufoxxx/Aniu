@@ -672,6 +672,21 @@ class ArenaAgentConfig(Base):
     )
 
 
+class ArenaAgentMemory(Base):
+    __tablename__ = "arena_agent_memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String(64), index=True)
+    agent_name: Mapped[str] = mapped_column(String(120))
+    style: Mapped[str] = mapped_column(String(32), default="balanced")
+    memory_type: Mapped[str] = mapped_column(String(32), default="closing_review", index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    metrics_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+
+
 class ArenaAccount(Base):
     __tablename__ = "arena_accounts"
     __table_args__ = (

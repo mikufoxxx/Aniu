@@ -614,8 +614,11 @@ class ArenaAgentRequest(BaseModel):
     prompt: str = Field(default="", max_length=2000)
 
 
+ArenaPhase = Literal["morning_recommendation", "intraday_trade", "closing_review"]
+
+
 class ArenaRunRequest(BaseModel):
-    phase: Literal["morning_recommendation", "intraday_trade"] = "intraday_trade"
+    phase: ArenaPhase = "intraday_trade"
     symbols: list[str] | None = None
     agents: list[ArenaAgentRequest] | None = None
     initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
@@ -677,12 +680,28 @@ class ArenaLeaderboardResponse(BaseModel):
     items: list[ArenaLeaderboardItemRead] = Field(default_factory=list)
 
 
+class ArenaAgentMemoryRead(BaseModel):
+    id: int
+    agent_id: str
+    agent_name: str
+    style: str
+    memory_type: str
+    summary: str
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
+
+
+class ArenaAgentMemoriesResponse(BaseModel):
+    memories: list[ArenaAgentMemoryRead] = Field(default_factory=list)
+
+
 class ArenaRunResponse(BaseModel):
     run_id: int
     phase: str = "intraday_trade"
     candidate_count: int
     candidates: list[QuantCandidateRead]
     agent_recommendations: list[dict[str, Any]] = Field(default_factory=list)
+    agent_reviews: list[ArenaAgentMemoryRead] = Field(default_factory=list)
     leaderboard: list[ArenaLeaderboardItemRead]
     orders: list[ArenaOrderRead]
     data_sources: list[str]

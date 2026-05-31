@@ -13,6 +13,7 @@ from app.db.database import session_scope
 from app.db.models import (
     AppSettings,
     ArenaAccount,
+    ArenaAgentMemory,
     ArenaPosition,
     DailyBar,
     SectorBar,
@@ -1051,6 +1052,111 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     assert payload["agent_recommendations"][0]["decision_context"]["action"] == "WATCH"
     assert stored_run.phase == "morning_recommendation"
     assert stored_run.candidate_payload["agent_recommendations"][0]["agent_id"] == "momentum_ai"
+
+    _reset_state()
+
+
+def test_arena_closing_phase_records_agent_memory_and_reuses_it_in_prompt(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    calls: list[dict[str, object]] = []
+    quote_count = {"value": 0}
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        quote_count["value"] += 1
+        price = 10.0 if quote_count["value"] == 1 else 12.0
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": price,
+                "change_pct": 3.0 if price == 10.0 else 5.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:03",
+            }
+        ]
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        calls.append({"payload": payload})
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "BUY",
+                                "symbol": "000001.SZ",
+                                "allocation_ratio": 0.1,
+                                "reason": "读取记忆后继续小仓位跟踪。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            settings = db.query(AppSettings).first()
+            assert settings is not None
+            settings.llm_base_url = "https://llm.example/v1"
+            settings.llm_api_key = "llm-key"
+            settings.llm_model = "gpt-4o-mini"
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500))
+        run_payload = {
+            "symbols": ["000001.SZ"],
+            "initial_cash": 200000,
+            "agents": [
+                {
+                    "id": "memory_ai",
+                    "name": "记忆 AI",
+                    "style": "momentum",
+                    "provider": "openai-compatible",
+                    "model": "gpt-4o-mini",
+                    "prompt": "复盘后改进仓位。",
+                }
+            ],
+        }
+        first_run = client.post("/api/aniu/arena/run", headers=headers, json=run_payload)
+        closing = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={**run_payload, "phase": "closing_review"},
+        )
+        memories = client.get(
+            "/api/aniu/arena/agents/memory_ai/memories",
+            headers=headers,
+        )
+        second_run = client.post("/api/aniu/arena/run", headers=headers, json=run_payload)
+        with session_scope() as db:
+            stored_memory = db.query(ArenaAgentMemory).filter_by(agent_id="memory_ai").first()
+
+    assert first_run.status_code == 200
+    assert closing.status_code == 200
+    closing_payload = closing.json()
+    assert closing_payload["phase"] == "closing_review"
+    assert closing_payload["orders"] == []
+    assert closing_payload["agent_reviews"][0]["agent_id"] == "memory_ai"
+    assert closing_payload["agent_reviews"][0]["memory_type"] == "closing_review"
+    assert "收益" in closing_payload["agent_reviews"][0]["summary"]
+    assert memories.status_code == 200
+    assert memories.json()["memories"][0]["summary"] == closing_payload["agent_reviews"][0]["summary"]
+    assert second_run.status_code == 200
+    assert stored_memory is not None
+    last_prompt = json.loads(calls[-1]["payload"]["messages"][1]["content"])
+    assert last_prompt["recent_memories"][0]["summary"] == stored_memory.summary
 
     _reset_state()
 

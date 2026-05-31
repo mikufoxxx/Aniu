@@ -400,6 +400,26 @@ class AIMarketContextResponse(BaseModel):
     context_length: int
 
 
+class AIDataRequestRequest(BaseModel):
+    symbols: list[str] = Field(min_length=1, max_length=100)
+    dimensions: list[str] = Field(default_factory=list, max_length=12)
+    limit: int = Field(default=20, ge=1, le=100)
+    lookback_days: int = Field(default=1825, ge=1, le=1825)
+    prefer_realtime: bool = True
+    refresh: bool = False
+    end_date: str | None = None
+
+
+class AIDataRequestResponse(BaseModel):
+    requested_symbols: list[str]
+    requested_dimensions: list[str]
+    actions: list[dict[str, Any]]
+    refresh: dict[str, Any] | None = None
+    dataset: QuantDatasetResponse
+    context: str
+    context_length: int
+
+
 class AIStockPicksRequest(QuantDatasetRequest):
     pass
 

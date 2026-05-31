@@ -303,6 +303,17 @@ class AISelectionService:
             "temporal_window": temporal_window,
         }
 
+    def dimension_action(
+        self,
+        dimension: str,
+        plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._dimension_action(
+            dimension,
+            {"status": "requested", "summary": "on demand"},
+            plan or {},
+        )
+
     def _dimension_status(
         self,
         candidate: dict[str, Any],

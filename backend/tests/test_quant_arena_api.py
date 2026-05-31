@@ -804,6 +804,105 @@ def test_ai_stock_picker_uses_agent_specific_selection_plan(monkeypatch, tmp_pat
     _reset_state()
 
 
+def test_ai_data_request_endpoint_refreshes_requested_dimensions(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_maintenance_service import market_data_maintenance_service
+    from app.services.quant_service import quant_service
+
+    captured: dict[str, object] = {}
+
+    def fake_run_now(db, *, end_date=None, lookback_days=None, symbols=None, dataset_limit=None, report_type=None):
+        captured["maintenance"] = {
+            "end_date": end_date,
+            "lookback_days": lookback_days,
+            "symbols": symbols,
+            "dataset_limit": dataset_limit,
+            "report_type": report_type,
+        }
+        return {
+            "status": "completed",
+            "refresh": {"stored_count": 3},
+            "dataset": {"item_count": 1},
+        }
+
+    def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=1825):
+        captured["dataset"] = {
+            "symbols": symbols,
+            "limit": limit,
+            "prefer_realtime": prefer_realtime,
+            "lookback_days": lookback_days,
+        }
+        return {
+            "universe_size": 1,
+            "item_count": 1,
+            "lookback_days": lookback_days,
+            "data_sources": ["easy_tdx", "tushare_daily", "tushare_moneyflow"],
+            "coverage": {"daily_history_symbols": 1},
+            "items": [
+                {
+                    "symbol": "000001.SZ",
+                    "name": "平安银行",
+                    "price": 11.2,
+                    "change_pct": 1.5,
+                    "amount": 120000000,
+                    "turnover": 0.8,
+                    "volume_ratio": 1.1,
+                    "source": "easy_tdx",
+                    "timestamp": "2026-05-29 10:30:03",
+                    "score": 70,
+                    "factor_scores": {},
+                    "profile": {},
+                    "financial_factors": {},
+                    "daily_factors": {"bars_used": 30, "moneyflow_net_amount": 1200},
+                    "rationale": "测试数据",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(market_data_maintenance_service, "run_now", fake_run_now)
+    monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/market/ai-data-request",
+            headers=headers,
+            json={
+                "symbols": ["000001.SZ"],
+                "dimensions": ["daily_history", "moneyflow"],
+                "lookback_days": 30,
+                "limit": 1,
+                "refresh": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requested_symbols"] == ["000001.SZ"]
+    assert payload["requested_dimensions"] == ["daily_history", "moneyflow"]
+    assert payload["refresh"]["status"] == "completed"
+    assert captured["maintenance"] == {
+        "end_date": None,
+        "lookback_days": 30,
+        "symbols": ["000001.SZ"],
+        "dataset_limit": 1,
+        "report_type": None,
+    }
+    assert captured["dataset"] == {
+        "symbols": ["000001.SZ"],
+        "limit": 1,
+        "prefer_realtime": True,
+        "lookback_days": 30,
+    }
+    action_by_dimension = {item["dimension"]: item for item in payload["actions"]}
+    assert action_by_dimension["daily_history"]["refresh_endpoint"] == "/api/aniu/market/daily/refresh-range"
+    assert action_by_dimension["moneyflow"]["source"] == "tushare_moneyflow"
+    assert action_by_dimension["moneyflow"]["temporal_window"]["lookback_days"] == 30
+    assert payload["dataset"]["items"][0]["name"] == "平安银行"
+    assert payload["context_length"] > 0
+
+    _reset_state()
+
+
 def test_quant_dataset_uses_most_complete_stored_trade_date(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 

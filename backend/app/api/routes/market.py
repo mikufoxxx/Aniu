@@ -8,6 +8,8 @@ from app.db.database import get_db
 from app.schemas.aniu import (
     AIMarketContextRequest,
     AIMarketContextResponse,
+    AIDataRequestRequest,
+    AIDataRequestResponse,
     AIStockPicksRequest,
     AIStockPicksResponse,
     ArenaAgentDashboardResponse,
@@ -42,6 +44,7 @@ from app.schemas.aniu import (
     StockAnalysisResponse,
 )
 from app.services.ai_market_context_service import ai_market_context_service
+from app.services.ai_data_request_service import ai_data_request_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
@@ -121,6 +124,29 @@ def build_ai_market_context(
         return {"context": context, "context_length": len(context)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/market/ai-data-request", response_model=AIDataRequestResponse)
+def execute_ai_data_request(
+    payload: AIDataRequestRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> AIDataRequestResponse:
+    try:
+        return ai_data_request_service.execute(
+            db,
+            symbols=payload.symbols,
+            dimensions=payload.dimensions,
+            limit=payload.limit,
+            lookback_days=payload.lookback_days,
+            prefer_realtime=payload.prefer_realtime,
+            refresh=payload.refresh,
+            end_date=payload.end_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/ai/picks", response_model=AIStockPicksResponse)

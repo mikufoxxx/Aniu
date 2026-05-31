@@ -15,16 +15,49 @@ def _number(value: Any, default: float = 0.0) -> float:
 class AISelectionService:
     """AI-ready A-share selection context built from quote, daily and retail signals."""
 
-    def enrich(self, candidate: dict[str, Any]) -> dict[str, Any]:
+    def selection_plan(self, agent: dict[str, Any] | None = None) -> dict[str, Any]:
+        style = str((agent or {}).get("style") or "balanced").strip().lower()
+        if style == "momentum":
+            return {
+                "strategy": "momentum",
+                "label": "短线动量",
+                "dimensions": ["quote", "daily_history", "moneyflow", "sector_heat", "limit_event"],
+                "risk_checks": ["overheated_intraday", "below_ma20", "illiquid"],
+                "ranking_focus": ["recent_momentum", "volume_ratio", "moneyflow", "uptrend"],
+            }
+        if style == "risk_control":
+            return {
+                "strategy": "risk_control",
+                "label": "长线稳健",
+                "dimensions": ["quote", "daily_history", "financial_indicator", "valuation", "pledge_stat"],
+                "risk_checks": ["below_ma60", "pledge_risk", "high_retail_risk", "max_drawdown", "volatility"],
+                "ranking_focus": ["above_ma60", "low_risk", "retail_score", "financial_quality"],
+            }
+        return {
+            "strategy": "balanced",
+            "label": "量化轮动",
+            "dimensions": ["quote", "daily_history", "moneyflow", "valuation", "financial_indicator"],
+            "risk_checks": ["below_ma60", "overheated_intraday", "high_retail_risk"],
+            "ranking_focus": ["ai_selection_score", "retail_score", "moneyflow", "trend"],
+        }
+
+    def enrich(
+        self,
+        candidate: dict[str, Any],
+        selection_plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         item = dict(candidate)
+        plan = selection_plan or self.selection_plan()
         retail = a_share_retail_analysis_service.build(item)
         temporal = self._temporal_profile(item)
         risk_flags = self._risk_flags(item, retail, temporal)
         reasons = self._reasons(item, retail, temporal, risk_flags)
-        score = self._score(item, retail, temporal, risk_flags)
+        score = self._score(item, retail, temporal, risk_flags, plan)
         item["retail_analysis"] = retail
         item["ai_selection"] = {
             "score": score,
+            "strategy": plan["strategy"],
+            "plan": plan,
             "temporal_profile": temporal,
             "risk_flags": risk_flags,
             "selection_reasons": reasons,
@@ -38,6 +71,7 @@ class AISelectionService:
         retail: dict[str, Any],
         temporal: dict[str, Any],
         risk_flags: list[str],
+        plan: dict[str, Any],
     ) -> float:
         base_score = _number(candidate.get("score"))
         retail_score = _number(retail.get("overall_score"), 50.0)
@@ -56,7 +90,24 @@ class AISelectionService:
             score -= 8
         if temporal["volatility_pct"] >= 8:
             score -= 6
-        score -= len(risk_flags) * 7
+        strategy = str(plan.get("strategy") or "balanced")
+        if strategy == "momentum":
+            score += max(min(_number(candidate.get("change_pct")) * 1.2, 12), -6)
+            score += max(min(temporal["recent_momentum_pct"] * 1.1, 14), -8)
+            score -= len(risk_flags) * 4
+            if temporal["range_position_pct"] >= 95:
+                score -= 4
+        elif strategy == "risk_control":
+            score = score * 0.75 + retail_score * 0.25
+            if temporal["above_ma60"]:
+                score += 10
+            if temporal["volatility_pct"] <= 4:
+                score += 6
+            if temporal["range_position_pct"] >= 90:
+                score -= 10
+            score -= len(risk_flags) * 11
+        else:
+            score -= len(risk_flags) * 7
         return round(max(0.0, min(120.0, score)), 4)
 
     def _temporal_profile(self, candidate: dict[str, Any]) -> dict[str, Any]:

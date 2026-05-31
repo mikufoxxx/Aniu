@@ -679,6 +679,109 @@ def test_ai_stock_picker_reranks_with_temporal_retail_risk_context(
     _reset_state()
 
 
+def test_ai_stock_picker_uses_agent_specific_selection_plan(monkeypatch, tmp_path) -> None:
+    from app.services.ai_stock_picker_service import ai_stock_picker_service
+    from app.services.quant_service import quant_service
+
+    def candidate(
+        symbol: str,
+        *,
+        score: float,
+        change_pct: float,
+        recent_momentum: float,
+        range_position: float,
+        volatility: float,
+    ) -> dict[str, object]:
+        return {
+            "symbol": symbol,
+            "name": symbol,
+            "price": 20.0,
+            "change_pct": change_pct,
+            "amount": 900_000_000,
+            "turnover": 1.5,
+            "volume_ratio": 1.8,
+            "source": "easy_tdx",
+            "timestamp": "2026-05-29 10:30:03",
+            "score": score,
+            "factor_scores": {},
+            "profile": {},
+            "financial_factors": {},
+            "daily_factors": {
+                "latest_trade_date": "20260528",
+                "bars_used": 90,
+                "latest_close": 20.0,
+                "momentum_pct": recent_momentum * 2,
+                "recent_momentum_pct": recent_momentum,
+                "ma20": 18.0,
+                "ma60": 16.0,
+                "above_ma20": True,
+                "above_ma60": True,
+                "range_position_pct": range_position,
+                "max_drawdown_pct": -6.0,
+                "volatility_pct": volatility,
+                "moneyflow_net_amount": 3000,
+                "moneyflow_buy_lg_amount_rate": 4,
+            },
+            "rationale": "测试候选",
+        }
+
+    def fake_build_dataset(db, *, symbols=None, limit=50, prefer_realtime=True, lookback_days=1825):
+        items = [
+            candidate(
+                "000001.SZ",
+                score=82,
+                change_pct=8.0,
+                recent_momentum=12.0,
+                range_position=96.0,
+                volatility=7.0,
+            ),
+            candidate(
+                "600519.SH",
+                score=74,
+                change_pct=1.4,
+                recent_momentum=3.0,
+                range_position=72.0,
+                volatility=2.0,
+            ),
+        ]
+        return {
+            "universe_size": len(items),
+            "item_count": len(items),
+            "lookback_days": lookback_days,
+            "data_sources": ["easy_tdx", "tushare_daily", "tushare_moneyflow"],
+            "coverage": {"daily_history_symbols": len(items)},
+            "items": items,
+        }
+
+    monkeypatch.setattr(quant_service, "build_dataset", fake_build_dataset)
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            momentum = ai_stock_picker_service.build_snapshot(
+                db,
+                agent={"id": "m1", "name": "动量", "style": "momentum"},
+                limit=2,
+                lookback_days=1825,
+            )
+            risk_control = ai_stock_picker_service.build_snapshot(
+                db,
+                agent={"id": "r1", "name": "风控", "style": "risk_control"},
+                limit=2,
+                lookback_days=1825,
+            )
+
+    assert momentum["selection_plan"]["strategy"] == "momentum"
+    assert risk_control["selection_plan"]["strategy"] == "risk_control"
+    assert momentum["recommendations"][0]["symbol"] == "000001.SZ"
+    assert risk_control["recommendations"][0]["symbol"] == "600519.SH"
+    assert "quote" in momentum["selection_plan"]["dimensions"]
+    assert "pledge_risk" in risk_control["selection_plan"]["risk_checks"]
+    assert momentum["recommendations"][0]["ai_selection"]["strategy"] == "momentum"
+    assert risk_control["recommendations"][0]["ai_selection"]["strategy"] == "risk_control"
+
+    _reset_state()
+
+
 def test_quant_dataset_uses_most_complete_stored_trade_date(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 
@@ -856,7 +959,7 @@ def test_arena_run_reuses_autonomous_stock_pick_snapshot(
 def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path) -> None:
     from app.services.ai_stock_picker_service import ai_stock_picker_service
 
-    captured_requests: list[tuple[object, object, object, object]] = []
+    captured_requests: list[tuple[object, object, object, object, object]] = []
 
     def candidate(symbol: str, score: float) -> dict[str, object]:
         return {
@@ -882,8 +985,9 @@ def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path)
         limit=50,
         prefer_realtime=True,
         lookback_days=120,
+        agent=None,
     ):
-        captured_requests.append((symbols, limit, prefer_realtime, lookback_days))
+        captured_requests.append((symbols, limit, prefer_realtime, lookback_days, (agent or {}).get("style")))
         call_index = len(captured_requests)
         items = [candidate("600519.SH", 80), candidate("000001.SZ", 70)]
         return {
@@ -891,6 +995,7 @@ def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path)
             "selection_mode": "auto_universe",
             "data_sources": ["tencent", "tushare_daily"],
             "coverage": {},
+            "selection_plan": {"strategy": (agent or {}).get("style") or "balanced"},
             "dataset": {
                 "universe_size": 1000,
                 "item_count": len(items),
@@ -922,8 +1027,8 @@ def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path)
 
     assert response.status_code == 200
     assert captured_requests == [
-        (None, 1000, True, 1825),
-        (None, 1000, True, 1825),
+        (None, 1000, True, 1825, "momentum"),
+        (None, 1000, True, 1825, "balanced"),
     ]
     payload = response.json()
     assert payload["stock_pick_snapshot"] is None
@@ -941,7 +1046,7 @@ def test_arena_run_ignores_user_symbols_and_builds_independent_snapshot_per_agen
 ) -> None:
     from app.services.ai_stock_picker_service import ai_stock_picker_service
 
-    captured_requests: list[tuple[object, object, object, object]] = []
+    captured_requests: list[tuple[object, object, object, object, object]] = []
 
     def candidate(symbol: str, score: float) -> dict[str, object]:
         return {
@@ -967,8 +1072,9 @@ def test_arena_run_ignores_user_symbols_and_builds_independent_snapshot_per_agen
         limit=50,
         prefer_realtime=True,
         lookback_days=120,
+        agent=None,
     ):
-        captured_requests.append((symbols, limit, prefer_realtime, lookback_days))
+        captured_requests.append((symbols, limit, prefer_realtime, lookback_days, (agent or {}).get("style")))
         call_index = len(captured_requests)
         items = [candidate(f"60000{call_index}.SH", 80 - call_index)]
         return {
@@ -976,6 +1082,7 @@ def test_arena_run_ignores_user_symbols_and_builds_independent_snapshot_per_agen
             "selection_mode": "auto_universe" if symbols is None else "custom_symbols",
             "data_sources": ["tencent", "tushare_daily"],
             "coverage": {},
+            "selection_plan": {"strategy": (agent or {}).get("style") or "balanced"},
             "dataset": {
                 "universe_size": 1000,
                 "item_count": len(items),
@@ -1008,8 +1115,8 @@ def test_arena_run_ignores_user_symbols_and_builds_independent_snapshot_per_agen
 
     assert response.status_code == 200
     assert captured_requests == [
-        (None, 1000, True, 1825),
-        (None, 1000, True, 1825),
+        (None, 1000, True, 1825, "momentum"),
+        (None, 1000, True, 1825, "balanced"),
     ]
     payload = response.json()
     order_contexts = [order["decision_context"] for order in payload["orders"]]
@@ -1537,7 +1644,9 @@ def test_arena_order_context_includes_retail_a_share_analysis(monkeypatch, tmp_p
     assert context["retail_analysis"]["sell_plan"]["rule"]
     assert context["retail_analysis"]["dimension_scores"]
     assert context["selected_candidate"]["ai_selection"]["score"] > 0
+    assert context["selected_candidate"]["ai_selection"]["strategy"] == "balanced"
     assert context["selected_candidate"]["ai_selection"]["temporal_profile"]
+    assert context["selection_plan"]["strategy"] == "balanced"
 
     _reset_state()
 

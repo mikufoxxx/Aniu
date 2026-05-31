@@ -296,10 +296,12 @@ class ArenaService:
                 limit=limit,
                 prefer_realtime=True,
                 lookback_days=lookback_days,
+                agent=agent,
             )
             contexts[agent_id] = {
                 "stock_pick_snapshot": stock_pick_snapshot,
                 "stock_pick_snapshot_id": stock_pick_snapshot["snapshot_id"],
+                "selection_plan": stock_pick_snapshot.get("selection_plan") or {},
                 "candidates": stock_pick_snapshot["recommendations"],
                 "data_sources": list(stock_pick_snapshot.get("data_sources") or []),
             }
@@ -1245,6 +1247,7 @@ class ArenaService:
             },
             "action": action,
             "data_sources": data_sources,
+            "selection_plan": (candidate.get("ai_selection") or {}).get("plan") or {},
             "selected_candidate": {
                 "symbol": candidate.get("symbol"),
                 "name": candidate.get("name"),

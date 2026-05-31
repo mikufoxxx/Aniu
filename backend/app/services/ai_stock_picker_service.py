@@ -22,6 +22,7 @@ class AIStockPickerService:
         limit: int = 50,
         prefer_realtime: bool = True,
         lookback_days: int | None = None,
+        agent: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         normalized_lookback_days = int(
@@ -35,8 +36,9 @@ class AIStockPickerService:
             prefer_realtime=prefer_realtime,
             lookback_days=normalized_lookback_days,
         )
+        selection_plan = ai_selection_service.selection_plan(agent)
         enriched_items = [
-            ai_selection_service.enrich(item)
+            ai_selection_service.enrich(item, selection_plan)
             for item in dataset.get("items", [])
         ]
         enriched_items.sort(
@@ -51,6 +53,7 @@ class AIStockPickerService:
             "selection_mode": "custom_symbols" if normalized_symbols else "auto_universe",
             "data_sources": dataset["data_sources"],
             "coverage": coverage,
+            "selection_plan": selection_plan,
             "dataset": dataset,
             "recommendations": enriched_items,
             "context": context,

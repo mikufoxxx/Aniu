@@ -443,6 +443,7 @@ export interface AIStockPicksPayload {
   selection_mode: 'auto_universe' | 'custom_symbols'
   data_sources: string[]
   coverage: Record<string, unknown>
+  selection_plan: Record<string, unknown>
   dataset: QuantDatasetPayload
   recommendations: QuantCandidate[]
   context: string

@@ -409,6 +409,7 @@ class AIStockPicksResponse(BaseModel):
     selection_mode: Literal["auto_universe", "custom_symbols"]
     data_sources: list[str]
     coverage: dict[str, Any]
+    selection_plan: dict[str, Any] = Field(default_factory=dict)
     dataset: QuantDatasetResponse
     recommendations: list[QuantCandidateRead]
     context: str

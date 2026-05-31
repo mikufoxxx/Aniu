@@ -5,12 +5,6 @@
         <h1>AI 竞技场</h1>
         <p>每个 AI 独立选股、模拟交易、复盘和学习；首页只看排名与收益。</p>
       </div>
-      <div class="arena-actions">
-        <button class="button ghost small" :disabled="loading" @click="runArena('morning_recommendation')">早盘推荐</button>
-        <button class="button primary small" :disabled="loading" @click="runArena('intraday_trade')">盘中模拟</button>
-        <button class="button ghost small" :disabled="loading" @click="runArena('closing_review')">收盘复盘</button>
-        <button class="button ghost small" :disabled="loading" @click="runArena('nightly_learning')">夜间学习</button>
-      </div>
     </section>
 
     <div v-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
@@ -22,7 +16,10 @@
             <h2>AI 收益排名</h2>
             <p class="arena-muted">按总资产排序；点击卡片进入 AI 的早盘、盘中、收盘、学习详情。</p>
           </div>
-          <button class="button ghost small" :disabled="loading" @click="loadArenaState">刷新</button>
+          <div class="arena-panel-actions">
+            <button class="button ghost small" :disabled="saving" @click="addAgent">新增 AI</button>
+            <button class="button ghost small" :disabled="loading" @click="loadArenaState">刷新</button>
+          </div>
         </div>
 
         <div class="arena-agent-list">
@@ -38,7 +35,7 @@
             <button
               class="button ghost small arena-card-config"
               type="button"
-              @click.stop="focusAgentConfig(agent.id)"
+              @click.stop="openAgentConfig(agent.id)"
             >
               配置
             </button>
@@ -73,55 +70,60 @@
         </div>
       </section>
 
-      <aside class="panel arena-side-panel">
+    </section>
+
+    <div v-if="configAgent" class="arena-config-overlay" @click.self="closeAgentConfig">
+      <section class="arena-config-modal panel">
         <div class="panel-head">
           <div>
-            <h2>AI 选手</h2>
-            <p class="arena-muted">只保留竞技场需要的配置。</p>
+            <h2>配置 AI</h2>
+            <p class="arena-muted">只修改当前 AI 的竞技场参数。</p>
           </div>
-          <button class="button ghost small" :disabled="saving" @click="addAgent">新增</button>
+          <button class="button ghost small" type="button" @click="closeAgentConfig">关闭</button>
         </div>
-        <div class="arena-agent-editor-list">
-          <label
-            v-for="agent in agents"
-            :id="agentEditorId(agent.id)"
-            :key="agent.id"
-            class="arena-agent-editor"
-            :class="{ 'is-selected': selectedConfigAgentId === agent.id }"
-          >
+
+        <div class="arena-agent-editor">
+          <label>
             <span>ID</span>
-            <input v-model="agent.id" />
+            <input v-model="configAgent.id" />
+          </label>
+          <label>
             <span>名称</span>
-            <input v-model="agent.name" />
+            <input v-model="configAgent.name" />
+          </label>
+          <label>
             <span>风格</span>
-            <select v-model="agent.style">
+            <select v-model="configAgent.style">
               <option value="momentum">短线动量</option>
               <option value="balanced">量化轮动</option>
               <option value="risk_control">长线稳健</option>
             </select>
+          </label>
+          <label>
             <span>模型</span>
-            <input v-model="agent.model" placeholder="deepseek-chat" />
-            <div class="arena-editor-actions">
-              <label class="arena-enable"><input v-model="agent.enabled" type="checkbox" /> 启用</label>
-              <button class="button ghost small" type="button" @click="removeAgent(agent.id)">删除</button>
-            </div>
+            <input v-model="configAgent.model" placeholder="deepseek-chat" />
+          </label>
+          <label class="arena-enable">
+            <input v-model="configAgent.enabled" type="checkbox" /> 启用
           </label>
         </div>
-        <button class="button primary arena-save-button" :disabled="saving" @click="saveAgents">
-          {{ saving ? '保存中...' : '保存 AI 配置' }}
-        </button>
-      </aside>
-    </section>
+
+        <div class="arena-modal-actions">
+          <button class="button ghost small" type="button" @click="removeConfigAgent">删除</button>
+          <button class="button primary small" :disabled="saving" type="button" @click="saveConfigAgent">
+            {{ saving ? '保存中...' : '保存配置' }}
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaLeaderboardPayload } from '@/types'
-
-type ArenaPhase = 'morning_recommendation' | 'intraday_trade' | 'closing_review' | 'nightly_learning'
 
 const router = useRouter()
 const agents = ref<ArenaAgentConfig[]>([])
@@ -130,7 +132,7 @@ const leaderboard = ref<ArenaLeaderboardPayload>({ items: [] })
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
-const selectedConfigAgentId = ref('')
+const configAgentIndex = ref(-1)
 
 const rankedAgents = computed(() => {
   return agents.value
@@ -174,21 +176,7 @@ async function loadArenaState(): Promise<void> {
   }
 }
 
-async function runArena(phase: ArenaPhase): Promise<void> {
-  loading.value = true
-  errorMessage.value = ''
-  try {
-    await api.runArena({
-      phase,
-      initial_cash: 200000,
-    })
-    await loadArenaState()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '竞技场运行失败。'
-  } finally {
-    loading.value = false
-  }
-}
+const configAgent = computed(() => agents.value[configAgentIndex.value] ?? null)
 
 async function saveAgents(): Promise<void> {
   saving.value = true
@@ -212,11 +200,13 @@ function addAgent(): void {
     style: 'balanced',
   })
   agents.value.push(agent)
-  focusAgentConfig(agent.id)
+  configAgentIndex.value = agents.value.length - 1
 }
 
 function removeAgent(agentId: string): void {
+  const activeAgent = configAgent.value
   agents.value = agents.value.filter((agent) => agent.id !== agentId)
+  if (activeAgent?.id === agentId) configAgentIndex.value = -1
 }
 
 function normalizeAgent(agent: ArenaAgentConfig): ArenaAgentConfig {
@@ -233,17 +223,24 @@ function openAgent(agentId: string): void {
   router.push({ name: 'arena-agent-detail', params: { agentId } })
 }
 
-function focusAgentConfig(agentId: string): void {
-  selectedConfigAgentId.value = agentId
-  nextTick(() => {
-    const element = document.getElementById(agentEditorId(agentId))
-    element?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    element?.querySelector('input')?.focus()
-  })
+function openAgentConfig(agentId: string): void {
+  configAgentIndex.value = agents.value.findIndex((agent) => agent.id === agentId)
 }
 
-function agentEditorId(agentId: string): string {
-  return `arena-agent-editor-${agentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+function closeAgentConfig(): void {
+  configAgentIndex.value = -1
+}
+
+async function saveConfigAgent(): Promise<void> {
+  await saveAgents()
+  closeAgentConfig()
+}
+
+async function removeConfigAgent(): Promise<void> {
+  if (!configAgent.value) return
+  agents.value.splice(configAgentIndex.value, 1)
+  closeAgentConfig()
+  await saveAgents()
 }
 
 function styleText(style: string): string {
@@ -304,22 +301,19 @@ onMounted(() => {
   font-size: 13px;
 }
 
-.arena-actions,
-.arena-editor-actions {
+.arena-panel-actions,
+.arena-editor-actions,
+.arena-modal-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
 .arena-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 14px;
-  align-items: start;
+  display: block;
 }
 
-.arena-agent-list,
-.arena-agent-editor-list {
+.arena-agent-list {
   display: grid;
   gap: 10px;
 }
@@ -402,19 +396,18 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.arena-agent-editor {
+.arena-agent-editor,
+.arena-agent-editor label {
   display: grid;
   gap: 7px;
+}
+
+.arena-agent-editor {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 10px;
   color: #6b7280;
   font-size: 12px;
-}
-
-.arena-agent-editor.is-selected {
-  border-color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
 }
 
 .arena-agent-editor input,
@@ -434,8 +427,24 @@ onMounted(() => {
   color: #374151;
 }
 
-.arena-save-button {
-  width: 100%;
+.arena-config-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(17, 24, 39, 0.28);
+}
+
+.arena-config-modal {
+  width: min(460px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+
+.arena-modal-actions {
+  justify-content: flex-end;
   margin-top: 12px;
 }
 

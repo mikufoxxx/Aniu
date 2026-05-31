@@ -127,6 +127,12 @@
                 <p v-if="orderForecasts[order.id]" class="ai-forecast-summary">
                   {{ orderForecasts[order.id].quantitative_summary }}
                 </p>
+                <div v-if="orderForecasts[order.id]" class="ai-forecast-config">
+                  <span>接口 {{ orderForecasts[order.id].ai_config.base_url || '--' }}</span>
+                  <span>Key {{ apiKeyStatus(orderForecasts[order.id].ai_config.api_key_configured, orderForecasts[order.id].ai_config.api_key_masked) }}</span>
+                  <span>模型 {{ modelConfigText(orderForecasts[order.id].ai_config.models) }}</span>
+                  <span>生成 {{ generatedAtText(orderForecasts[order.id].generated_at) }}</span>
+                </div>
                 <div v-if="isForecastLoading(order.id)" class="ai-forecast-loading">
                   正在让 5 个模型基于同一份量化底稿独立预测…
                 </div>
@@ -151,6 +157,11 @@
                         <span :class="['ai-direction-pill', directionClass(forecast.direction)]">
                           {{ forecast.direction_label }} · {{ forecast.confidence.toFixed(0) }}
                         </span>
+                      </div>
+                      <div class="ai-forecast-card-config">
+                        <span>接口 {{ orderForecasts[order.id].ai_config.base_url || '--' }}</span>
+                        <span>Key {{ apiKeyStatus(orderForecasts[order.id].ai_config.api_key_configured, orderForecasts[order.id].ai_config.api_key_masked) }}</span>
+                        <span>生成 {{ generatedAtText(orderForecasts[order.id].generated_at) }}</span>
                       </div>
                       <div class="ai-forecast-price-grid">
                         <div>
@@ -357,6 +368,11 @@ async function loadPrimaryOrderForecast(): Promise<void> {
 async function loadOrderForecast(orderId: number, refresh = false): Promise<void> {
   orderForecastLoading.value = { ...orderForecastLoading.value, [orderId]: true }
   orderForecastErrors.value = { ...orderForecastErrors.value, [orderId]: '' }
+  if (refresh) {
+    const nextForecasts = { ...orderForecasts.value }
+    delete nextForecasts[orderId]
+    orderForecasts.value = nextForecasts
+  }
   try {
     const forecast = await api.getArenaOrderForecast(orderId, { refresh })
     orderForecasts.value = { ...orderForecasts.value, [orderId]: forecast }
@@ -415,6 +431,29 @@ function forecastStatusText(status: string): string {
   if (status === 'live_ai') return 'AI 实时生成'
   if (status === 'model_error_fallback') return '模型异常，使用量化底稿'
   return '量化底稿'
+}
+
+function apiKeyStatus(configured: boolean | undefined, masked: string | undefined): string {
+  return configured ? masked || '已配置' : '未配置'
+}
+
+function modelConfigText(models: string[] | undefined): string {
+  if (!Array.isArray(models) || !models.length) return '--'
+  return models.join(' / ')
+}
+
+function generatedAtText(value: string | undefined): string {
+  if (!value) return '--'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleString('zh-CN', {
+    hour12: false,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 function formatAmount(value: number | null | undefined): string {
@@ -592,6 +631,7 @@ watch(activeSection, () => {
 }
 
 .ai-forecast-context,
+.ai-forecast-config,
 .ai-forecast-risk {
   display: flex;
   flex-wrap: wrap;
@@ -599,11 +639,24 @@ watch(activeSection, () => {
 }
 
 .ai-forecast-context span,
+.ai-forecast-config span,
 .ai-forecast-risk span {
   border: 1px solid #e5e7eb;
   border-radius: 999px;
   background: #f9fafb;
   padding: 5px 8px;
+}
+
+.ai-forecast-config {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.ai-forecast-config span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .ai-forecast-model-grid {
@@ -626,6 +679,19 @@ watch(activeSection, () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ai-forecast-card-config {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 7px 8px;
+}
+
+.ai-forecast-card-config span {
+  overflow-wrap: anywhere;
 }
 
 .ai-direction-pill {

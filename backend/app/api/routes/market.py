@@ -15,6 +15,7 @@ from app.schemas.aniu import (
     ArenaAgentDashboardResponse,
     ArenaAgentMemoriesResponse,
     ArenaAgentRequest,
+    ArenaAIConfigResponse,
     ArenaOrderForecastResponse,
     ArenaRunRequest,
     ArenaRunResponse,
@@ -48,6 +49,7 @@ from app.schemas.aniu import (
 )
 from app.services.ai_market_context_service import ai_market_context_service
 from app.services.ai_data_request_service import ai_data_request_service
+from app.services.ai_forecast_service import ai_forecast_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
@@ -365,6 +367,8 @@ def analyze_stock(
             db,
             symbol=payload.symbol,
             initial_cash=payload.initial_cash,
+            model=payload.model,
+            skill_id=payload.skill_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -406,6 +410,13 @@ def list_arena_agents(
     _user: str = Depends(get_current_user),
 ) -> ArenaAgentsResponse:
     return arena_service.list_agents(db)
+
+
+@router.get("/arena/ai-config", response_model=ArenaAIConfigResponse)
+def get_arena_ai_config(
+    _user: str = Depends(get_current_user),
+) -> ArenaAIConfigResponse:
+    return ai_forecast_service.public_config()
 
 
 @router.post("/arena/agents", response_model=ArenaAgentRequest)

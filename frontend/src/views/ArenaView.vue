@@ -44,6 +44,20 @@
               <div class="arena-agent-title">
                 <strong>{{ agent.name }}</strong>
                 <span>{{ styleText(agent.style) }} · {{ agent.model || '默认模型' }}</span>
+                <div class="arena-model-meta">
+                  <span>
+                    <span class="material-symbols-rounded" aria-hidden="true">hub</span>
+                    {{ agent.provider || 'openai-compatible' }}
+                  </span>
+                  <span>
+                    <span class="material-symbols-rounded" aria-hidden="true">link</span>
+                    {{ aiConfig.base_url || '--' }}
+                  </span>
+                  <span>
+                    <span class="material-symbols-rounded" aria-hidden="true">key</span>
+                    {{ aiConfig.api_key_configured ? aiConfig.api_key_masked : '未配置' }}
+                  </span>
+                </div>
               </div>
               <div class="arena-pick-chips">
                 <span v-for="pick in agent.latestPicks" :key="pick.symbol">
@@ -110,9 +124,23 @@
             </select>
           </label>
           <label>
-            <span>模型</span>
-            <input v-model="configAgent.model" placeholder="deepseek-chat" />
+            <span>服务商</span>
+            <input v-model="configAgent.provider" placeholder="forecast-ai" />
           </label>
+          <label>
+            <span>模型</span>
+            <select v-model="configAgent.model">
+              <option value="">默认模型</option>
+              <option v-for="model in aiConfig.models" :key="model" :value="model">
+                {{ model }}
+              </option>
+            </select>
+          </label>
+          <div class="arena-config-summary">
+            <span>接口 {{ aiConfig.base_url || '--' }}</span>
+            <span>Key {{ aiConfig.api_key_configured ? aiConfig.api_key_masked : '未配置' }}</span>
+            <span>已配置模型 {{ aiConfig.models.length }}</span>
+          </div>
           <label class="arena-enable">
             <input v-model="configAgent.enabled" type="checkbox" /> 启用
           </label>
@@ -137,12 +165,19 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaLeaderboardPayload } from '@/types'
+import type { ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload } from '@/types'
 
 const router = useRouter()
 const agents = ref<ArenaAgentConfig[]>([])
 const dashboards = ref<Record<string, ArenaAgentDashboardPayload>>({})
 const leaderboard = ref<ArenaLeaderboardPayload>({ items: [] })
+const aiConfig = ref<ArenaAIConfigPayload>({
+  base_url: '',
+  api_key_configured: false,
+  api_key_masked: '未配置',
+  models: [],
+  model_count: 0,
+})
 const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
@@ -169,12 +204,14 @@ async function loadArenaState(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [agentPayload, leaderboardPayload] = await Promise.all([
+    const [agentPayload, leaderboardPayload, configPayload] = await Promise.all([
       api.getArenaAgents(),
       api.getArenaLeaderboard(),
+      api.getArenaAIConfig(),
     ])
     agents.value = agentPayload.agents.map(normalizeAgent)
     leaderboard.value = leaderboardPayload
+    aiConfig.value = configPayload
     const entries = await Promise.allSettled(
       agents.value.map(async (agent) => [agent.id, await api.getArenaAgentDashboard(agent.id)] as const),
     )
@@ -226,7 +263,7 @@ function removeAgent(agentId: string): void {
 function normalizeAgent(agent: ArenaAgentConfig): ArenaAgentConfig {
   return {
     ...agent,
-    provider: agent.provider ?? 'openai-compatible',
+    provider: agent.provider ?? 'forecast-ai',
     model: agent.model ?? '',
     enabled: agent.enabled ?? true,
     prompt: agent.prompt ?? '',
@@ -396,6 +433,29 @@ onMounted(() => {
   font-size: 12px;
 }
 
+.arena-model-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.arena-model-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #ececf1;
+  border-radius: 999px;
+  background: #f7f7f5;
+  color: #4b5563;
+  padding: 4px 7px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.arena-model-meta .material-symbols-rounded {
+  font-size: 14px;
+}
+
 .arena-pick-chips {
   display: flex;
   flex-wrap: wrap;
@@ -468,6 +528,20 @@ onMounted(() => {
   background: #ffffff;
   color: #111827;
   padding: 8px 10px;
+}
+
+.arena-config-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.arena-config-summary span {
+  border: 1px solid #ececf1;
+  border-radius: 999px;
+  background: #f7f7f5;
+  color: #4b5563;
+  padding: 5px 8px;
 }
 
 .arena-enable {

@@ -39,6 +39,13 @@ const defaultSettings = (): SettingsPayload => ({
   llm_model: 'gpt-4o-mini',
   llm_provider_configs: {},
   automation_context_window_tokens: 128000,
+  forecast_ai_config: {
+    base_url: '',
+    api_key_configured: false,
+    api_key_masked: '未配置',
+    models: [],
+    model_count: 0,
+  },
   system_prompt: '你是跨越完整牛熊周期的顶尖私募投资机构老将与极度理性的专业交易员，你深谙A股政策驱动、外资流动与资金博弈机制。你必须持续运行以下自我驱动循环，监控经济、政策、盘面数据及资金流向，研判周期位置与市场情绪，寻找共识与预期差，定性博弈逻辑，自主决策执行交易操作。你的唯一目标是追求收益最大化。',
 })
 
@@ -176,6 +183,7 @@ export const useAppStore = defineStore('app', () => {
     settings.llm_model = payload.llm_model
     settings.llm_provider_configs = payload.llm_provider_configs ?? {}
     settings.automation_context_window_tokens = payload.automation_context_window_tokens ?? 128000
+    settings.forecast_ai_config = payload.forecast_ai_config ?? defaultSettings().forecast_ai_config
     settings.system_prompt = payload.system_prompt
   }
 
@@ -285,8 +293,9 @@ export const useAppStore = defineStore('app', () => {
     errorMessage.value = ''
 
     try {
+      const { forecast_ai_config: _forecastAIConfig, ...editableSettings } = settings
       const payload = await api.updateSettings({
-        ...settings,
+        ...editableSettings,
         mx_api_key: settings.mx_api_key || null,
         tushare_token: settings.tushare_token || null,
         tushare_api_url: settings.tushare_api_url || null,

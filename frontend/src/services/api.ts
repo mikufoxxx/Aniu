@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaOrderForecastPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload, ArenaOrderForecastPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -217,7 +217,7 @@ export const api = {
   getSettings() {
     return request<AppSettings>(`${API_PREFIX}/settings`)
   },
-  updateSettings(payload: Omit<AppSettings, 'id' | 'created_at' | 'updated_at'>) {
+  updateSettings(payload: Omit<AppSettings, 'id' | 'created_at' | 'updated_at' | 'forecast_ai_config'>) {
     return request<AppSettings>(`${API_PREFIX}/settings`, {
       method: 'PUT',
       body: JSON.stringify(payload),
@@ -480,7 +480,7 @@ export const api = {
       timeoutMs: 60000,
     })
   },
-  analyzeStock(payload: { symbol: string; initial_cash?: number }) {
+  analyzeStock(payload: { symbol: string; initial_cash?: number; model?: string; skill_id?: string }) {
     return request<StockAnalysisPayload>(`${API_PREFIX}/stocks/analyze`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -489,6 +489,9 @@ export const api = {
   },
   getArenaAgents() {
     return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents`)
+  },
+  getArenaAIConfig() {
+    return request<ArenaAIConfigPayload>(`${API_PREFIX}/arena/ai-config`)
   },
   createArenaAgent(payload: ArenaAgentConfig) {
     return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents`, {

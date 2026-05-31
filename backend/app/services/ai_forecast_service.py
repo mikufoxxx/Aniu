@@ -22,6 +22,13 @@ DEFAULT_FORECAST_MODELS = [
 
 
 class AIForecastService:
+    def public_config(self) -> dict[str, Any]:
+        return self._public_ai_config(self.internal_config())
+
+    def internal_config(self) -> dict[str, Any]:
+        models = self._configured_models()
+        return self._ai_config(models)
+
     def analyze_order(
         self,
         *,
@@ -41,8 +48,10 @@ class AIForecastService:
             technical_context=technical_context,
         )
         models = self._configured_models()
+        ai_config = self._ai_config(models)
         model_forecasts = self.model_forecasts(
             models=models,
+            ai_config=ai_config,
             order_id=order_id,
             symbol=symbol,
             name=name,
@@ -60,6 +69,7 @@ class AIForecastService:
             "action": action,
             "technical_context": technical_context,
             "quantitative_summary": quantitative_summary,
+            "ai_config": self._public_ai_config(ai_config),
             "methodology": [
                 "日线趋势：MA5/MA20、多周期动量、线性回归斜率",
                 "风险区间：近20日波动率、支撑压力、波动锥上下沿",
@@ -174,6 +184,7 @@ class AIForecastService:
         self,
         *,
         models: list[str],
+        ai_config: dict[str, Any],
         order_id: int,
         symbol: str,
         name: str,
@@ -184,9 +195,8 @@ class AIForecastService:
         technical_context: dict[str, Any],
         quantitative_summary: str,
     ) -> list[dict[str, Any]]:
-        settings = get_settings()
-        base_url = str(settings.forecast_ai_base_url or settings.openai_base_url or "").strip()
-        api_key = str(settings.forecast_ai_api_key or settings.openai_api_key or "").strip()
+        base_url = str(ai_config.get("base_url") or "").strip()
+        api_key = str(ai_config.get("api_key") or "").strip()
         fallback_cards = {
             model: self._fallback_card(model=model, technical_context=technical_context, status="quant_fallback")
             for model in models
@@ -404,6 +414,36 @@ class AIForecastService:
         raw = str(settings.forecast_ai_models or "").strip()
         models = [item.strip() for item in raw.split(",") if item.strip()]
         return models or DEFAULT_FORECAST_MODELS
+
+    def _ai_config(self, models: list[str]) -> dict[str, Any]:
+        settings = get_settings()
+        base_url = str(settings.forecast_ai_base_url or settings.openai_base_url or "").strip()
+        api_key = str(settings.forecast_ai_api_key or settings.openai_api_key or "").strip()
+        return {
+            "base_url": base_url,
+            "api_key": api_key,
+            "display_base_url": base_url,
+            "api_key_configured": bool(api_key),
+            "api_key_masked": self._mask_key(api_key),
+            "models": models,
+            "model_count": len(models),
+        }
+
+    def _public_ai_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "base_url": config.get("display_base_url") or "",
+            "api_key_configured": bool(config.get("api_key_configured")),
+            "api_key_masked": config.get("api_key_masked") or "未配置",
+            "models": list(config.get("models") or []),
+            "model_count": int(config.get("model_count") or 0),
+        }
+
+    def _mask_key(self, value: str) -> str:
+        if not value:
+            return "未配置"
+        if len(value) <= 10:
+            return f"{value[:2]}***{value[-2:]}"
+        return f"{value[:6]}...{value[-6:]}"
 
     def _extract_json(self, response: dict[str, Any]) -> dict[str, Any]:
         content = (

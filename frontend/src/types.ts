@@ -1,3 +1,11 @@
+export interface ForecastAIConfig {
+  base_url: string
+  api_key_configured: boolean
+  api_key_masked: string
+  models: string[]
+  model_count: number
+}
+
 export interface AppSettings {
   id: number
   provider_name: string
@@ -10,6 +18,7 @@ export interface AppSettings {
   llm_provider_configs: Record<string, Record<string, unknown>>
   automation_context_window_tokens: number | null
   system_prompt: string
+  forecast_ai_config: ForecastAIConfig
   created_at: string
   updated_at: string
 }
@@ -662,6 +671,13 @@ export interface ArenaOrderForecastPayload {
   action: string
   technical_context: Record<string, unknown>
   quantitative_summary: string
+  ai_config: {
+    base_url?: string
+    api_key_configured?: boolean
+    api_key_masked?: string
+    models?: string[]
+    model_count?: number
+  }
   methodology: string[]
   model_forecasts: AIForecastCard[]
   generated_at: string
@@ -748,6 +764,8 @@ export interface ArenaAgentConfig {
 export interface ArenaAgentsPayload {
   agents: ArenaAgentConfig[]
 }
+
+export type ArenaAIConfigPayload = ForecastAIConfig
 
 export interface ArenaOrder {
   id: number
@@ -893,6 +911,17 @@ export interface StockAnalysisPayload {
   decision: Record<string, unknown>
   retail_analysis: Record<string, unknown>
   llm_decision: Record<string, unknown>
+  analysis_config: {
+    ai_config?: ForecastAIConfig
+    selected_model?: string
+    selected_skill?: {
+      id: string
+      name: string
+      description?: string
+      source?: string
+      run_types?: string[]
+    } | null
+  }
   data_sources: string[]
   context: string
   stock_pick_snapshot?: AIStockPicksPayload | null

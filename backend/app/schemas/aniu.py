@@ -52,6 +52,7 @@ class AppSettingsRead(AppSettingsBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    forecast_ai_config: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def mask_sensitive_fields(self) -> "AppSettingsRead":
@@ -692,6 +693,7 @@ class ArenaOrderForecastResponse(BaseModel):
     action: str
     technical_context: dict[str, Any] = Field(default_factory=dict)
     quantitative_summary: str
+    ai_config: dict[str, Any] = Field(default_factory=dict)
     methodology: list[str] = Field(default_factory=list)
     model_forecasts: list[dict[str, Any]] = Field(default_factory=list)
     generated_at: str
@@ -779,6 +781,14 @@ class ArenaAgentsUpdateRequest(BaseModel):
 
 class ArenaAgentsResponse(BaseModel):
     agents: list[ArenaAgentRequest] = Field(default_factory=list)
+
+
+class ArenaAIConfigResponse(BaseModel):
+    base_url: str = ""
+    api_key_configured: bool = False
+    api_key_masked: str = "未配置"
+    models: list[str] = Field(default_factory=list)
+    model_count: int = 0
 
 
 class ArenaOrderRead(BaseModel):
@@ -872,6 +882,8 @@ class ArenaRunResponse(BaseModel):
 class StockAnalysisRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=16)
     initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
+    model: str | None = Field(default=None, max_length=128)
+    skill_id: str | None = Field(default=None, max_length=128)
 
 
 class StockAnalysisResponse(BaseModel):
@@ -885,6 +897,7 @@ class StockAnalysisResponse(BaseModel):
     decision: dict[str, Any] = Field(default_factory=dict)
     retail_analysis: dict[str, Any] = Field(default_factory=dict)
     llm_decision: dict[str, Any] = Field(default_factory=dict)
+    analysis_config: dict[str, Any] = Field(default_factory=dict)
     data_sources: list[str]
     context: str
     stock_pick_snapshot: AIStockPicksResponse | None = None

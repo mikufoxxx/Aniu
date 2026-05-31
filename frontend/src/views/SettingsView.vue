@@ -57,6 +57,22 @@
             </label>
           </div>
           <div class="settings-right">
+            <div class="settings-ai-config">
+              <div>
+                <span class="meta-label">AI 竞技场 / 股票分析</span>
+                <strong>已配置模型 {{ settings.forecast_ai_config.model_count }}</strong>
+              </div>
+              <div class="settings-ai-config-grid">
+                <span>接口</span>
+                <b>{{ settings.forecast_ai_config.base_url || '--' }}</b>
+                <span>API Key</span>
+                <b>{{ settings.forecast_ai_config.api_key_configured ? settings.forecast_ai_config.api_key_masked : '未配置' }}</b>
+              </div>
+              <div class="settings-model-chips">
+                <span v-for="model in settings.forecast_ai_config.models" :key="model">{{ model }}</span>
+                <span v-if="!settings.forecast_ai_config.models.length">暂无模型</span>
+              </div>
+            </div>
             <label class="field">
               <span>系统提示词</span>
               <textarea v-model="settings.system_prompt" rows="8" />
@@ -439,3 +455,52 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+.settings-ai-config {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #ececf1;
+  border-radius: 8px;
+  background: #fbfbfc;
+  padding: 12px;
+}
+
+.settings-ai-config strong {
+  display: block;
+  margin-top: 3px;
+  color: #111827;
+  font-size: 15px;
+}
+
+.settings-ai-config-grid {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px 10px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.settings-ai-config-grid b {
+  overflow: hidden;
+  color: #111827;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.settings-model-chips span {
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+</style>

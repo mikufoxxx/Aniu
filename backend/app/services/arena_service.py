@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -29,11 +30,7 @@ from app.services.historical_data_service import historical_data_service
 from app.services.settings_service import settings_service
 
 
-DEFAULT_AGENTS = [
-    {"id": "momentum_ai", "name": "动量 AI", "style": "momentum"},
-    {"id": "balanced_ai", "name": "均衡 AI", "style": "balanced"},
-    {"id": "risk_ai", "name": "风控 AI", "style": "risk_control"},
-]
+DEFAULT_AGENT_STYLES = ["momentum", "balanced", "risk_control", "balanced", "momentum"]
 
 STOP_LOSS_BY_STYLE = {
     "momentum": 0.07,
@@ -43,7 +40,7 @@ STOP_LOSS_BY_STYLE = {
 
 
 class ArenaService:
-    _order_forecast_cache: dict[int, dict[str, Any]] = {}
+    _order_forecast_cache: dict[str, dict[str, Any]] = {}
 
     def _utcnow(self) -> datetime:
         return datetime.now(UTC).replace(tzinfo=None)
@@ -594,8 +591,9 @@ class ArenaService:
         order_id: int,
         refresh: bool = False,
     ) -> dict[str, Any]:
-        if not refresh and order_id in self._order_forecast_cache:
-            return self._order_forecast_cache[order_id]
+        cache_key = self._order_forecast_cache_key(order_id)
+        if not refresh and cache_key in self._order_forecast_cache:
+            return self._order_forecast_cache[cache_key]
 
         order = db.get(ArenaOrder, order_id)
         if order is None:
@@ -617,8 +615,15 @@ class ArenaService:
             quantity=order.quantity,
             price_series=charts["price_series"],
         )
-        self._order_forecast_cache[order_id] = forecast
+        self._order_forecast_cache[cache_key] = forecast
         return forecast
+
+    def _order_forecast_cache_key(self, order_id: int) -> str:
+        settings = get_settings()
+        base_url = str(settings.forecast_ai_base_url or settings.openai_base_url or "").strip()
+        models = str(settings.forecast_ai_models or "").strip()
+        has_key = bool(str(settings.forecast_ai_api_key or settings.openai_api_key or "").strip())
+        return f"{order_id}:{base_url}:{models}:{has_key}"
 
     def _closing_reviews(
         self,
@@ -777,18 +782,7 @@ class ArenaService:
         if stored:
             agents = [self._agent_config_payload(item) for item in stored]
         else:
-            agents = [
-                {
-                    "id": item["id"],
-                    "name": item["name"],
-                    "style": item["style"],
-                    "provider": "openai-compatible",
-                    "model": "",
-                    "enabled": True,
-                    "prompt": "",
-                }
-                for item in DEFAULT_AGENTS
-            ]
+            agents = self._default_agents()
         return {"agents": agents}
 
     def replace_agents(
@@ -882,7 +876,7 @@ class ArenaService:
             .order_by(ArenaAgentConfig.id)
         ).all()
         if not records:
-            return DEFAULT_AGENTS
+            return self._default_agents()
         return [
             {
                 "id": item.agent_id,
@@ -907,18 +901,42 @@ class ArenaService:
         }
 
     def _default_agent(self, agent_id: str) -> dict[str, Any] | None:
-        match = next((item for item in DEFAULT_AGENTS if item["id"] == agent_id), None)
+        match = next((item for item in self._default_agents() if item["id"] == agent_id), None)
         if match is None:
             return None
-        return {
-            "id": match["id"],
-            "name": match["name"],
-            "style": match["style"],
-            "provider": "openai-compatible",
-            "model": "",
-            "enabled": True,
-            "prompt": "",
+        return dict(match)
+
+    def _default_agents(self) -> list[dict[str, Any]]:
+        models = list(ai_forecast_service.public_config().get("models") or [])
+        agents: list[dict[str, Any]] = []
+        for index, model in enumerate(models):
+            style = DEFAULT_AGENT_STYLES[index % len(DEFAULT_AGENT_STYLES)]
+            agents.append(
+                {
+                    "id": f"model_{self._model_slug(model)}",
+                    "name": self._model_display_name(model),
+                    "style": style,
+                    "provider": "forecast-ai",
+                    "model": model,
+                    "enabled": True,
+                    "prompt": f"使用 {model} 独立完成选股、模拟交易、复盘和学习。",
+                }
+            )
+        return agents
+
+    def _model_slug(self, model: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "_", str(model or "").lower()).strip("_")
+        return slug or "ai"
+
+    def _model_display_name(self, model: str) -> str:
+        replacements = {
+            "gpt-5.5": "GPT-5.5",
+            "deepseek-v4-flash": "DeepSeek V4 Flash",
+            "grok-4.20-0309-non-reasoning": "Grok 4.20",
+            "minimax-m2.7": "MiniMax M2.7",
+            "deepseek-v4-pro": "DeepSeek V4 Pro",
         }
+        return replacements.get(model, model)
 
     def _account_summary(
         self,
@@ -1376,14 +1394,22 @@ class ArenaService:
             if isinstance(raw_config, dict):
                 provider_config = raw_config
 
+        runtime_settings = get_settings()
+        forecast_config = ai_forecast_service.internal_config()
+        forecast_models = list(forecast_config.get("models") or [])
+        use_forecast = provider == "forecast-ai" or str(agent.get("model") or "") in forecast_models
         base_url = str(
             provider_config.get("base_url")
+            or (forecast_config.get("base_url") if use_forecast else None)
             or getattr(app_settings, "llm_base_url", None)
+            or runtime_settings.openai_base_url
             or ""
         ).strip()
         api_key = str(
             provider_config.get("api_key")
+            or (forecast_config.get("api_key") if use_forecast else None)
             or getattr(app_settings, "llm_api_key", None)
+            or runtime_settings.openai_api_key
             or ""
         ).strip()
         model = str(
@@ -1391,6 +1417,7 @@ class ArenaService:
             or provider_config.get("default_model")
             or provider_config.get("model")
             or getattr(app_settings, "llm_model", None)
+            or (forecast_models[0] if use_forecast and forecast_models else "")
             or ""
         ).strip()
         if not base_url or not api_key or not model:

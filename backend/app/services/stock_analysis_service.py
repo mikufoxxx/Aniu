@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.core.config import get_settings
 from app.services.chart_data_service import chart_data_service
+from app.services.ai_forecast_service import ai_forecast_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.llm_service import llm_service
 from app.services.market_data_service import normalize_symbol
 from app.services.settings_service import settings_service
+from app.skills import skill_registry
 
 
 class StockAnalysisService:
@@ -21,6 +23,8 @@ class StockAnalysisService:
         *,
         symbol: str,
         initial_cash: float,
+        model: str | None = None,
+        skill_id: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         normalized_symbol = normalize_symbol(symbol)
@@ -47,12 +51,15 @@ class StockAnalysisService:
             initial_cash=initial_cash,
         )
         retail_analysis = a_share_retail_analysis_service.build(candidate)
+        selected_skill = self._selected_analysis_skill(skill_id)
         llm_decision = self._llm_decision(
             db=db,
             candidate=candidate,
             context=snapshot["context"],
             decision=decision,
             retail_analysis=retail_analysis,
+            selected_model=model,
+            selected_skill=selected_skill,
         )
         if llm_decision.get("used"):
             decision = self._merge_llm_decision(decision, llm_decision)
@@ -76,6 +83,11 @@ class StockAnalysisService:
             "decision": decision,
             "retail_analysis": retail_analysis,
             "llm_decision": llm_decision,
+            "analysis_config": {
+                "ai_config": ai_forecast_service.public_config(),
+                "selected_model": str(llm_decision.get("model") or model or ""),
+                "selected_skill": self._public_skill(selected_skill),
+            },
             "data_sources": snapshot["data_sources"],
             "context": snapshot["context"],
             "stock_pick_snapshot": snapshot,
@@ -132,13 +144,17 @@ class StockAnalysisService:
         context: str,
         decision: dict[str, Any],
         retail_analysis: dict[str, Any],
+        selected_model: str | None,
+        selected_skill: dict[str, Any] | None,
     ) -> dict[str, Any]:
         app_settings = settings_service.get_or_create_settings(db)
-        base_url = str(getattr(app_settings, "llm_base_url", None) or "").strip()
-        api_key = str(getattr(app_settings, "llm_api_key", None) or "").strip()
-        model = str(getattr(app_settings, "llm_model", None) or "").strip()
-        if not base_url or not api_key or not model:
+        llm_config = self._resolve_llm_config(
+            app_settings=app_settings,
+            selected_model=selected_model,
+        )
+        if llm_config is None:
             return {"used": False}
+        model = llm_config["model"]
 
         payload = {
             "model": model,
@@ -156,6 +172,7 @@ class StockAnalysisService:
                             "retail_analysis": retail_analysis,
                             "market_context": context,
                             "fallback_decision": decision,
+                            "selected_skill": self._prompt_skill(selected_skill),
                             "output_schema": {
                                 "action": "BUY, HOLD or SELL",
                                 "rating": "一句短评级",
@@ -171,8 +188,8 @@ class StockAnalysisService:
         }
         try:
             response = llm_service._call_llm(
-                base_url=base_url,
-                api_key=api_key,
+                base_url=llm_config["base_url"],
+                api_key=llm_config["api_key"],
                 payload=payload,
                 timeout_seconds=60,
             )
@@ -182,7 +199,9 @@ class StockAnalysisService:
                 action = decision["action"]
             return {
                 "used": True,
+                "provider": llm_config["provider"],
                 "model": model,
+                "skill": self._public_skill(selected_skill),
                 "raw_decision": raw,
                 "action": action,
                 "rating": str(raw.get("rating") or decision["rating"]),
@@ -194,6 +213,92 @@ class StockAnalysisService:
             }
         except Exception:
             return {"used": False}
+
+    def _resolve_llm_config(
+        self,
+        *,
+        app_settings: Any,
+        selected_model: str | None,
+    ) -> dict[str, str] | None:
+        forecast_config = ai_forecast_service.internal_config()
+        forecast_models = list(forecast_config.get("models") or [])
+        requested_model = str(selected_model or "").strip()
+        if requested_model:
+            model = requested_model if requested_model in forecast_models else requested_model
+            base_url = str(forecast_config.get("base_url") or "").strip()
+            api_key = str(forecast_config.get("api_key") or "").strip()
+            if base_url and api_key:
+                return {
+                    "provider": "forecast-ai",
+                    "base_url": base_url,
+                    "api_key": api_key,
+                    "model": model,
+                }
+
+        base_url = str(getattr(app_settings, "llm_base_url", None) or "").strip()
+        api_key = str(getattr(app_settings, "llm_api_key", None) or "").strip()
+        model = str(requested_model or getattr(app_settings, "llm_model", None) or "").strip()
+        if base_url and api_key and model:
+            return {
+                "provider": str(getattr(app_settings, "provider_name", None) or "openai-compatible"),
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model,
+            }
+
+        forecast_model = requested_model or (forecast_models[0] if forecast_models else "")
+        base_url = str(forecast_config.get("base_url") or "").strip()
+        api_key = str(forecast_config.get("api_key") or "").strip()
+        if base_url and api_key and forecast_model:
+            return {
+                "provider": "forecast-ai",
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": forecast_model,
+            }
+        return None
+
+    def _selected_analysis_skill(self, skill_id: str | None) -> dict[str, Any] | None:
+        normalized = str(skill_id or "").strip()
+        if not normalized:
+            return None
+        package = next(
+            (
+                item
+                for item in skill_registry.enabled_packages()
+                if item.id == normalized and item.supports_run_type("analysis")
+            ),
+            None,
+        )
+        if package is None:
+            return None
+        return {
+            "id": package.id,
+            "name": package.name,
+            "description": package.description,
+            "source": package.source,
+            "run_types": package.run_types,
+            "prompt": package.sop_text[:6000],
+        }
+
+    def _public_skill(self, skill: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not skill:
+            return None
+        return {
+            "id": skill["id"],
+            "name": skill["name"],
+            "description": skill["description"],
+            "source": skill["source"],
+            "run_types": list(skill.get("run_types") or []),
+        }
+
+    def _prompt_skill(self, skill: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not skill:
+            return None
+        return {
+            **(self._public_skill(skill) or {}),
+            "instructions": skill.get("prompt") or "",
+        }
 
     def _merge_llm_decision(
         self,

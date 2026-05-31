@@ -1884,6 +1884,102 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     _reset_state()
 
 
+def test_stock_analysis_uses_selected_forecast_model_and_skill(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    monkeypatch.setenv("FORECAST_AI_BASE_URL", "https://ai.example/v1")
+    monkeypatch.setenv("FORECAST_AI_API_KEY", "forecast-secret-key")
+    monkeypatch.setenv("FORECAST_AI_MODELS", "deepseek-v4-pro,minimax-m2.7")
+
+    calls: list[dict[str, object]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.0,
+                "change_pct": 4.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.8,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:20:00",
+            }
+        ]
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        calls.append(
+            {
+                "base_url": base_url,
+                "api_key": api_key,
+                "payload": payload,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "BUY",
+                                "rating": "深度观察",
+                                "target_allocation_ratio": 0.18,
+                                "reason": "结合 UZI 深度分析框架后维持观察买入。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260526", open=9.8, high=10.3, low=9.7, close=10, amount=500))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260527", open=10.0, high=11.1, low=9.9, close=11, amount=800))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", open=11.0, high=12.2, low=10.8, close=12, amount=1200))
+        response = client.post(
+            "/api/aniu/stocks/analyze",
+            headers=headers,
+            json={
+                "symbol": "000001.SZ",
+                "initial_cash": 200000,
+                "model": "deepseek-v4-pro",
+                "skill_id": "uzi_deep_analysis",
+            },
+        )
+
+    assert response.status_code == 200
+    assert calls
+    call = calls[0]
+    assert call["base_url"] == "https://ai.example/v1"
+    assert call["api_key"] == "forecast-secret-key"
+    assert call["payload"]["model"] == "deepseek-v4-pro"
+    prompt = call["payload"]["messages"][1]["content"]
+    assert "uzi_deep_analysis" in prompt
+    assert "UZI 深度分析" in prompt
+    payload = response.json()
+    assert payload["rating"] == "深度观察"
+    assert payload["llm_decision"]["used"] is True
+    assert payload["llm_decision"]["model"] == "deepseek-v4-pro"
+    assert payload["analysis_config"]["selected_model"] == "deepseek-v4-pro"
+    assert payload["analysis_config"]["selected_skill"]["id"] == "uzi_deep_analysis"
+    assert payload["analysis_config"]["ai_config"]["api_key_configured"] is True
+    assert "forecast-secret-key" not in response.text
+
+    _reset_state()
+
+
 def test_arena_order_context_includes_retail_a_share_analysis(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 
@@ -2329,6 +2425,49 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     _reset_state()
 
 
+def test_arena_ai_config_and_default_agents_reflect_forecast_models(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("FORECAST_AI_BASE_URL", "https://ai.example/v1")
+    monkeypatch.setenv("FORECAST_AI_API_KEY", "forecast-secret-key")
+    monkeypatch.setenv("FORECAST_AI_MODELS", "deepseek-v4-pro,minimax-m2.7")
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        config_response = client.get("/api/aniu/arena/ai-config", headers=headers)
+        settings_response = client.get("/api/aniu/settings", headers=headers)
+        agents_response = client.get("/api/aniu/arena/agents", headers=headers)
+
+    assert config_response.status_code == 200
+    assert settings_response.status_code == 200
+    assert agents_response.status_code == 200
+
+    config_payload = config_response.json()
+    assert config_payload["base_url"] == "https://ai.example/v1"
+    assert config_payload["api_key_configured"] is True
+    assert config_payload["api_key_masked"] != "forecast-secret-key"
+    assert config_payload["models"] == ["deepseek-v4-pro", "minimax-m2.7"]
+
+    settings_payload = settings_response.json()
+    assert settings_payload["forecast_ai_config"]["base_url"] == "https://ai.example/v1"
+    assert settings_payload["forecast_ai_config"]["models"] == [
+        "deepseek-v4-pro",
+        "minimax-m2.7",
+    ]
+    assert "forecast-secret-key" not in settings_response.text
+
+    agents = agents_response.json()["agents"]
+    assert [item["model"] for item in agents] == ["deepseek-v4-pro", "minimax-m2.7"]
+    assert [item["provider"] for item in agents] == ["forecast-ai", "forecast-ai"]
+    assert [item["id"] for item in agents] == [
+        "model_deepseek_v4_pro",
+        "model_minimax_m2_7",
+    ]
+
+    _reset_state()
+
+
 def test_arena_order_forecast_returns_multi_model_analysis(monkeypatch, tmp_path) -> None:
     from app.services.llm_service import llm_service
 
@@ -2409,6 +2548,11 @@ def test_arena_order_forecast_returns_multi_model_analysis(monkeypatch, tmp_path
     assert response.status_code == 200
     payload = response.json()
     assert payload["symbol"] == "000001.SZ"
+    assert payload["ai_config"]["base_url"] == "https://ai.example/v1"
+    assert payload["ai_config"]["api_key_configured"] is True
+    assert payload["ai_config"]["api_key_masked"] == "foreca...st-key"
+    assert payload["ai_config"]["models"] == ["model-a", "model-b"]
+    assert "forecast-key" not in json.dumps(payload, ensure_ascii=False)
     assert payload["technical_context"]["direction"] in {"bullish", "neutral", "bearish"}
     assert payload["methodology"]
     assert [item["model"] for item in payload["model_forecasts"]] == ["model-a", "model-b"]

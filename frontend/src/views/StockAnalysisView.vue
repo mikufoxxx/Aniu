@@ -62,10 +62,30 @@
             <h2>AI 分析</h2>
             <p class="analysis-muted">选择股票后生成交易动作、理由和数据源。</p>
           </div>
-          <button class="button primary small" :disabled="!selectedSymbol || analyzing" @click="analyzeSelected">
-            <span class="material-symbols-rounded" aria-hidden="true">analytics</span>
-            {{ analyzing ? '分析中...' : '分析选中股票' }}
-          </button>
+          <div class="analysis-ai-controls">
+            <label>
+              模型
+              <select v-model="selectedModel">
+                <option value="">默认</option>
+                <option v-for="model in aiConfig.models" :key="model" :value="model">
+                  {{ model }}
+                </option>
+              </select>
+            </label>
+            <label>
+              Skill
+              <select v-model="selectedSkillId">
+                <option value="">不指定</option>
+                <option v-for="skill in analysisSkills" :key="skill.id" :value="skill.id">
+                  {{ skill.name }}
+                </option>
+              </select>
+            </label>
+            <button class="button primary small" :disabled="!selectedSymbol || analyzing" @click="analyzeSelected">
+              <span class="material-symbols-rounded" aria-hidden="true">analytics</span>
+              {{ analyzing ? '分析中...' : '分析选中股票' }}
+            </button>
+          </div>
         </div>
 
         <div v-if="analysis" class="analysis-result">
@@ -89,6 +109,12 @@
               <span>数据源</span>
               <strong>{{ analysis.data_sources.length }}</strong>
             </div>
+          </div>
+          <div class="analysis-config-strip">
+            <span>模型 {{ analysis.analysis_config.selected_model || selectedModel || '--' }}</span>
+            <span>Skill {{ analysis.analysis_config.selected_skill?.name || '未指定' }}</span>
+            <span>接口 {{ analysis.analysis_config.ai_config?.base_url || aiConfig.base_url || '--' }}</span>
+            <span>Key {{ analysis.analysis_config.ai_config?.api_key_configured ? analysis.analysis_config.ai_config.api_key_masked : '未配置' }}</span>
           </div>
           <div v-if="retailAnalysis" class="retail-analysis">
             <div class="retail-analysis-head">
@@ -164,9 +190,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { QuantCandidate, StockAnalysisPayload } from '@/types'
+import type { ForecastAIConfig, QuantCandidate, SkillListItem, StockAnalysisPayload } from '@/types'
 import DistributionChart from '@/components/charts/DistributionChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
@@ -181,6 +207,16 @@ const analysis = ref<StockAnalysisPayload | null>(null)
 const loadingCandidates = ref(false)
 const analyzing = ref(false)
 const errorMessage = ref('')
+const aiConfig = ref<ForecastAIConfig>({
+  base_url: '',
+  api_key_configured: false,
+  api_key_masked: '未配置',
+  models: [],
+  model_count: 0,
+})
+const skills = ref<SkillListItem[]>([])
+const selectedModel = ref('')
+const selectedSkillId = ref('')
 
 interface RetailDimension {
   key: string
@@ -193,6 +229,26 @@ const retailDimensions = computed<RetailDimension[]>(() => {
   const items = retailAnalysis.value?.dimension_scores
   return Array.isArray(items) ? items as RetailDimension[] : []
 })
+const analysisSkills = computed(() => {
+  return skills.value.filter((skill) => {
+    if (!skill.enabled || skill.role === 'runtime') return false
+    return !skill.run_types.length || skill.run_types.includes('analysis')
+  })
+})
+
+async function loadAnalysisOptions(): Promise<void> {
+  try {
+    const [settingsPayload, skillPayload] = await Promise.all([
+      api.getSettings(),
+      api.listSkills(),
+    ])
+    aiConfig.value = settingsPayload.forecast_ai_config
+    skills.value = skillPayload
+    selectedModel.value ||= settingsPayload.forecast_ai_config.models[0] ?? ''
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '分析配置加载失败。'
+  }
+}
 
 function parseSymbols(): string[] {
   return symbolText.value
@@ -233,6 +289,8 @@ async function analyzeSelected(): Promise<void> {
     analysis.value = await api.analyzeStock({
       symbol: selectedSymbol.value,
       initial_cash: 200000,
+      model: selectedModel.value || undefined,
+      skill_id: selectedSkillId.value || undefined,
     })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '股票分析失败。'
@@ -275,6 +333,10 @@ function retailList(key: string): string[] {
   const value = retailAnalysis.value?.[key]
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean).slice(0, 4) : []
 }
+
+onMounted(() => {
+  loadAnalysisOptions()
+})
 </script>
 
 <style scoped>
@@ -315,7 +377,16 @@ function retailList(key: string): string[] {
   gap: 10px;
 }
 
+.analysis-ai-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  min-width: min(100%, 520px);
+}
+
 .analysis-controls label,
+.analysis-ai-controls label,
 .analysis-field {
   display: grid;
   gap: 8px;
@@ -324,6 +395,7 @@ function retailList(key: string): string[] {
 }
 
 .analysis-controls input,
+.analysis-ai-controls select,
 .analysis-field textarea {
   width: 100%;
   border: 1px solid #dededb;
@@ -403,6 +475,21 @@ function retailList(key: string): string[] {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.analysis-config-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.analysis-config-strip span {
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
+  padding: 5px 8px;
+  font-size: 12px;
 }
 
 .analysis-chart-grid {
@@ -526,6 +613,11 @@ function retailList(key: string): string[] {
   .analysis-controls {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .analysis-ai-controls {
+    grid-template-columns: 1fr;
+    width: 100%;
   }
 
   .analysis-controls .button {

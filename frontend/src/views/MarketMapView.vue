@@ -2,7 +2,8 @@
   <div class="market-map-page">
     <section class="market-map-frame-shell">
       <a class="market-map-open" href="https://map.wenyuanw.me" target="_blank" rel="noreferrer">
-        原站
+        <span class="material-symbols-rounded" aria-hidden="true">open_in_new</span>
+        <span>原站</span>
       </a>
       <iframe
         class="market-map-frame"
@@ -43,6 +44,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   min-width: 54px;
   height: 32px;
   padding: 0 12px;
@@ -54,6 +56,10 @@
   font-weight: 650;
   text-decoration: none;
   backdrop-filter: blur(8px);
+}
+
+.market-map-open .material-symbols-rounded {
+  font-size: 18px;
 }
 
 .market-map-open:hover {

@@ -216,8 +216,13 @@ textarea {
   border-radius: 10px;
   background: #ffffff;
   color: #6b6b6b;
-  font-size: 13px;
-  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-collapse-button .material-symbols-rounded {
+  font-size: 20px;
 }
 
 .app-brand-logo {
@@ -265,8 +270,16 @@ textarea {
 .page-shell.is-sidebar-collapsed .tab-button,
 .page-shell.is-sidebar-collapsed .header-action-button {
   padding-inline: 4px;
-  font-size: 12px;
   text-align: center;
+}
+
+.page-shell.is-sidebar-collapsed .tab-button {
+  justify-content: center;
+}
+
+.page-shell.is-sidebar-collapsed .tab-button-label,
+.page-shell.is-sidebar-collapsed .header-action-button span:not(.material-symbols-rounded) {
+  display: none;
 }
 
 .app-header-nav {
@@ -325,6 +338,9 @@ textarea {
 }
 
 .tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   min-width: 0;
   padding: 9px 10px;
   border: none;
@@ -340,6 +356,22 @@ textarea {
   text-decoration: none;
 }
 
+.tab-button-icon {
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  color: #7c818b;
+  font-size: 20px;
+  flex: 0 0 auto;
+}
+
+.tab-button-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tab-button:hover {
   background: #efefed;
   color: #202123;
@@ -350,6 +382,11 @@ textarea {
   color: #202123;
   font-weight: 600;
   box-shadow: none;
+}
+
+.tab-button:hover .tab-button-icon,
+.tab-button.active .tab-button-icon {
+  color: #202123;
 }
 
 .app-sidebar-footer {

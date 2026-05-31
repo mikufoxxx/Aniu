@@ -14,7 +14,9 @@
           :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
           @click="sidebarCollapsed = !sidebarCollapsed"
         >
-          {{ sidebarCollapsed ? '›' : '‹' }}
+          <span class="material-symbols-rounded" aria-hidden="true">
+            {{ sidebarCollapsed ? 'chevron_right' : 'chevron_left' }}
+          </span>
         </button>
       </div>
 
@@ -24,8 +26,10 @@
           :key="tab.id"
           :to="tab.path"
           :class="['tab-button', { active: isSidebarTabActive(tab) }]"
+          :title="tab.name"
         >
-          {{ tab.name }}
+          <span class="material-symbols-rounded tab-button-icon" aria-hidden="true">{{ tab.icon }}</span>
+          <span class="tab-button-label">{{ tab.name }}</span>
         </router-link>
       </nav>
 
@@ -36,9 +40,13 @@
           class="header-action-button"
           to="/arena"
         >
-          返回
+          <span class="material-symbols-rounded" aria-hidden="true">arrow_back</span>
+          <span>返回</span>
         </RouterLink>
-        <button v-else class="header-action-button" type="button" @click="handleLogout">退出</button>
+        <button v-else class="header-action-button" type="button" @click="handleLogout">
+          <span class="material-symbols-rounded" aria-hidden="true">logout</span>
+          <span>退出</span>
+        </button>
       </div>
     </aside>
 
@@ -78,15 +86,15 @@ const isMarketMapPage = computed(() => route.name === 'market-map')
 const arenaDetailNavigation = computed(() => {
   const path = route.path
   return [
-    { id: 'morning', name: '早盘', path: `${path}?section=morning` },
-    { id: 'intraday', name: '盘中', path: `${path}?section=intraday` },
-    { id: 'closing', name: '收盘', path: `${path}?section=closing` },
-    { id: 'learning', name: '学习', path: `${path}?section=learning` },
+    { id: 'morning', name: '早盘', path: `${path}?section=morning`, icon: 'wb_twilight' },
+    { id: 'intraday', name: '盘中', path: `${path}?section=intraday`, icon: 'monitoring' },
+    { id: 'closing', name: '收盘', path: `${path}?section=closing`, icon: 'fact_check' },
+    { id: 'learning', name: '学习', path: `${path}?section=learning`, icon: 'school' },
   ]
 })
 const sidebarNavigation = computed(() => isArenaAgentDetail.value ? arenaDetailNavigation.value : appNavigation)
 
-function isSidebarTabActive(tab: { id: string; path: string }): boolean {
+function isSidebarTabActive(tab: { id: string; path: string; icon: string }): boolean {
   if (isArenaAgentDetail.value) {
     return (route.query.section ?? 'morning') === tab.id
   }

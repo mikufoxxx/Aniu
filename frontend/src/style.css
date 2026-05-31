@@ -259,13 +259,16 @@ textarea {
 
 .page-shell.is-sidebar-collapsed .app-brand {
   display: grid;
-  justify-items: center;
+  grid-template-columns: 1fr;
+  place-items: center;
   gap: 10px;
+  width: 100%;
 }
 
 .page-shell.is-sidebar-collapsed .app-brand-logo {
   width: 32px;
   height: 32px;
+  justify-self: center;
 }
 
 .page-shell.is-sidebar-collapsed .sidebar-collapse-button {
@@ -273,6 +276,7 @@ textarea {
   margin-inline: auto;
   width: 32px;
   height: 32px;
+  justify-self: center;
 }
 
 .page-shell.is-sidebar-collapsed .app-brand-copy,

@@ -191,6 +191,7 @@ textarea {
   max-width: none;
   margin: 0;
   padding: 0;
+  transition: grid-template-columns 0.24s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .page-shell.is-sidebar-collapsed {
@@ -211,6 +212,7 @@ textarea {
   padding: 16px 12px 20px;
   border-right: 1px solid var(--color-border);
   background: var(--color-surface-subtle);
+  transition: padding 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
 }
 
 .app-sidebar-top {
@@ -232,13 +234,14 @@ textarea {
   align-items: center;
   justify-content: center;
   box-shadow: var(--shadow-flat);
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.2s ease;
 }
 
 .sidebar-collapse-button:hover {
   border-color: var(--color-border-strong);
   background: var(--color-surface-muted);
   color: var(--color-text);
+  transform: translateY(-1px);
 }
 
 .sidebar-collapse-button .material-symbols-rounded {
@@ -268,7 +271,9 @@ textarea {
 }
 
 .page-shell.is-sidebar-collapsed .app-sidebar-footer small {
-  display: none;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
 }
 
 .page-shell.is-sidebar-collapsed .tab-button,
@@ -283,7 +288,10 @@ textarea {
 
 .page-shell.is-sidebar-collapsed .tab-button-label,
 .page-shell.is-sidebar-collapsed .header-action-button span:not(.material-symbols-rounded) {
-  display: none;
+  width: 0;
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(-4px);
 }
 
 .app-header-nav {
@@ -326,6 +334,15 @@ textarea {
   color: var(--color-text);
 }
 
+.header-action-button span:not(.material-symbols-rounded) {
+  display: inline-block;
+  max-width: 64px;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-width 0.2s ease, opacity 0.16s ease, transform 0.2s ease;
+  white-space: nowrap;
+}
+
 .header-action-link {
   min-width: 122px;
 }
@@ -355,7 +372,7 @@ textarea {
   line-height: 1.2;
   border-radius: 10px;
   cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease;
+  transition: background 0.18s ease, color 0.18s ease, padding 0.22s ease;
   text-align: left;
   text-decoration: none;
 }
@@ -370,9 +387,13 @@ textarea {
 }
 
 .tab-button-label {
+  display: inline-block;
+  max-width: 120px;
   min-width: 0;
   overflow: hidden;
+  opacity: 1;
   text-overflow: ellipsis;
+  transition: max-width 0.2s ease, opacity 0.16s ease, transform 0.2s ease;
   white-space: nowrap;
 }
 
@@ -400,6 +421,12 @@ textarea {
   font-size: 12px;
 }
 
+.app-sidebar-footer small {
+  max-height: 20px;
+  opacity: 1;
+  transition: max-height 0.2s ease, opacity 0.16s ease;
+}
+
 .tab-content {
   animation: fadeIn 0.3s ease-in-out;
 }
@@ -412,6 +439,17 @@ textarea {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

@@ -39,6 +39,7 @@ const defaultSettings = (): SettingsPayload => ({
   llm_model: 'gpt-4o-mini',
   llm_provider_configs: {},
   automation_context_window_tokens: 128000,
+  arena_initial_cash: 200000,
   forecast_ai_config: {
     base_url: '',
     api_key_configured: false,
@@ -183,6 +184,7 @@ export const useAppStore = defineStore('app', () => {
     settings.llm_model = payload.llm_model
     settings.llm_provider_configs = payload.llm_provider_configs ?? {}
     settings.automation_context_window_tokens = payload.automation_context_window_tokens ?? 128000
+    settings.arena_initial_cash = payload.arena_initial_cash ?? 200000
     settings.forecast_ai_config = payload.forecast_ai_config ?? defaultSettings().forecast_ai_config
     settings.system_prompt = payload.system_prompt
   }

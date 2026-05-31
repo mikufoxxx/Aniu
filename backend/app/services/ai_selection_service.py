@@ -90,6 +90,14 @@ class AISelectionService:
                 "risk_checks": ["below_ma60", "pledge_risk", "high_retail_risk", "max_drawdown", "volatility"],
                 "ranking_focus": ["above_ma60", "low_risk", "retail_score", "financial_quality"],
             }
+        if style == "auto":
+            return {
+                "strategy": "auto_adaptive",
+                "label": "AI自适应",
+                "dimensions": ["quote", "daily_history", "moneyflow", "valuation", "financial_indicator"],
+                "risk_checks": ["below_ma60", "overheated_intraday", "high_retail_risk"],
+                "ranking_focus": ["ai_selection_score", "retail_score", "moneyflow", "trend"],
+            }
         return {
             "strategy": "balanced",
             "label": "量化轮动",

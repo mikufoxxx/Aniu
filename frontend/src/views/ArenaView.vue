@@ -7,7 +7,7 @@
         <div class="panel-head">
           <div>
             <h2>AI 收益排名</h2>
-            <p class="arena-muted">按总资产排序；点击卡片进入 AI 的早盘、盘中、收盘、学习详情。</p>
+            <p class="arena-muted">统一初始资金 {{ formatAmount(arenaInitialCash) }}；点击卡片进入早盘、盘中、收盘、学习详情。</p>
           </div>
           <div class="arena-panel-actions">
             <button class="button ghost small" :disabled="saving" @click="addAgent">
@@ -20,79 +20,123 @@
             </button>
           </div>
         </div>
+        <div class="arena-schedule-strip">
+          <span>
+            <span class="material-symbols-rounded" aria-hidden="true">schedule</span>
+            早盘 08:00-08:30 错峰
+          </span>
+          <span>盘中 09:35 / 10:40 / 13:30 / 14:25</span>
+          <span>收盘 15:10 起</span>
+          <span>夜间 20:00 起</span>
+        </div>
 
         <div class="arena-agent-list">
-          <article
-            v-for="(agent, index) in rankedAgents"
-            :key="agent.id"
-            class="arena-agent-row"
-            role="button"
-            tabindex="0"
-            @click="openAgent(agent.id)"
-            @keydown.enter.self="openAgent(agent.id)"
-          >
-            <button
-              class="button ghost small arena-card-config"
-              type="button"
-              @click.stop="openAgentConfig(agent.id)"
-            >
-              <span class="material-symbols-rounded" aria-hidden="true">settings</span>
-              配置
-            </button>
-            <div class="arena-rank">#{{ index + 1 }}</div>
-            <div class="arena-agent-main">
-              <div class="arena-agent-title">
-                <strong>{{ agent.name }}</strong>
-                <span>{{ styleText(agent.style) }} · {{ agent.model || '默认模型' }}</span>
-                <div class="arena-model-meta">
-                  <span>
-                    <span class="material-symbols-rounded" aria-hidden="true">hub</span>
-                    {{ agent.provider || 'openai-compatible' }}
-                  </span>
-                  <span>
-                    <span class="material-symbols-rounded" aria-hidden="true">link</span>
-                    {{ aiConfig.base_url || '--' }}
-                  </span>
-                  <span>
-                    <span class="material-symbols-rounded" aria-hidden="true">key</span>
-                    {{ aiConfig.api_key_configured ? aiConfig.api_key_masked : '未配置' }}
-                  </span>
+          <template v-if="loading && !rankedAgents.length">
+            <article v-for="item in 4" :key="item" class="arena-agent-row arena-agent-skeleton" aria-hidden="true">
+              <div class="skeleton-block skeleton-rank"></div>
+              <div class="arena-agent-main">
+                <div class="skeleton-block skeleton-title"></div>
+                <div class="skeleton-chip-row">
+                  <span class="skeleton-block"></span>
+                  <span class="skeleton-block"></span>
+                  <span class="skeleton-block"></span>
                 </div>
               </div>
-              <div class="arena-pick-chips">
-                <span v-for="pick in agent.latestPicks" :key="pick.symbol">
-                  <b>{{ pick.name || pick.symbol }}</b>
-                  <small>
-                    {{ pick.symbol }} · {{ formatPrice(pick.price) }}
-                    <em :class="profitClass(percentRatio(pick.change_pct))">
-                      {{ formatChange(pick.change_pct) }}
-                    </em>
-                  </small>
-                  <small>AI {{ scoreText(pick.ai_selection_score ?? pick.score) }} · {{ riskText(pick.risk_flags) }}</small>
-                </span>
-                <span v-if="!agent.latestPicks.length">暂无早盘精选</span>
+              <div class="arena-agent-metrics">
+                <div v-for="metric in 6" :key="metric">
+                  <span class="skeleton-block"></span>
+                  <strong class="skeleton-block"></strong>
+                </div>
               </div>
-            </div>
-            <div class="arena-agent-metrics">
-              <div>
-                <span>总资产</span>
-                <strong>{{ formatAmount(agent.totalAssets) }}</strong>
+            </article>
+          </template>
+          <template v-else>
+            <article
+              v-for="(agent, index) in rankedAgents"
+              :key="agent.id"
+              class="arena-agent-row"
+              role="button"
+              tabindex="0"
+              @click="openAgent(agent.id)"
+              @keydown.enter.self="openAgent(agent.id)"
+            >
+              <button
+                class="button ghost small arena-card-config"
+                type="button"
+                @click.stop="openAgentConfig(agent.id)"
+              >
+                <span class="material-symbols-rounded" aria-hidden="true">settings</span>
+                配置
+              </button>
+              <div class="arena-rank">#{{ index + 1 }}</div>
+              <div class="arena-agent-main">
+                <div class="arena-agent-title">
+                  <strong>{{ agent.name }}</strong>
+                  <span>{{ agent.model || '默认模型' }} · AI 自主判断风格</span>
+                  <div class="arena-card-tags">
+                    <span :class="{ 'is-muted': !agent.enabled }">{{ agent.enabled ? '运行中' : '已停用' }}</span>
+                    <span>早盘精选 {{ agent.latestPicks.length }}</span>
+                    <span>持仓 {{ agent.positionCount }}</span>
+                    <span>复盘 {{ agent.closingCount }}</span>
+                    <span>学习 {{ agent.learningCount }}</span>
+                  </div>
+                </div>
+                <div class="arena-pick-chips">
+                  <span v-for="pick in agent.latestPicks" :key="pick.symbol">
+                    <b>{{ pick.name || pick.symbol }}</b>
+                    <small>
+                      {{ pick.symbol }} · {{ formatPrice(pick.price) }}
+                      <em :class="profitClass(percentRatio(pick.change_pct))">
+                        {{ formatChange(pick.change_pct) }}
+                      </em>
+                    </small>
+                    <small>AI {{ scoreText(pick.ai_selection_score ?? pick.score) }} · {{ riskText(pick.risk_flags) }}</small>
+                  </span>
+                  <span v-if="!agent.latestPicks.length">暂无早盘精选</span>
+                </div>
               </div>
-              <div>
-                <span>收益</span>
-                <strong :class="profitClass(agent.returnRatio)">{{ formatPercent(agent.returnRatio) }}</strong>
+              <div class="arena-agent-metrics">
+                <div>
+                  <span>总资产</span>
+                  <strong>{{ formatAmount(agent.totalAssets) }}</strong>
+                </div>
+                <div>
+                  <span>收益</span>
+                  <strong :class="profitClass(agent.returnRatio)">{{ formatPercent(agent.returnRatio) }}</strong>
+                </div>
+                <div>
+                  <span>订单</span>
+                  <strong>{{ agent.orderCount }}</strong>
+                </div>
+                <div>
+                  <span>现金</span>
+                  <strong>{{ formatAmount(agent.cash) }}</strong>
+                </div>
+                <div>
+                  <span>持仓市值</span>
+                  <strong>{{ formatAmount(agent.positionValue) }}</strong>
+                </div>
+                <div>
+                  <span>持仓数</span>
+                  <strong>{{ agent.positionCount }}</strong>
+                </div>
+                <div>
+                  <span>已实现</span>
+                  <strong :class="profitClass(agent.realizedPnl)">{{ formatAmount(agent.realizedPnl) }}</strong>
+                </div>
+                <div>
+                  <span>最新动作</span>
+                  <strong>{{ agent.latestAction }}</strong>
+                </div>
               </div>
-              <div>
-                <span>订单</span>
-                <strong>{{ agent.orderCount }}</strong>
-              </div>
-            </div>
-          </article>
+            </article>
+          </template>
         </div>
       </section>
 
     </section>
 
+    <Transition name="modal">
     <div v-if="configAgent" class="arena-config-overlay" @click.self="closeAgentConfig">
       <section class="arena-config-modal panel">
         <div class="panel-head">
@@ -116,14 +160,6 @@
             <input v-model="configAgent.name" />
           </label>
           <label>
-            <span>风格</span>
-            <select v-model="configAgent.style">
-              <option value="momentum">短线动量</option>
-              <option value="balanced">量化轮动</option>
-              <option value="risk_control">长线稳健</option>
-            </select>
-          </label>
-          <label>
             <span>服务商</span>
             <input v-model="configAgent.provider" placeholder="forecast-ai" />
           </label>
@@ -137,6 +173,7 @@
             </select>
           </label>
           <div class="arena-config-summary">
+            <span>风格 AI 自主判断</span>
             <span>接口 {{ aiConfig.base_url || '--' }}</span>
             <span>Key {{ aiConfig.api_key_configured ? aiConfig.api_key_masked : '未配置' }}</span>
             <span>已配置模型 {{ aiConfig.models.length }}</span>
@@ -158,6 +195,7 @@
         </div>
       </section>
     </div>
+    </Transition>
   </div>
 </template>
 
@@ -165,7 +203,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload } from '@/types'
+import type { AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload } from '@/types'
 
 const router = useRouter()
 const agents = ref<ArenaAgentConfig[]>([])
@@ -182,6 +220,7 @@ const loading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
 const configAgentIndex = ref(-1)
+const arenaInitialCash = ref(200000)
 
 const rankedAgents = computed(() => {
   return agents.value
@@ -189,11 +228,22 @@ const rankedAgents = computed(() => {
       const board = dashboards.value[agent.id]
       const rank = leaderboard.value.items.find((item) => item.agent_id === agent.id)
       const latestPicks = board?.morning.recommendations[0]?.picks ?? []
+      const summary = (board?.summary ?? {}) as Record<string, unknown>
+      const rankPositions = rank?.positions ?? []
+      const summaryPositions = Array.isArray(summary.positions) ? summary.positions : []
+      const latestOrder = board?.intraday.orders[0]
       return {
         ...agent,
         totalAssets: rank?.total_assets ?? Number(board?.summary.total_assets ?? 0),
         returnRatio: rank?.return_ratio ?? Number(board?.summary.return_ratio ?? 0),
         orderCount: rank?.order_count ?? Number(board?.summary.order_count ?? 0),
+        cash: rank?.cash ?? Number(summary.cash ?? 0),
+        positionValue: rank?.position_value ?? Number(summary.position_value ?? 0),
+        realizedPnl: rank?.realized_pnl ?? Number(summary.realized_pnl ?? 0),
+        positionCount: rankPositions.length || summaryPositions.length,
+        latestAction: latestOrder ? `${latestOrder.action} ${latestOrder.name || latestOrder.symbol}` : '--',
+        closingCount: board?.closing.reviews.length ?? 0,
+        learningCount: board?.learning.reviews.length ?? 0,
         latestPicks,
       }
     })
@@ -204,14 +254,16 @@ async function loadArenaState(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [agentPayload, leaderboardPayload, configPayload] = await Promise.all([
+    const [agentPayload, leaderboardPayload, configPayload, settingsPayload] = await Promise.all([
       api.getArenaAgents(),
       api.getArenaLeaderboard(),
       api.getArenaAIConfig(),
+      api.getSettings(),
     ])
     agents.value = agentPayload.agents.map(normalizeAgent)
     leaderboard.value = leaderboardPayload
     aiConfig.value = configPayload
+    arenaInitialCash.value = normalizeInitialCash(settingsPayload)
     const entries = await Promise.allSettled(
       agents.value.map(async (agent) => [agent.id, await api.getArenaAgentDashboard(agent.id)] as const),
     )
@@ -248,7 +300,7 @@ function addAgent(): void {
   const agent = normalizeAgent({
     id: `custom_ai_${next}`,
     name: `自定义 AI ${next}`,
-    style: 'balanced',
+    style: 'auto',
   })
   agents.value.push(agent)
   configAgentIndex.value = agents.value.length - 1
@@ -263,6 +315,7 @@ function removeAgent(agentId: string): void {
 function normalizeAgent(agent: ArenaAgentConfig): ArenaAgentConfig {
   return {
     ...agent,
+    style: 'auto',
     provider: agent.provider ?? 'forecast-ai',
     model: agent.model ?? '',
     enabled: agent.enabled ?? true,
@@ -292,12 +345,6 @@ async function removeConfigAgent(): Promise<void> {
   agents.value.splice(configAgentIndex.value, 1)
   closeAgentConfig()
   await saveAgents()
-}
-
-function styleText(style: string): string {
-  if (style === 'momentum') return '短线动量'
-  if (style === 'risk_control') return '长线稳健'
-  return '量化轮动'
 }
 
 function scoreText(value: unknown): string {
@@ -334,6 +381,11 @@ function formatAmount(value: number): string {
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(2)}%`
+}
+
+function normalizeInitialCash(payload: AppSettings): number {
+  const value = Number(payload.arena_initial_cash)
+  return Number.isFinite(value) && value >= 10000 ? value : 200000
 }
 
 onMounted(() => {
@@ -376,6 +428,30 @@ onMounted(() => {
   gap: 8px;
 }
 
+.arena-schedule-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 12px;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.arena-schedule-strip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  border: 1px solid #ececf1;
+  border-radius: 999px;
+  background: #fbfbfa;
+  padding: 0 10px;
+}
+
+.arena-schedule-strip .material-symbols-rounded {
+  font-size: 16px;
+}
+
 .arena-layout {
   display: block;
 }
@@ -388,7 +464,7 @@ onMounted(() => {
 .arena-agent-row {
   position: relative;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) minmax(260px, 0.75fr);
+  grid-template-columns: 44px minmax(0, 1fr) minmax(360px, 0.92fr);
   gap: 12px;
   align-items: center;
   border: 1px solid #ececf1;
@@ -396,7 +472,7 @@ onMounted(() => {
   background: #ffffff;
   padding: 12px 82px 12px 12px;
   cursor: pointer;
-  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .arena-card-config {
@@ -410,6 +486,7 @@ onMounted(() => {
   border-color: #dededb;
   background: #fcfcfb;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transform: translateY(-1px);
 }
 
 .arena-rank {
@@ -433,16 +510,15 @@ onMounted(() => {
   font-size: 12px;
 }
 
-.arena-model-meta {
+.arena-card-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.arena-model-meta span {
+.arena-card-tags span {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   border: 1px solid #ececf1;
   border-radius: 999px;
   background: #f7f7f5;
@@ -452,8 +528,9 @@ onMounted(() => {
   line-height: 1;
 }
 
-.arena-model-meta .material-symbols-rounded {
-  font-size: 14px;
+.arena-card-tags .is-muted {
+  color: #8b949e;
+  background: #fbfbfa;
 }
 
 .arena-pick-chips {
@@ -492,18 +569,27 @@ onMounted(() => {
 
 .arena-agent-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .arena-agent-metrics div {
   display: grid;
-  gap: 4px;
+  gap: 3px;
+  min-height: 52px;
+  border: 1px solid #f0f0ee;
+  border-radius: 10px;
+  background: #fbfbfa;
+  padding: 8px;
 }
 
 .arena-agent-metrics strong {
+  overflow: hidden;
   color: #111827;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .arena-agent-editor,
@@ -559,10 +645,11 @@ onMounted(() => {
   place-items: center;
   padding: 20px;
   background: rgba(17, 24, 39, 0.28);
+  backdrop-filter: blur(2px);
 }
 
 .arena-config-modal {
-  width: min(460px, 100%);
+  width: min(540px, 100%);
   max-height: calc(100vh - 40px);
   overflow: auto;
 }
@@ -572,10 +659,90 @@ onMounted(() => {
   margin-top: 12px;
 }
 
+.arena-agent-skeleton {
+  pointer-events: none;
+}
+
+.skeleton-block {
+  display: block;
+  min-height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #f0f0ed 0%, #fafaf8 48%, #f0f0ed 100%);
+  background-size: 220% 100%;
+  animation: skeletonPulse 1.35s ease-in-out infinite;
+}
+
+.skeleton-rank {
+  width: 30px;
+  height: 18px;
+}
+
+.skeleton-title {
+  width: min(220px, 70%);
+  height: 18px;
+}
+
+.skeleton-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.skeleton-chip-row .skeleton-block {
+  width: 148px;
+  height: 48px;
+  border-radius: 10px;
+}
+
+.arena-agent-skeleton .arena-agent-metrics .skeleton-block {
+  width: 70%;
+}
+
+.arena-agent-skeleton .arena-agent-metrics strong.skeleton-block {
+  width: 88%;
+  height: 14px;
+}
+
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.22s ease, backdrop-filter 0.22s ease;
+}
+
+.modal-enter-active .arena-config-modal,
+.modal-leave-active .arena-config-modal {
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+  backdrop-filter: blur(0);
+}
+
+.modal-enter-from .arena-config-modal,
+.modal-leave-to .arena-config-modal {
+  opacity: 0;
+  transform: translateY(12px) scale(0.98);
+}
+
+@keyframes skeletonPulse {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
 @media (max-width: 1100px) {
   .arena-layout,
   .arena-agent-row {
     grid-template-columns: 1fr;
+  }
+
+  .arena-agent-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

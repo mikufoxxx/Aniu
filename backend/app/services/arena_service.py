@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -20,6 +22,7 @@ from app.db.models import (
     DailyBar,
     StockProfile,
 )
+from app.db.database import session_scope
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.services.ai_data_request_service import ai_data_request_service
 from app.services.ai_forecast_service import ai_forecast_service
@@ -30,9 +33,58 @@ from app.services.historical_data_service import historical_data_service
 from app.services.settings_service import settings_service
 
 
-DEFAULT_AGENT_STYLES = ["momentum", "balanced", "risk_control", "balanced", "momentum"]
+logger = logging.getLogger(__name__)
+
+ARENA_DEFAULT_INITIAL_CASH = 200000.0
+ARENA_SCHEDULE_TIMEZONE = ZoneInfo("Asia/Shanghai")
+ARENA_SCHEDULE_WINDOWS = (
+    {
+        "phase": "morning_recommendation",
+        "label": "早盘推荐",
+        "start": (8, 0),
+        "window_minutes": 30,
+    },
+    {
+        "phase": "intraday_trade",
+        "label": "盘中模拟",
+        "start": (9, 35),
+        "window_minutes": 25,
+    },
+    {
+        "phase": "intraday_trade",
+        "label": "盘中模拟",
+        "start": (10, 40),
+        "window_minutes": 20,
+    },
+    {
+        "phase": "intraday_trade",
+        "label": "盘中模拟",
+        "start": (13, 30),
+        "window_minutes": 20,
+    },
+    {
+        "phase": "intraday_trade",
+        "label": "盘中模拟",
+        "start": (14, 25),
+        "window_minutes": 20,
+    },
+    {
+        "phase": "closing_review",
+        "label": "收盘复盘",
+        "start": (15, 10),
+        "window_minutes": 30,
+    },
+    {
+        "phase": "nightly_learning",
+        "label": "夜间学习",
+        "start": (20, 0),
+        "window_minutes": 30,
+    },
+)
+DEFAULT_AGENT_STYLES = ["auto", "auto", "auto", "auto", "auto"]
 
 STOP_LOSS_BY_STYLE = {
+    "auto": 0.06,
     "momentum": 0.07,
     "balanced": 0.06,
     "risk_control": 0.05,
@@ -45,18 +97,26 @@ class ArenaService:
     def _utcnow(self) -> datetime:
         return datetime.now(UTC).replace(tzinfo=None)
 
+    def _now_shanghai(self) -> datetime:
+        return datetime.now(ARENA_SCHEDULE_TIMEZONE)
+
     def run_once(
         self,
         db: Session,
         *,
         phase: str = "intraday_trade",
-        agents: list[dict[str, str]] | None = None,
-        initial_cash: float = 200000.0,
+        agents: list[dict[str, Any]] | None = None,
+        initial_cash: float | None = None,
+        schedule_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_phase = self._normalize_phase(phase)
-        active_agents = agents or self.enabled_agents(db)
+        active_agents = [
+            self._normalize_agent_payload(agent, index)
+            for index, agent in enumerate(agents or self.enabled_agents(db))
+        ]
         settings = get_settings()
         app_settings = settings_service.get_or_create_settings(db)
+        effective_initial_cash = self._arena_initial_cash(db, initial_cash)
         agent_candidate_contexts = self._build_agent_candidate_contexts(
             db=db,
             agents=active_agents,
@@ -80,10 +140,11 @@ class ArenaService:
                 for agent_id, context in agent_candidate_contexts.items()
             },
             "agent_recommendations": [],
+            "schedule_context": schedule_context or {},
         }
         arena_run = ArenaRun(
             phase=normalized_phase,
-            initial_cash=initial_cash,
+            initial_cash=effective_initial_cash,
             universe_json=None,
             candidate_payload=candidate_payload,
             leaderboard_payload=[],
@@ -156,7 +217,7 @@ class ArenaService:
                 agents=active_agents,
                 agent_candidate_contexts=agent_candidate_contexts,
                 snapshot_id=snapshot_id,
-                initial_cash=initial_cash,
+                initial_cash=effective_initial_cash,
             )
             leaderboard = self.leaderboard(db)["items"]
             arena_run.candidate_payload = {
@@ -193,7 +254,7 @@ class ArenaService:
             account = self._get_or_create_account(
                 db,
                 agent=agent,
-                initial_cash=initial_cash,
+                initial_cash=effective_initial_cash,
             )
             self._mark_positions(account, agent_candidates)
             sell_decision = self._stop_loss_decision(
@@ -295,11 +356,176 @@ class ArenaService:
             )
         return normalized
 
+    def _normalize_agent_payload(
+        self,
+        agent: dict[str, Any],
+        index: int = 0,
+    ) -> dict[str, Any]:
+        agent_id = str(agent.get("id") or f"agent_{index + 1}").strip()
+        return {
+            "id": agent_id or f"agent_{index + 1}",
+            "name": str(agent.get("name") or agent_id or f"AI {index + 1}"),
+            "style": str(agent.get("style") or "auto"),
+            "provider": str(agent.get("provider") or "openai-compatible"),
+            "model": str(agent.get("model") or ""),
+            "enabled": bool(agent.get("enabled", True)),
+            "prompt": str(agent.get("prompt") or ""),
+        }
+
+    def _arena_initial_cash(
+        self,
+        db: Session,
+        explicit_initial_cash: float | None,
+    ) -> float:
+        if explicit_initial_cash is not None:
+            return float(explicit_initial_cash)
+        app_settings = settings_service.get_or_create_settings(db)
+        value = getattr(app_settings, "arena_initial_cash", None)
+        try:
+            amount = float(value)
+        except (TypeError, ValueError):
+            amount = ARENA_DEFAULT_INITIAL_CASH
+        return amount if amount >= 10000 else ARENA_DEFAULT_INITIAL_CASH
+
+    def process_due_schedules(self) -> list[dict[str, Any]]:
+        settings = get_settings()
+        if not settings.arena_automation_enabled:
+            return []
+        now = self._now_shanghai()
+        if not self._is_trading_day(now):
+            return []
+
+        processed: list[dict[str, Any]] = []
+        with session_scope() as db:
+            agents = self.enabled_agents(db)
+            due_entries = self._due_schedule_entries(now=now, agents=agents)
+            for entry in due_entries:
+                slot_key = str(entry["slot_key"])
+                if self._schedule_slot_completed(db, slot_key=slot_key):
+                    continue
+                try:
+                    result = self.run_once(
+                        db,
+                        phase=str(entry["phase"]),
+                        agents=[entry["agent"]],
+                        initial_cash=None,
+                        schedule_context={
+                            "slot_key": slot_key,
+                            "label": entry["label"],
+                            "phase": entry["phase"],
+                            "agent_id": entry["agent_id"],
+                            "scheduled_at": entry["scheduled_at"].isoformat(),
+                            "window_start": entry["window_start"].isoformat(),
+                            "triggered_at": now.isoformat(),
+                        },
+                    )
+                    processed.append(
+                        {
+                            "slot_key": slot_key,
+                            "phase": entry["phase"],
+                            "agent_id": entry["agent_id"],
+                            "run_id": result["run_id"],
+                        }
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "arena scheduled run failed: slot_key=%s error=%s",
+                        slot_key,
+                        exc,
+                    )
+        return processed
+
+    def _is_trading_day(self, now: datetime) -> bool:
+        return now.weekday() < 5
+
+    def _due_schedule_entries(
+        self,
+        *,
+        now: datetime,
+        agents: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        localized_now = now
+        if localized_now.tzinfo is None:
+            localized_now = localized_now.replace(tzinfo=ARENA_SCHEDULE_TIMEZONE)
+        entries = self._schedule_entries_for_day(now=localized_now, agents=agents)
+        grace_minutes = max(1, min(get_settings().arena_schedule_grace_minutes, 30))
+        grace = timedelta(minutes=grace_minutes)
+        return [
+            entry
+            for entry in entries
+            if entry["scheduled_at"] <= localized_now < entry["scheduled_at"] + grace
+        ]
+
+    def _schedule_entries_for_day(
+        self,
+        *,
+        now: datetime,
+        agents: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not agents:
+            return []
+        localized_now = now
+        if localized_now.tzinfo is None:
+            localized_now = localized_now.replace(tzinfo=ARENA_SCHEDULE_TIMEZONE)
+        entries: list[dict[str, Any]] = []
+        normalized_agents = [
+            self._normalize_agent_payload(agent, index)
+            for index, agent in enumerate(agents)
+        ]
+        for window in ARENA_SCHEDULE_WINDOWS:
+            hour, minute = window["start"]
+            window_start = localized_now.replace(
+                hour=hour,
+                minute=minute,
+                second=0,
+                microsecond=0,
+            )
+            window_minutes = int(window["window_minutes"])
+            stagger_minutes = max(
+                1,
+                min(6, window_minutes // max(len(normalized_agents), 1)),
+            )
+            for index, agent in enumerate(normalized_agents):
+                scheduled_at = window_start + timedelta(minutes=index * stagger_minutes)
+                agent_id = str(agent["id"])
+                slot_key = (
+                    f"{scheduled_at.date().isoformat()}:"
+                    f"{window['phase']}:{window_start.strftime('%H%M')}:{agent_id}"
+                )
+                entries.append(
+                    {
+                        "slot_key": slot_key,
+                        "phase": window["phase"],
+                        "label": window["label"],
+                        "agent_id": agent_id,
+                        "agent": agent,
+                        "window_start": window_start,
+                        "scheduled_at": scheduled_at,
+                        "stagger_minutes": stagger_minutes,
+                    }
+                )
+        return entries
+
+    def _schedule_slot_completed(self, db: Session, *, slot_key: str) -> bool:
+        since = self._utcnow() - timedelta(days=2)
+        runs = db.scalars(
+            select(ArenaRun)
+            .where(ArenaRun.created_at >= since)
+            .order_by(ArenaRun.id.desc())
+            .limit(200)
+        ).all()
+        for run in runs:
+            payload = run.candidate_payload or {}
+            context = payload.get("schedule_context") or {}
+            if context.get("slot_key") == slot_key:
+                return True
+        return False
+
     def _build_agent_candidate_contexts(
         self,
         *,
         db: Session,
-        agents: list[dict[str, str]],
+        agents: list[dict[str, Any]],
         limit: int,
         lookback_days: int,
     ) -> dict[str, dict[str, Any]]:
@@ -479,7 +705,7 @@ class ArenaService:
     def _morning_recommendations(
         self,
         *,
-        agents: list[dict[str, str]],
+        agents: list[dict[str, Any]],
         agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
     ) -> list[dict[str, Any]]:
@@ -490,7 +716,7 @@ class ArenaService:
             candidates = candidate_context["candidates"]
             stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
             data_sources = candidate_context["data_sources"]
-            style = str(agent.get("style") or "balanced")
+            style = str(agent.get("style") or "auto")
             picks = self._morning_picks(
                 candidates=candidates,
                 style=style,
@@ -629,7 +855,7 @@ class ArenaService:
         self,
         *,
         db: Session,
-        agents: list[dict[str, str]],
+        agents: list[dict[str, Any]],
         agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
     ) -> list[dict[str, Any]]:
@@ -661,7 +887,7 @@ class ArenaService:
             memory = ArenaAgentMemory(
                 agent_id=agent_id,
                 agent_name=str(agent.get("name") or account.agent_name),
-                style=str(agent.get("style") or account.style),
+                style=str(agent.get("style") or account.style or "auto"),
                 memory_type="closing_review",
                 summary=summary,
                 metrics_payload=metrics_payload,
@@ -675,7 +901,7 @@ class ArenaService:
         self,
         *,
         db: Session,
-        agents: list[dict[str, str]],
+        agents: list[dict[str, Any]],
         agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
         initial_cash: float,
@@ -721,7 +947,7 @@ class ArenaService:
             memory = ArenaAgentMemory(
                 agent_id=agent_id,
                 agent_name=str(agent.get("name") or agent_id),
-                style=str(agent.get("style") or "balanced"),
+                style=str(agent.get("style") or "auto"),
                 memory_type="nightly_learning",
                 summary=summary,
                 metrics_payload=metrics_payload,
@@ -806,7 +1032,7 @@ class ArenaService:
             seen.add(agent_id)
             record = existing_by_id.get(agent_id) or ArenaAgentConfig(agent_id=agent_id)
             record.agent_name = str(agent.get("name") or agent_id)
-            record.style = str(agent.get("style") or "balanced")
+            record.style = str(agent.get("style") or "auto")
             record.provider = str(agent.get("provider") or "openai-compatible")
             record.model = str(agent.get("model") or "")
             record.prompt = str(agent.get("prompt") or "")
@@ -846,7 +1072,7 @@ class ArenaService:
         if record is None:
             record = ArenaAgentConfig(agent_id=normalized_id)
         record.agent_name = str(agent.get("name") or normalized_id)
-        record.style = str(agent.get("style") or "balanced")
+        record.style = str(agent.get("style") or "auto")
         record.provider = str(agent.get("provider") or "openai-compatible")
         record.model = str(agent.get("model") or "")
         record.prompt = str(agent.get("prompt") or "")
@@ -881,7 +1107,7 @@ class ArenaService:
             {
                 "id": item.agent_id,
                 "name": item.agent_name,
-                "style": item.style,
+                "style": "auto",
                 "provider": item.provider,
                 "model": item.model,
                 "prompt": item.prompt,
@@ -893,7 +1119,7 @@ class ArenaService:
         return {
             "id": item.agent_id,
             "name": item.agent_name,
-            "style": item.style,
+            "style": item.style or "auto",
             "provider": item.provider,
             "model": item.model,
             "enabled": item.enabled,
@@ -948,7 +1174,7 @@ class ArenaService:
             return {
                 "agent_id": agent["id"],
                 "agent_name": agent["name"],
-                "style": agent["style"],
+                "style": agent.get("style") or "auto",
                 "cash": 0,
                 "position_value": 0,
                 "total_assets": 0,
@@ -956,7 +1182,7 @@ class ArenaService:
                 "order_count": 0,
                 "realized_pnl": 0,
                 "positions": [],
-                "playbook": self._playbook_for_style(str(agent.get("style") or "balanced")),
+                "playbook": self._playbook_for_style(str(agent.get("style") or "auto")),
             }
         payload = self._leaderboard_item(account, include_positions=True)
         payload["playbook"] = self._playbook_for_style(account.style)
@@ -980,7 +1206,8 @@ class ArenaService:
     ) -> dict[str, Any] | None:
         if not candidates:
             return None
-        style = str(agent.get("style") or "balanced")
+        style = str(agent.get("style") or "auto")
+        fallback_style = self._fallback_style(style)
         llm_config = self._resolve_llm_config(agent=agent, app_settings=app_settings)
         dimension_request = None
         if llm_config is not None:
@@ -1049,15 +1276,15 @@ class ArenaService:
                 llm_decision=llm_decision["context"],
                 agent_index=agent_index,
             )
-        if style == "momentum":
+        if fallback_style == "momentum":
             allocation_ratio = 0.45
-        elif style == "risk_control":
+        elif fallback_style == "risk_control":
             allocation_ratio = 0.2
         else:
             allocation_ratio = 0.3
 
         budget = available_cash * allocation_ratio
-        preferred_index = 0 if style == "momentum" else min(agent_index, len(candidates) - 1)
+        preferred_index = 0 if fallback_style == "momentum" else min(agent_index, len(candidates) - 1)
         candidate = self._select_affordable_candidate(
             candidates=candidates,
             preferred_index=preferred_index,
@@ -1071,7 +1298,7 @@ class ArenaService:
             candidate=candidate,
             available_cash=available_cash,
             allocation_ratio=allocation_ratio,
-            reason=f"{style} 根据候选评分 {candidate['score']} 执行模拟买入。",
+            reason=f"{self._playbook_for_style(style)['label']} 根据候选评分 {candidate['score']} 执行模拟买入。",
             snapshot_id=snapshot_id,
             stock_pick_snapshot_id=stock_pick_snapshot_id,
             data_sources=data_sources,
@@ -1523,7 +1750,7 @@ class ArenaService:
         stock_pick_snapshot_id: str,
         data_sources: list[str],
     ) -> dict[str, Any] | None:
-        stop_loss = STOP_LOSS_BY_STYLE.get(account.style, 0.06)
+        stop_loss = STOP_LOSS_BY_STYLE.get(self._fallback_style(account.style), 0.06)
         for position in account.positions:
             if position.quantity <= 0 or position.avg_cost <= 0 or position.last_price <= 0:
                 continue
@@ -1579,7 +1806,7 @@ class ArenaService:
             "agent": {
                 "id": str(agent.get("id") or ""),
                 "name": str(agent.get("name") or ""),
-                "style": str(agent.get("style") or "balanced"),
+                "style": str(agent.get("style") or "auto"),
                 "provider": str(agent.get("provider") or "openai-compatible"),
                 "model": str(agent.get("model") or ""),
                 "prompt": str(agent.get("prompt") or ""),
@@ -1647,7 +1874,7 @@ class ArenaService:
         account = ArenaAccount(
             agent_id=agent_id,
             agent_name=str(agent.get("name") or agent_id),
-            style=str(agent.get("style") or "balanced"),
+            style=str(agent.get("style") or "auto"),
             initial_cash=initial_cash,
             cash=initial_cash,
         )
@@ -1768,7 +1995,8 @@ class ArenaService:
     ) -> list[dict[str, Any]]:
         if not candidates:
             return []
-        if style == "risk_control":
+        fallback_style = self._fallback_style(style)
+        if fallback_style == "risk_control":
             ordered = sorted(
                 candidates,
                 key=lambda item: (
@@ -1777,7 +2005,7 @@ class ArenaService:
                 ),
                 reverse=True,
             )
-        elif style == "balanced":
+        elif fallback_style == "balanced":
             ordered = candidates[agent_index:] + candidates[:agent_index]
         else:
             ordered = candidates
@@ -1810,11 +2038,25 @@ class ArenaService:
                 "label": "长线稳健",
                 "holding_period": "2周以上",
             }
+        if style == "auto":
+            return {
+                "mode": "ai_adaptive",
+                "label": "AI自适应",
+                "holding_period": "由AI按市场判断",
+            }
         return {
             "mode": "quant_rotation",
             "label": "量化轮动",
             "holding_period": "3-10个交易日",
         }
+
+    def _fallback_style(self, style: str) -> str:
+        normalized = str(style or "auto").strip()
+        if normalized == "auto":
+            return "balanced"
+        if normalized in {"momentum", "balanced", "risk_control"}:
+            return normalized
+        return "balanced"
 
     def _recent_agent_recommendations(
         self,

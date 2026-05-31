@@ -41,6 +41,7 @@ class AppSettingsBase(BaseModel):
     system_prompt: str = Field(max_length=20000)
     automation_session_id: int | None = None
     automation_context_window_tokens: int | None = Field(default=128000, ge=4096)
+    arena_initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
     automation_recent_message_limit: int = Field(default=24, ge=4, le=200)
     automation_enable_auto_compaction: bool = True
     automation_idle_summary_hours: int = Field(default=12, ge=1, le=168)
@@ -754,7 +755,7 @@ class QuantResearchResponse(BaseModel):
 class ArenaAgentRequest(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=120)
-    style: Literal["momentum", "balanced", "risk_control"] = "balanced"
+    style: Literal["auto", "momentum", "balanced", "risk_control"] = "auto"
     provider: str = Field(default="openai-compatible", max_length=64)
     model: str = Field(default="", max_length=128)
     enabled: bool = True
@@ -772,7 +773,7 @@ ArenaPhase = Literal[
 class ArenaRunRequest(BaseModel):
     phase: ArenaPhase = "intraday_trade"
     agents: list[ArenaAgentRequest] | None = None
-    initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
+    initial_cash: float | None = Field(default=None, ge=10000, le=100000000)
 
 
 class ArenaAgentsUpdateRequest(BaseModel):

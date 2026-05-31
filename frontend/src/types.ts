@@ -17,6 +17,7 @@ export interface AppSettings {
   llm_model: string
   llm_provider_configs: Record<string, Record<string, unknown>>
   automation_context_window_tokens: number | null
+  arena_initial_cash: number
   system_prompt: string
   forecast_ai_config: ForecastAIConfig
   created_at: string
@@ -754,7 +755,7 @@ export interface QuantResearchPayload {
 export interface ArenaAgentConfig {
   id: string
   name: string
-  style: 'momentum' | 'balanced' | 'risk_control'
+  style: 'auto' | 'momentum' | 'balanced' | 'risk_control'
   provider?: string
   model?: string
   enabled?: boolean

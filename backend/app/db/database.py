@@ -82,6 +82,10 @@ def _ensure_app_settings_columns(engine) -> None:
         statements.append(
             "ALTER TABLE app_settings ADD COLUMN automation_context_window_tokens INTEGER DEFAULT 128000"
         )
+    if "arena_initial_cash" not in columns:
+        statements.append(
+            "ALTER TABLE app_settings ADD COLUMN arena_initial_cash FLOAT DEFAULT 200000"
+        )
     if "automation_recent_message_limit" not in columns:
         statements.append(
             "ALTER TABLE app_settings ADD COLUMN automation_recent_message_limit INTEGER DEFAULT 24"
@@ -116,6 +120,7 @@ def _ensure_app_settings_columns(engine) -> None:
                 "UPDATE app_settings SET automation_context_window_tokens = CASE "
                 "WHEN automation_context_window_tokens IS NULL OR automation_context_window_tokens = 65536 THEN 128000 "
                 "ELSE automation_context_window_tokens END, "
+                "arena_initial_cash = COALESCE(arena_initial_cash, 200000), "
                 "automation_recent_message_limit = COALESCE(automation_recent_message_limit, 24), "
                 "automation_enable_auto_compaction = COALESCE(automation_enable_auto_compaction, 1), "
                 "automation_idle_summary_hours = COALESCE(automation_idle_summary_hours, 12), "

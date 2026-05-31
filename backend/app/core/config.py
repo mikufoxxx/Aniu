@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     market_data_maintenance_dataset_limit: int = Field(
         default=1000, alias="MARKET_DATA_MAINTENANCE_DATASET_LIMIT"
     )
+    arena_initial_cash: float = Field(default=200000.0, alias="ARENA_INITIAL_CASH")
+    arena_automation_enabled: bool = Field(
+        default=True, alias="ARENA_AUTOMATION_ENABLED"
+    )
+    arena_schedule_grace_minutes: int = Field(
+        default=4, alias="ARENA_SCHEDULE_GRACE_MINUTES"
+    )
     ai_market_context_enabled: bool = Field(
         default=True, alias="AI_MARKET_CONTEXT_ENABLED"
     )

@@ -56,6 +56,7 @@ class AppSettings(Base):
     automation_context_window_tokens: Mapped[int | None] = mapped_column(
         Integer, nullable=True, default=128000
     )
+    arena_initial_cash: Mapped[float] = mapped_column(Float, default=200000.0)
     automation_recent_message_limit: Mapped[int] = mapped_column(
         Integer, default=24
     )

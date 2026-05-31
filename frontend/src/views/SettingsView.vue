@@ -74,6 +74,17 @@
               </div>
             </div>
             <label class="field">
+              <span>竞技场统一初始资金</span>
+              <input
+                v-model.number="settings.arena_initial_cash"
+                type="number"
+                min="10000"
+                max="100000000"
+                step="10000"
+              />
+              <p class="field-help">用于新 AI 账户和自动定时任务；已有账户不自动重置。</p>
+            </label>
+            <label class="field">
               <span>系统提示词</span>
               <textarea v-model="settings.system_prompt" rows="8" />
               <p class="field-help">指导大模型行为的系统提示词，会影响 AI 的分析和决策方式。</p>

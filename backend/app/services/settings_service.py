@@ -28,8 +28,14 @@ class SettingsService:
                 llm_api_key=env.openai_api_key,
                 llm_model=env.openai_model,
                 llm_provider_configs={},
+                arena_initial_cash=env.arena_initial_cash,
                 system_prompt=DEFAULT_SYSTEM_PROMPT,
             )
+            db.add(instance)
+            db.commit()
+            db.refresh(instance)
+        if not getattr(instance, "arena_initial_cash", None):
+            instance.arena_initial_cash = get_settings().arena_initial_cash
             db.add(instance)
             db.commit()
             db.refresh(instance)

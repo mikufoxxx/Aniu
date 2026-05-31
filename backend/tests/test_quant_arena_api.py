@@ -1,6 +1,8 @@
 from pathlib import Path
+from datetime import datetime
 import json
 import sys
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -2529,13 +2531,13 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert dashboard_response.status_code == 200
     payload = dashboard_response.json()
     assert payload["agent"]["id"] == "detail_ai"
-    assert payload["summary"]["playbook"]["mode"] == "short_swing"
+    assert payload["summary"]["playbook"]["mode"] == "ai_adaptive"
     assert payload["summary"]["total_assets"] > 0
     assert len(payload["morning"]["recommendations"]) == 1
     morning = payload["morning"]["recommendations"][0]
     assert len(morning["picks"]) == 5
     assert len(morning["picks"]) < 6
-    assert morning["playbook"]["mode"] == "short_swing"
+    assert morning["playbook"]["mode"] == "ai_adaptive"
     assert morning["name"] != morning["symbol"]
     assert all(pick["name"] != pick["symbol"] for pick in morning["picks"])
     assert all(pick["ai_selection_score"] > 0 for pick in morning["picks"])
@@ -2591,6 +2593,128 @@ def test_arena_ai_config_and_default_agents_reflect_forecast_models(
         "model_deepseek_v4_pro",
         "model_minimax_m2_7",
     ]
+
+    _reset_state()
+
+
+def test_arena_run_uses_unified_initial_cash_setting(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 2.0,
+                "amount": 1_000_000,
+                "turnover": 0.6,
+                "volume_ratio": 1.2,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 09:45:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        settings_payload = client.get("/api/aniu/settings", headers=headers).json()
+        settings_payload["arena_initial_cash"] = 500000
+        update_response = client.put(
+            "/api/aniu/settings",
+            headers=headers,
+            json=settings_payload,
+        )
+        run_response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "agents": [
+                    {"id": "cash_ai", "name": "资金 AI", "style": "auto"},
+                ],
+            },
+        )
+        with session_scope() as db:
+            stored_run = db.get(ArenaRun, run_response.json()["run_id"])
+            account = db.scalar(select(ArenaAccount).where(ArenaAccount.agent_id == "cash_ai"))
+
+    assert update_response.status_code == 200
+    assert update_response.json()["arena_initial_cash"] == 500000
+    assert run_response.status_code == 200
+    assert stored_run is not None
+    assert stored_run.initial_cash == 500000
+    assert account is not None
+    assert account.initial_cash == 500000
+
+    _reset_state()
+
+
+def test_arena_schedule_staggers_agents_and_skips_completed_slots(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.arena_service import arena_service
+
+    now = datetime(2026, 6, 1, 8, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    agents = [{"id": f"ai_{index}", "name": f"AI {index}", "style": "auto"} for index in range(5)]
+
+    entries = [
+        entry
+        for entry in arena_service._schedule_entries_for_day(now=now, agents=agents)
+        if entry["phase"] == "morning_recommendation"
+    ]
+
+    assert [entry["scheduled_at"].strftime("%H:%M") for entry in entries] == [
+        "08:00",
+        "08:06",
+        "08:12",
+        "08:18",
+        "08:24",
+    ]
+    assert entries[-1]["scheduled_at"].strftime("%H:%M") <= "08:30"
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        save_response = client.put(
+            "/api/aniu/arena/agents",
+            headers=headers,
+            json={"agents": [{"id": "ai_0", "name": "AI 0", "style": "auto"}]},
+        )
+        calls: list[dict[str, object]] = []
+
+        def fake_run_once(db, **kwargs):
+            schedule_context = dict(kwargs.get("schedule_context") or {})
+            calls.append(
+                {
+                    "phase": kwargs["phase"],
+                    "agents": kwargs["agents"],
+                    "initial_cash": kwargs["initial_cash"],
+                    "schedule_context": schedule_context,
+                }
+            )
+            run = ArenaRun(
+                status="completed",
+                phase=str(kwargs["phase"]),
+                initial_cash=200000,
+                candidate_payload={"schedule_context": schedule_context},
+                leaderboard_payload=[],
+            )
+            db.add(run)
+            db.flush()
+            return {"run_id": run.id}
+
+        monkeypatch.setattr(arena_service, "_now_shanghai", lambda: now)
+        monkeypatch.setattr(arena_service, "run_once", fake_run_once)
+        first = arena_service.process_due_schedules()
+        second = arena_service.process_due_schedules()
+
+    assert save_response.status_code == 200
+    assert len(first) == 1
+    assert second == []
+    assert len(calls) == 1
+    assert calls[0]["initial_cash"] is None
+    assert calls[0]["schedule_context"]["slot_key"].endswith(":ai_0")
 
     _reset_state()
 

@@ -921,11 +921,49 @@ export interface StockAnalysisPayload {
       source?: string
       run_types?: string[]
     } | null
+    selected_skills?: Array<{
+      id: string
+      name: string
+      description?: string
+      source?: string
+      run_types?: string[]
+    }>
   }
+  analysis_report: StockAnalysisReportPayload
   data_sources: string[]
   context: string
   stock_pick_snapshot?: AIStockPicksPayload | null
   charts: StockAnalysisCharts
+}
+
+export interface StockAnalysisReportPayload {
+  id: number
+  symbol: string
+  name: string
+  title: string
+  model: string
+  action: string
+  rating: string
+  summary: string
+  selected_skills: Array<{
+    id: string
+    name: string
+    description?: string
+    source?: string
+    run_types?: string[]
+  }>
+  sections: Array<{
+    id: string
+    title: string
+    content: string
+    items?: Array<{
+      label: string
+      value: string
+      skill_id?: string
+    }>
+  }>
+  source_snapshot: Record<string, unknown>
+  created_at?: string | null
 }
 
 export interface ChatToolCall {

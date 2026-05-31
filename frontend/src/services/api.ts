@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload, ArenaOrderForecastPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload, ArenaOrderForecastPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload, StockAnalysisReportPayload } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -480,12 +480,15 @@ export const api = {
       timeoutMs: 60000,
     })
   },
-  analyzeStock(payload: { symbol: string; initial_cash?: number; model?: string; skill_id?: string }) {
+  analyzeStock(payload: { symbol: string; initial_cash?: number; model?: string; skill_id?: string; skill_ids?: string[] }) {
     return request<StockAnalysisPayload>(`${API_PREFIX}/stocks/analyze`, {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 60000,
     })
+  },
+  getStockAnalysisReport(reportId: number) {
+    return request<StockAnalysisReportPayload>(`${API_PREFIX}/stocks/analysis-reports/${encodeURIComponent(String(reportId))}`)
   },
   getArenaAgents() {
     return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents`)

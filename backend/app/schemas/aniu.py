@@ -884,6 +884,22 @@ class StockAnalysisRequest(BaseModel):
     initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
     model: str | None = Field(default=None, max_length=128)
     skill_id: str | None = Field(default=None, max_length=128)
+    skill_ids: list[str] = Field(default_factory=list, max_length=8)
+
+
+class StockAnalysisReportResponse(BaseModel):
+    id: int
+    symbol: str
+    name: str
+    title: str
+    model: str
+    action: str
+    rating: str
+    summary: str
+    selected_skills: list[dict[str, Any]] = Field(default_factory=list)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    source_snapshot: dict[str, Any] = Field(default_factory=dict)
+    created_at: str | None = None
 
 
 class StockAnalysisResponse(BaseModel):
@@ -898,6 +914,7 @@ class StockAnalysisResponse(BaseModel):
     retail_analysis: dict[str, Any] = Field(default_factory=dict)
     llm_decision: dict[str, Any] = Field(default_factory=dict)
     analysis_config: dict[str, Any] = Field(default_factory=dict)
+    analysis_report: StockAnalysisReportResponse
     data_sources: list[str]
     context: str
     stock_pick_snapshot: AIStockPicksResponse | None = None

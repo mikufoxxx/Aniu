@@ -605,6 +605,25 @@ class MarketReport(Base):
     )
 
 
+class StockAnalysisReport(Base):
+    __tablename__ = "stock_analysis_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="")
+    title: Mapped[str] = mapped_column(String(160), default="")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    action: Mapped[str] = mapped_column(String(16), default="HOLD")
+    rating: Mapped[str] = mapped_column(String(64), default="")
+    selected_skills_payload: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    report_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+
+
 class MarketDataMaintenanceRun(Base):
     __tablename__ = "market_data_maintenance_runs"
 

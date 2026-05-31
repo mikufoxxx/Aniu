@@ -39,6 +39,11 @@ const router = createRouter({
       component: () => import('@/views/StockAnalysisView.vue')
     },
     {
+      path: '/stock-analysis/reports/:reportId',
+      name: 'stock-analysis-report',
+      component: () => import('@/views/StockAnalysisReportView.vue')
+    },
+    {
       path: '/data-lab',
       name: 'data-lab',
       component: () => import('@/views/DataLabView.vue')

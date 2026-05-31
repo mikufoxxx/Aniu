@@ -1980,6 +1980,133 @@ def test_stock_analysis_uses_selected_forecast_model_and_skill(
     _reset_state()
 
 
+def test_stock_analysis_uses_multiple_skills_and_persists_report(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    monkeypatch.setenv("FORECAST_AI_BASE_URL", "https://ai.example/v1")
+    monkeypatch.setenv("FORECAST_AI_API_KEY", "forecast-secret-key")
+    monkeypatch.setenv("FORECAST_AI_MODELS", "deepseek-v4-pro,minimax-m2.7")
+
+    calls: list[dict[str, object]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.0,
+                "change_pct": 4.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.8,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:20:00",
+            }
+        ]
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        calls.append(
+            {
+                "base_url": base_url,
+                "api_key": api_key,
+                "payload": payload,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "BUY",
+                                "rating": "多技能观察",
+                                "target_allocation_ratio": 0.16,
+                                "reason": "深度研究和风险检测汇总后建议轻仓观察。",
+                                "report_summary": "多技能汇总显示趋势可跟踪，但需排除异常推广风险。",
+                                "skill_opinions": [
+                                    {
+                                        "skill_id": "uzi_deep_analysis",
+                                        "stance": "bullish",
+                                        "summary": "基本面和趋势结构可继续观察。",
+                                    },
+                                    {
+                                        "skill_id": "uzi_trap_detector",
+                                        "stance": "neutral",
+                                        "summary": "暂未确认高危推广信号，但需要持续跟踪。",
+                                    },
+                                ],
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260526", open=9.8, high=10.3, low=9.7, close=10, amount=500))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260527", open=10.0, high=11.1, low=9.9, close=11, amount=800))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", open=11.0, high=12.2, low=10.8, close=12, amount=1200))
+        response = client.post(
+            "/api/aniu/stocks/analyze",
+            headers=headers,
+            json={
+                "symbol": "000001.SZ",
+                "initial_cash": 200000,
+                "model": "deepseek-v4-pro",
+                "skill_ids": ["uzi_deep_analysis", "uzi_trap_detector"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert calls
+    prompt = calls[0]["payload"]["messages"][1]["content"]
+    assert "uzi_deep_analysis" in prompt
+    assert "uzi_trap_detector" in prompt
+    assert "UZI 深度分析" in prompt
+    assert "UZI 杀猪盘检测" in prompt
+    payload = response.json()
+    assert [item["id"] for item in payload["analysis_config"]["selected_skills"]] == [
+        "uzi_deep_analysis",
+        "uzi_trap_detector",
+    ]
+    report = payload["analysis_report"]
+    assert report["id"] > 0
+    assert report["symbol"] == "000001.SZ"
+    assert report["model"] == "deepseek-v4-pro"
+    assert [item["id"] for item in report["selected_skills"]] == [
+        "uzi_deep_analysis",
+        "uzi_trap_detector",
+    ]
+    assert "多技能汇总" in report["summary"]
+    assert len(report["sections"]) >= 3
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        detail_response = client.get(
+            f"/api/aniu/stocks/analysis-reports/{report['id']}",
+            headers=headers,
+        )
+
+    assert detail_response.status_code == 200
+    detail_payload = detail_response.json()
+    assert detail_payload["id"] == report["id"]
+    assert detail_payload["summary"] == report["summary"]
+    assert "forecast-secret-key" not in detail_response.text
+
+    _reset_state()
+
+
 def test_arena_order_context_includes_retail_a_share_analysis(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 

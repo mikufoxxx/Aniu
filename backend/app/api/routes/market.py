@@ -45,6 +45,7 @@ from app.schemas.aniu import (
     QuantResearchRequest,
     QuantResearchResponse,
     StockAnalysisRequest,
+    StockAnalysisReportResponse,
     StockAnalysisResponse,
 )
 from app.services.ai_market_context_service import ai_market_context_service
@@ -369,9 +370,22 @@ def analyze_stock(
             initial_cash=payload.initial_cash,
             model=payload.model,
             skill_id=payload.skill_id,
+            skill_ids=payload.skill_ids,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/stocks/analysis-reports/{report_id}", response_model=StockAnalysisReportResponse)
+def get_stock_analysis_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> StockAnalysisReportResponse:
+    report = stock_analysis_service.get_report(db, report_id=report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="股票分析报告不存在。")
+    return report
 
 
 @router.post("/arena/run", response_model=ArenaRunResponse)

@@ -74,12 +74,22 @@
             </label>
             <label>
               Skill
-              <select v-model="selectedSkillId">
-                <option value="">不指定</option>
-                <option v-for="skill in analysisSkills" :key="skill.id" :value="skill.id">
+              <div class="analysis-skill-picker">
+                <button
+                  v-for="skill in analysisSkills"
+                  :key="skill.id"
+                  class="analysis-skill-chip"
+                  :class="{ selected: isSkillSelected(skill.id) }"
+                  type="button"
+                  @click="toggleSkill(skill.id)"
+                >
+                  <span class="material-symbols-rounded" aria-hidden="true">
+                    {{ isSkillSelected(skill.id) ? 'check_circle' : 'radio_button_unchecked' }}
+                  </span>
                   {{ skill.name }}
-                </option>
-              </select>
+                </button>
+                <span v-if="!analysisSkills.length" class="analysis-skill-empty">暂无可用 Skill</span>
+              </div>
             </label>
             <button class="button primary small" :disabled="!selectedSymbol || analyzing" @click="analyzeSelected">
               <span class="material-symbols-rounded" aria-hidden="true">analytics</span>
@@ -112,10 +122,23 @@
           </div>
           <div class="analysis-config-strip">
             <span>模型 {{ analysis.analysis_config.selected_model || selectedModel || '--' }}</span>
-            <span>Skill {{ analysis.analysis_config.selected_skill?.name || '未指定' }}</span>
+            <span>Skill {{ selectedSkillNames(analysis.analysis_config.selected_skills).join(' / ') || '未指定' }}</span>
             <span>接口 {{ analysis.analysis_config.ai_config?.base_url || aiConfig.base_url || '--' }}</span>
             <span>Key {{ analysis.analysis_config.ai_config?.api_key_configured ? analysis.analysis_config.ai_config.api_key_masked : '未配置' }}</span>
           </div>
+          <button
+            v-if="analysis.analysis_report"
+            class="analysis-report-card"
+            type="button"
+            @click="openReport(analysis.analysis_report.id)"
+          >
+            <span class="material-symbols-rounded" aria-hidden="true">article</span>
+            <div>
+              <strong>{{ analysis.analysis_report.title }}</strong>
+              <small>{{ analysis.analysis_report.summary }}</small>
+            </div>
+            <span class="material-symbols-rounded" aria-hidden="true">chevron_right</span>
+          </button>
           <div v-if="retailAnalysis" class="retail-analysis">
             <div class="retail-analysis-head">
               <strong>散户 A 股分析</strong>
@@ -191,6 +214,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ForecastAIConfig, QuantCandidate, SkillListItem, StockAnalysisPayload } from '@/types'
 import DistributionChart from '@/components/charts/DistributionChart.vue'
@@ -199,6 +223,7 @@ import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
 import TechnicalIndicatorChart from '@/components/charts/TechnicalIndicatorChart.vue'
 import VolumeProfileChart from '@/components/charts/VolumeProfileChart.vue'
 
+const router = useRouter()
 const candidateLimit = ref(5)
 const symbolText = ref('')
 const candidates = ref<QuantCandidate[]>([])
@@ -216,7 +241,7 @@ const aiConfig = ref<ForecastAIConfig>({
 })
 const skills = ref<SkillListItem[]>([])
 const selectedModel = ref('')
-const selectedSkillId = ref('')
+const selectedSkillIds = ref<string[]>([])
 
 interface RetailDimension {
   key: string
@@ -281,6 +306,24 @@ function selectCandidate(symbol: string): void {
   selectedSymbol.value = symbol
 }
 
+function isSkillSelected(skillId: string): boolean {
+  return selectedSkillIds.value.includes(skillId)
+}
+
+function toggleSkill(skillId: string): void {
+  selectedSkillIds.value = isSkillSelected(skillId)
+    ? selectedSkillIds.value.filter((item) => item !== skillId)
+    : [...selectedSkillIds.value, skillId]
+}
+
+function selectedSkillNames(skillsPayload: StockAnalysisPayload['analysis_config']['selected_skills'] = []): string[] {
+  return (skillsPayload ?? []).map((skill) => skill.name).filter(Boolean)
+}
+
+function openReport(reportId: number): void {
+  router.push({ name: 'stock-analysis-report', params: { reportId: String(reportId) } })
+}
+
 async function analyzeSelected(): Promise<void> {
   if (!selectedSymbol.value) return
   analyzing.value = true
@@ -290,7 +333,7 @@ async function analyzeSelected(): Promise<void> {
       symbol: selectedSymbol.value,
       initial_cash: 200000,
       model: selectedModel.value || undefined,
-      skill_id: selectedSkillId.value || undefined,
+      skill_ids: selectedSkillIds.value,
     })
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '股票分析失败。'
@@ -379,10 +422,10 @@ onMounted(() => {
 
 .analysis-ai-controls {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1.3fr) auto;
   gap: 8px;
   align-items: end;
-  min-width: min(100%, 520px);
+  min-width: min(100%, 650px);
 }
 
 .analysis-controls label,
@@ -403,6 +446,41 @@ onMounted(() => {
   background: #ffffff;
   color: #111827;
   padding: 9px 10px;
+}
+
+.analysis-skill-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 360px;
+}
+
+.analysis-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #374151;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.analysis-skill-chip.selected {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
+}
+
+.analysis-skill-chip .material-symbols-rounded {
+  font-size: 15px;
+}
+
+.analysis-skill-empty {
+  color: #9ca3af;
+  font-size: 12px;
 }
 
 .analysis-controls input {
@@ -490,6 +568,39 @@ onMounted(() => {
   color: #374151;
   padding: 5px 8px;
   font-size: 12px;
+}
+
+.analysis-report-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 20px;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfbfc;
+  color: #111827;
+  padding: 12px;
+  text-align: left;
+}
+
+.analysis-report-card:hover {
+  border-color: #111827;
+  background: #ffffff;
+}
+
+.analysis-report-card div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.analysis-report-card small {
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .analysis-chart-grid {

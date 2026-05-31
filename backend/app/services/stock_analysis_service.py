@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.db.models import StockAnalysisReport
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.core.config import get_settings
 from app.services.chart_data_service import chart_data_service
@@ -25,6 +26,7 @@ class StockAnalysisService:
         initial_cash: float,
         model: str | None = None,
         skill_id: str | None = None,
+        skill_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         normalized_symbol = normalize_symbol(symbol)
@@ -51,7 +53,10 @@ class StockAnalysisService:
             initial_cash=initial_cash,
         )
         retail_analysis = a_share_retail_analysis_service.build(candidate)
-        selected_skill = self._selected_analysis_skill(skill_id)
+        selected_skills = self._selected_analysis_skills(
+            skill_ids=skill_ids,
+            legacy_skill_id=skill_id,
+        )
         llm_decision = self._llm_decision(
             db=db,
             candidate=candidate,
@@ -59,7 +64,7 @@ class StockAnalysisService:
             decision=decision,
             retail_analysis=retail_analysis,
             selected_model=model,
-            selected_skill=selected_skill,
+            selected_skills=selected_skills,
         )
         if llm_decision.get("used"):
             decision = self._merge_llm_decision(decision, llm_decision)
@@ -70,6 +75,19 @@ class StockAnalysisService:
             price=float(candidate.get("price") or 0),
             quantity=int(decision.get("suggested_quantity") or 0),
             factor_scores=candidate.get("factor_scores") or {},
+        )
+        selected_model = str(llm_decision.get("model") or model or "")
+        analysis_report = self._save_analysis_report(
+            db=db,
+            symbol=normalized_symbol,
+            name=str(candidate.get("name") or normalized_symbol),
+            model=selected_model,
+            selected_skills=selected_skills,
+            candidate=candidate,
+            decision=decision,
+            retail_analysis=retail_analysis,
+            llm_decision=llm_decision,
+            data_sources=snapshot["data_sources"],
         )
 
         return {
@@ -85,9 +103,11 @@ class StockAnalysisService:
             "llm_decision": llm_decision,
             "analysis_config": {
                 "ai_config": ai_forecast_service.public_config(),
-                "selected_model": str(llm_decision.get("model") or model or ""),
-                "selected_skill": self._public_skill(selected_skill),
+                "selected_model": selected_model,
+                "selected_skill": self._public_skill(selected_skills[0]) if selected_skills else None,
+                "selected_skills": [self._public_skill(skill) for skill in selected_skills],
             },
+            "analysis_report": analysis_report,
             "data_sources": snapshot["data_sources"],
             "context": snapshot["context"],
             "stock_pick_snapshot": snapshot,
@@ -145,7 +165,7 @@ class StockAnalysisService:
         decision: dict[str, Any],
         retail_analysis: dict[str, Any],
         selected_model: str | None,
-        selected_skill: dict[str, Any] | None,
+        selected_skills: list[dict[str, Any]],
     ) -> dict[str, Any]:
         app_settings = settings_service.get_or_create_settings(db)
         llm_config = self._resolve_llm_config(
@@ -172,12 +192,23 @@ class StockAnalysisService:
                             "retail_analysis": retail_analysis,
                             "market_context": context,
                             "fallback_decision": decision,
-                            "selected_skill": self._prompt_skill(selected_skill),
+                            "selected_skills": [
+                                self._prompt_skill(skill)
+                                for skill in selected_skills
+                            ],
                             "output_schema": {
                                 "action": "BUY, HOLD or SELL",
                                 "rating": "一句短评级",
                                 "target_allocation_ratio": "0到1之间的小数",
                                 "reason": "一句话说明依据",
+                                "report_summary": "多技能汇总后的报告摘要",
+                                "skill_opinions": [
+                                    {
+                                        "skill_id": "对应 selected_skills.id",
+                                        "stance": "bullish, neutral or bearish",
+                                        "summary": "该技能视角下的核心结论",
+                                    }
+                                ],
                             },
                         },
                         ensure_ascii=False,
@@ -201,7 +232,8 @@ class StockAnalysisService:
                 "used": True,
                 "provider": llm_config["provider"],
                 "model": model,
-                "skill": self._public_skill(selected_skill),
+                "skill": self._public_skill(selected_skills[0]) if selected_skills else None,
+                "skills": [self._public_skill(skill) for skill in selected_skills],
                 "raw_decision": raw,
                 "action": action,
                 "rating": str(raw.get("rating") or decision["rating"]),
@@ -258,28 +290,41 @@ class StockAnalysisService:
             }
         return None
 
-    def _selected_analysis_skill(self, skill_id: str | None) -> dict[str, Any] | None:
-        normalized = str(skill_id or "").strip()
-        if not normalized:
-            return None
-        package = next(
-            (
-                item
-                for item in skill_registry.enabled_packages()
-                if item.id == normalized and item.supports_run_type("analysis")
-            ),
-            None,
-        )
-        if package is None:
-            return None
-        return {
-            "id": package.id,
-            "name": package.name,
-            "description": package.description,
-            "source": package.source,
-            "run_types": package.run_types,
-            "prompt": package.sop_text[:6000],
+    def _selected_analysis_skills(
+        self,
+        *,
+        skill_ids: list[str] | None,
+        legacy_skill_id: str | None,
+    ) -> list[dict[str, Any]]:
+        requested: list[str] = []
+        for value in [*(skill_ids or []), legacy_skill_id]:
+            normalized = str(value or "").strip()
+            if normalized and normalized not in requested:
+                requested.append(normalized)
+        if not requested:
+            return []
+
+        packages = {
+            item.id: item
+            for item in skill_registry.enabled_packages()
+            if item.supports_run_type("analysis")
         }
+        selected: list[dict[str, Any]] = []
+        for skill_id in requested[:8]:
+            package = packages.get(skill_id)
+            if package is None:
+                continue
+            selected.append(
+                {
+                    "id": package.id,
+                    "name": package.name,
+                    "description": package.description,
+                    "source": package.source,
+                    "run_types": package.run_types,
+                    "prompt": package.sop_text[:6000],
+                }
+            )
+        return selected
 
     def _public_skill(self, skill: dict[str, Any] | None) -> dict[str, Any] | None:
         if not skill:
@@ -299,6 +344,179 @@ class StockAnalysisService:
             **(self._public_skill(skill) or {}),
             "instructions": skill.get("prompt") or "",
         }
+
+    def _save_analysis_report(
+        self,
+        *,
+        db: Session,
+        symbol: str,
+        name: str,
+        model: str,
+        selected_skills: list[dict[str, Any]],
+        candidate: dict[str, Any],
+        decision: dict[str, Any],
+        retail_analysis: dict[str, Any],
+        llm_decision: dict[str, Any],
+        data_sources: list[str],
+    ) -> dict[str, Any]:
+        payload = self._build_analysis_report_payload(
+            report_id=0,
+            symbol=symbol,
+            name=name,
+            model=model,
+            selected_skills=selected_skills,
+            candidate=candidate,
+            decision=decision,
+            retail_analysis=retail_analysis,
+            llm_decision=llm_decision,
+            data_sources=data_sources,
+            created_at=None,
+        )
+        record = StockAnalysisReport(
+            symbol=symbol,
+            name=name,
+            title=payload["title"],
+            model=model,
+            action=decision["action"],
+            rating=decision["rating"],
+            selected_skills_payload=payload["selected_skills"],
+            report_payload=payload,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        payload["id"] = record.id
+        payload["created_at"] = record.created_at.isoformat() if record.created_at else None
+        record.report_payload = payload
+        db.add(record)
+        db.commit()
+        return payload
+
+    def get_report(self, db: Session, *, report_id: int) -> dict[str, Any] | None:
+        record = db.get(StockAnalysisReport, report_id)
+        if record is None:
+            return None
+        payload = dict(record.report_payload or {})
+        payload.setdefault("id", record.id)
+        payload.setdefault("symbol", record.symbol)
+        payload.setdefault("name", record.name)
+        payload.setdefault("title", record.title)
+        payload.setdefault("model", record.model)
+        payload.setdefault("action", record.action)
+        payload.setdefault("rating", record.rating)
+        payload.setdefault("summary", "")
+        payload.setdefault("selected_skills", list(record.selected_skills_payload or []))
+        payload.setdefault("sections", [])
+        payload.setdefault("source_snapshot", {})
+        payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
+        return payload
+
+    def _build_analysis_report_payload(
+        self,
+        *,
+        report_id: int,
+        symbol: str,
+        name: str,
+        model: str,
+        selected_skills: list[dict[str, Any]],
+        candidate: dict[str, Any],
+        decision: dict[str, Any],
+        retail_analysis: dict[str, Any],
+        llm_decision: dict[str, Any],
+        data_sources: list[str],
+        created_at: str | None,
+    ) -> dict[str, Any]:
+        raw = llm_decision.get("raw_decision") if llm_decision.get("used") else {}
+        raw = raw if isinstance(raw, dict) else {}
+        summary = str(raw.get("report_summary") or decision["reason"])
+        selected_public_skills = [self._public_skill(skill) for skill in selected_skills]
+        sections = [
+            {
+                "id": "decision",
+                "title": "交易结论",
+                "content": decision["reason"],
+                "items": [
+                    {"label": "动作", "value": decision["action"]},
+                    {"label": "评级", "value": decision["rating"]},
+                    {"label": "目标仓位", "value": f"{float(decision.get('target_allocation_ratio') or 0) * 100:.1f}%"},
+                ],
+            },
+            {
+                "id": "skill_synthesis",
+                "title": "多 Skill 汇总",
+                "content": summary,
+                "items": self._skill_opinion_items(
+                    selected_skills=selected_skills,
+                    raw_opinions=raw.get("skill_opinions"),
+                ),
+            },
+            {
+                "id": "risk",
+                "title": "风险与观察点",
+                "content": self._risk_summary(retail_analysis),
+                "items": [
+                    {"label": "风险等级", "value": retail_analysis.get("risk_level") or "--"},
+                    {"label": "行动信号", "value": retail_analysis.get("action_signal") or "--"},
+                ],
+            },
+            {
+                "id": "data",
+                "title": "数据底稿",
+                "content": f"评分 {float(candidate.get('score') or 0):.2f}，数据源 {len(data_sources)} 个。",
+                "items": [{"label": "数据源", "value": source} for source in data_sources],
+            },
+        ]
+        return {
+            "id": report_id,
+            "symbol": symbol,
+            "name": name,
+            "title": f"{name} {symbol} 多 Skill 分析报告",
+            "model": model,
+            "action": decision["action"],
+            "rating": decision["rating"],
+            "summary": summary,
+            "selected_skills": selected_public_skills,
+            "sections": sections,
+            "source_snapshot": {
+                "price": candidate.get("price"),
+                "score": candidate.get("score"),
+                "change_pct": candidate.get("change_pct"),
+                "data_sources": data_sources,
+            },
+            "created_at": created_at,
+        }
+
+    def _skill_opinion_items(
+        self,
+        *,
+        selected_skills: list[dict[str, Any]],
+        raw_opinions: Any,
+    ) -> list[dict[str, Any]]:
+        opinions = raw_opinions if isinstance(raw_opinions, list) else []
+        by_id = {
+            str(item.get("skill_id") or ""): item
+            for item in opinions
+            if isinstance(item, dict)
+        }
+        items: list[dict[str, Any]] = []
+        for skill in selected_skills:
+            opinion = by_id.get(skill["id"]) or {}
+            stance = str(opinion.get("stance") or "neutral")
+            summary = str(opinion.get("summary") or skill.get("description") or "")
+            items.append(
+                {
+                    "label": f"{skill['name']} · {stance}",
+                    "value": summary,
+                    "skill_id": skill["id"],
+                }
+            )
+        return items
+
+    def _risk_summary(self, retail_analysis: dict[str, Any]) -> str:
+        warnings = retail_analysis.get("warnings")
+        if isinstance(warnings, list) and warnings:
+            return "；".join(str(item) for item in warnings[:3])
+        return "暂未发现需要单独标记的高危风险，仍需结合盘中走势和成交额验证。"
 
     def _merge_llm_decision(
         self,

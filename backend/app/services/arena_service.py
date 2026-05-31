@@ -20,6 +20,7 @@ from app.db.models import (
     StockProfile,
 )
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
+from app.services.ai_data_request_service import ai_data_request_service
 from app.services.llm_service import llm_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.historical_data_service import historical_data_service
@@ -209,6 +210,7 @@ class ArenaService:
                 snapshot_id=snapshot_id,
                 stock_pick_snapshot_id=stock_pick_snapshot_id,
                 data_sources=agent_data_sources,
+                ai_data_request=candidate_context.get("ai_data_request"),
                 app_settings=app_settings,
                 recent_memories=self.recent_agent_memories(
                     db,
@@ -310,15 +312,78 @@ class ArenaService:
                 lookback_days=lookback_days,
                 agent=agent,
             )
+            selection_plan = stock_pick_snapshot.get("selection_plan") or {}
+            candidates = stock_pick_snapshot["recommendations"]
             contexts[agent_id] = {
                 "stock_pick_snapshot": stock_pick_snapshot,
                 "stock_pick_snapshot_id": stock_pick_snapshot["snapshot_id"],
-                "selection_plan": stock_pick_snapshot.get("selection_plan") or {},
+                "selection_plan": selection_plan,
                 "selection_mode": stock_pick_snapshot.get("selection_mode") or "auto_universe",
-                "candidates": stock_pick_snapshot["recommendations"],
+                "candidates": candidates,
                 "data_sources": list(stock_pick_snapshot.get("data_sources") or []),
+                "ai_data_request": self._agent_ai_data_request(
+                    db=db,
+                    candidates=candidates,
+                    selection_plan=selection_plan,
+                    lookback_days=lookback_days,
+                ),
             }
         return contexts
+
+    def _agent_ai_data_request(
+        self,
+        *,
+        db: Session,
+        candidates: list[dict[str, Any]],
+        selection_plan: dict[str, Any],
+        lookback_days: int,
+    ) -> dict[str, Any] | None:
+        symbols = [
+            str(candidate.get("symbol") or "")
+            for candidate in candidates[:5]
+            if candidate.get("symbol")
+        ]
+        if not symbols:
+            return None
+        dimensions = list(selection_plan.get("dimensions") or ["quote", "daily_history"])
+        try:
+            result = ai_data_request_service.execute(
+                db,
+                symbols=symbols,
+                dimensions=dimensions,
+                limit=len(symbols),
+                lookback_days=int(selection_plan.get("lookback_days") or lookback_days),
+                prefer_realtime=True,
+                refresh=False,
+            )
+        except Exception as exc:
+            return {
+                "requested_symbols": symbols,
+                "requested_dimensions": dimensions,
+                "actions": [],
+                "refresh": None,
+                "dataset": {},
+                "context": "",
+                "context_length": 0,
+                "error": str(exc),
+            }
+        return self._compact_ai_data_request(result)
+
+    def _compact_ai_data_request(self, result: dict[str, Any]) -> dict[str, Any]:
+        dataset = result.get("dataset") or {}
+        return {
+            "requested_symbols": list(result.get("requested_symbols") or []),
+            "requested_dimensions": list(result.get("requested_dimensions") or []),
+            "actions": list(result.get("actions") or []),
+            "refresh": result.get("refresh"),
+            "dataset": {
+                "item_count": int(dataset.get("item_count") or 0),
+                "data_sources": list(dataset.get("data_sources") or []),
+                "coverage": dict(dataset.get("coverage") or {}),
+            },
+            "context": str(result.get("context") or ""),
+            "context_length": int(result.get("context_length") or 0),
+        }
 
     def _candidate_pool_scope(
         self,
@@ -821,6 +886,7 @@ class ArenaService:
         snapshot_id: str,
         stock_pick_snapshot_id: str,
         data_sources: list[str],
+        ai_data_request: dict[str, Any] | None,
         app_settings: AppSettings,
         recent_memories: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
@@ -833,6 +899,7 @@ class ArenaService:
             positions=account.positions,
             snapshot_id=snapshot_id,
             data_sources=data_sources,
+            ai_data_request=ai_data_request,
             app_settings=app_settings,
             recent_memories=recent_memories,
         )
@@ -848,6 +915,7 @@ class ArenaService:
                     snapshot_id=snapshot_id,
                     stock_pick_snapshot_id=stock_pick_snapshot_id,
                     data_sources=data_sources,
+                    ai_data_request=ai_data_request,
                     llm_decision=llm_decision["context"],
                 )
             return self._buy_decision_from_candidate(
@@ -860,6 +928,7 @@ class ArenaService:
                 snapshot_id=snapshot_id,
                 stock_pick_snapshot_id=stock_pick_snapshot_id,
                 data_sources=data_sources,
+                ai_data_request=ai_data_request,
                 llm_decision=llm_decision["context"],
                 agent_index=agent_index,
             )
@@ -889,6 +958,7 @@ class ArenaService:
             snapshot_id=snapshot_id,
             stock_pick_snapshot_id=stock_pick_snapshot_id,
             data_sources=data_sources,
+            ai_data_request=ai_data_request,
             llm_decision=None,
             agent_index=agent_index,
         )
@@ -905,6 +975,7 @@ class ArenaService:
         snapshot_id: str,
         stock_pick_snapshot_id: str,
         data_sources: list[str],
+        ai_data_request: dict[str, Any] | None,
         llm_decision: dict[str, Any] | None,
         agent_index: int,
     ) -> dict[str, Any] | None:
@@ -933,6 +1004,7 @@ class ArenaService:
                 stock_pick_snapshot_id=stock_pick_snapshot_id,
                 agent=agent,
                 data_sources=data_sources,
+                ai_data_request=ai_data_request,
                 candidate=candidate,
                 action="BUY",
                 llm_decision=llm_decision,
@@ -951,6 +1023,7 @@ class ArenaService:
         snapshot_id: str,
         stock_pick_snapshot_id: str,
         data_sources: list[str],
+        ai_data_request: dict[str, Any] | None,
         llm_decision: dict[str, Any],
     ) -> dict[str, Any] | None:
         quantity = int((position.quantity * sell_ratio) // 100) * 100
@@ -978,6 +1051,7 @@ class ArenaService:
                 stock_pick_snapshot_id=stock_pick_snapshot_id,
                 agent=agent,
                 data_sources=data_sources,
+                ai_data_request=ai_data_request,
                 candidate=candidate,
                 action="SELL",
                 llm_decision=llm_decision,
@@ -992,6 +1066,7 @@ class ArenaService:
         positions: list[ArenaPosition],
         snapshot_id: str,
         data_sources: list[str],
+        ai_data_request: dict[str, Any] | None,
         app_settings: AppSettings,
         recent_memories: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
@@ -1020,6 +1095,7 @@ class ArenaService:
                         positions=positions,
                         snapshot_id=snapshot_id,
                         data_sources=data_sources,
+                        ai_data_request=ai_data_request,
                         recent_memories=recent_memories,
                     ),
                 },
@@ -1147,6 +1223,7 @@ class ArenaService:
         positions: list[ArenaPosition],
         snapshot_id: str,
         data_sources: list[str],
+        ai_data_request: dict[str, Any] | None,
         recent_memories: list[dict[str, Any]],
     ) -> str:
         prompt_payload = {
@@ -1160,6 +1237,7 @@ class ArenaService:
                 "prompt": agent.get("prompt"),
             },
             "data_sources": data_sources,
+            "ai_data_request": ai_data_request or {},
             "recent_memories": recent_memories,
             "positions": [
                 {
@@ -1276,6 +1354,7 @@ class ArenaService:
         stock_pick_snapshot_id: str | None = None,
         agent: dict[str, str],
         data_sources: list[str],
+        ai_data_request: dict[str, Any] | None = None,
         candidate: dict[str, Any],
         action: str,
         llm_decision: dict[str, Any] | None = None,
@@ -1293,6 +1372,7 @@ class ArenaService:
             },
             "action": action,
             "data_sources": data_sources,
+            "ai_data_request": ai_data_request or {},
             "selection_plan": (candidate.get("ai_selection") or {}).get("plan") or {},
             "selected_candidate": {
                 "symbol": candidate.get("symbol"),

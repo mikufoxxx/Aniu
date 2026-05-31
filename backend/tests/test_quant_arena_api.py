@@ -1062,7 +1062,11 @@ def test_arena_run_reuses_autonomous_stock_pick_snapshot(
     assert response.status_code == 200
     payload = response.json()
     assert payload["stock_pick_snapshot"] is None
-    assert captured_calls == [
+    assert captured_calls[:2] == [
+        ["600519.SH", "000001.SZ", "300750.SZ"],
+        ["600519.SH", "000001.SZ", "300750.SZ"],
+    ]
+    assert captured_calls[2:] == [
         ["600519.SH", "000001.SZ", "300750.SZ"],
         ["600519.SH", "000001.SZ", "300750.SZ"],
     ]
@@ -1791,6 +1795,92 @@ def test_arena_order_context_includes_retail_a_share_analysis(monkeypatch, tmp_p
     assert context["selected_candidate"]["ai_selection"]["temporal_profile"]
     assert context["selected_candidate"]["ai_selection"]["data_request"]["requested_dimensions"]
     assert context["selection_plan"]["strategy"] == "balanced"
+
+    _reset_state()
+
+
+def test_arena_decision_uses_agent_on_demand_data_request(monkeypatch, tmp_path) -> None:
+    from app.services.ai_data_request_service import ai_data_request_service
+    from app.services.market_data_service import market_data_service
+
+    requests: list[dict[str, object]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 3.2,
+                "amount": 900_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:20:00",
+            }
+        ]
+
+    def fake_execute(db, *, symbols, dimensions, limit, lookback_days, prefer_realtime, refresh, end_date=None):
+        requests.append(
+            {
+                "symbols": symbols,
+                "dimensions": dimensions,
+                "limit": limit,
+                "lookback_days": lookback_days,
+                "prefer_realtime": prefer_realtime,
+                "refresh": refresh,
+                "end_date": end_date,
+            }
+        )
+        return {
+            "requested_symbols": symbols,
+            "requested_dimensions": dimensions,
+            "actions": [
+                {
+                    "dimension": "moneyflow",
+                    "source": "tushare_moneyflow",
+                    "temporal_window": {"lookback_days": lookback_days, "frequency": "daily"},
+                }
+            ],
+            "refresh": None,
+            "dataset": {"item_count": 1, "items": [{"symbol": "000001.SZ", "name": "平安银行"}]},
+            "context": "按需补数上下文: 资金流与日线已就绪",
+            "context_length": 18,
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(ai_data_request_service, "execute", fake_execute)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500))
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "initial_cash": 200000,
+                "agents": [
+                    {"id": "data_ai", "name": "补数 AI", "style": "momentum"},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert requests
+    assert requests[0]["symbols"] == ["000001.SZ"]
+    assert requests[0]["dimensions"] == [
+        "quote",
+        "daily_history",
+        "moneyflow",
+        "sector_heat",
+        "limit_event",
+    ]
+    assert requests[0]["refresh"] is False
+    context = response.json()["orders"][0]["decision_context"]
+    assert context["ai_data_request"]["requested_symbols"] == ["000001.SZ"]
+    assert context["ai_data_request"]["context_length"] == 18
+    assert context["ai_data_request"]["actions"][0]["source"] == "tushare_moneyflow"
 
     _reset_state()
 

@@ -654,12 +654,17 @@ class StrategyChartsRead(BaseModel):
     trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
     equity_curve: list[EquityCurvePointRead] = Field(default_factory=list)
     drawdown_curve: list[DrawdownCurvePointRead] = Field(default_factory=list)
+    risk_metrics: dict[str, float] = Field(default_factory=dict)
+    return_distribution: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class StockAnalysisChartsRead(BaseModel):
     price_series: list[PriceSeriesPointRead] = Field(default_factory=list)
     signal_markers: list[TradeMarkerRead] = Field(default_factory=list)
     factor_radar: list[FactorRadarPointRead] = Field(default_factory=list)
+    support_resistance: dict[str, Any] = Field(default_factory=dict)
+    return_distribution: list[dict[str, Any]] = Field(default_factory=list)
+    volume_profile: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class OrderChartsRead(BaseModel):
@@ -713,6 +718,7 @@ class QuantResearchResponse(BaseModel):
     best_strategy: QuantResearchStrategyRead
     strategies: list[QuantResearchStrategyRead]
     comparison_chart: list[dict[str, Any]] = Field(default_factory=list)
+    strategy_equity_curves: list[dict[str, Any]] = Field(default_factory=list)
     ai_learning_context: str
 
 

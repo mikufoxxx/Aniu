@@ -548,6 +548,11 @@ class ArenaService:
             .where(ArenaAccount.agent_id == agent_id)
         )
         summary = self._account_summary(agent=agent, account=account)
+        recent_orders = self._recent_orders(db, agent_id=agent_id, limit=20)
+        summary["charts"] = chart_data_service.arena_summary_charts(
+            orders=recent_orders,
+            positions=list(summary.get("positions") or []),
+        )
         return {
             "agent": agent,
             "summary": summary,
@@ -559,7 +564,7 @@ class ArenaService:
                 )
             },
             "intraday": {
-                "orders": self._recent_orders(db, agent_id=agent_id, limit=20)
+                "orders": recent_orders
             },
             "closing": {
                 "reviews": self.recent_agent_memories_by_type(

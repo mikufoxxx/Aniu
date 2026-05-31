@@ -39,6 +39,20 @@
           <strong>{{ dashboard.summary.playbook?.holding_period || '--' }}</strong>
         </div>
       </div>
+      <div v-if="dashboard" class="arena-dashboard-charts">
+        <BreakdownChart
+          v-if="actionDistribution.length"
+          title="交易动作分布"
+          subtitle="按成交金额统计"
+          :items="actionDistribution"
+        />
+        <BreakdownChart
+          v-if="symbolExposure.length"
+          title="持仓暴露"
+          subtitle="按市值统计"
+          :items="symbolExposure"
+        />
+      </div>
     </section>
 
     <section v-if="dashboard" class="arena-agent-detail-layout">
@@ -145,6 +159,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation } from '@/types'
+import BreakdownChart from '@/components/charts/BreakdownChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 
 type ArenaPhase = 'morning_recommendation' | 'intraday_trade' | 'closing_review' | 'nightly_learning'
@@ -208,6 +223,17 @@ const sectionTabs = computed<DetailTab[]>(() => [
 
 const activeTab = computed<DetailTab>(() => {
   return sectionTabs.value.find((tab) => tab.id === activeSection.value) ?? sectionTabs.value[0]
+})
+
+const actionDistribution = computed(() => {
+  return dashboard.value?.summary.charts?.action_distribution ?? []
+})
+
+const symbolExposure = computed(() => {
+  return (dashboard.value?.summary.charts?.symbol_exposure ?? []).map((item) => ({
+    name: item.name || item.symbol,
+    value: item.market_value,
+  }))
 })
 
 async function loadDashboard(): Promise<void> {
@@ -283,6 +309,13 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.arena-dashboard-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .arena-agent-detail-summary div,
@@ -391,6 +424,10 @@ onMounted(() => {
   }
 
   .arena-agent-detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .arena-dashboard-charts {
     grid-template-columns: 1fr;
   }
 

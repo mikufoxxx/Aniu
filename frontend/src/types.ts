@@ -589,17 +589,39 @@ export interface StrategyCharts {
   trade_markers: TradeMarker[]
   equity_curve: EquityCurvePoint[]
   drawdown_curve: DrawdownCurvePoint[]
+  risk_metrics: Record<string, number>
+  return_distribution: DistributionBucket[]
 }
 
 export interface StockAnalysisCharts {
   price_series: PriceSeriesPoint[]
   signal_markers: TradeMarker[]
   factor_radar: FactorRadarPoint[]
+  support_resistance: {
+    support?: number | null
+    resistance?: number | null
+    last_close?: number | null
+  }
+  return_distribution: DistributionBucket[]
+  volume_profile: VolumeProfileBucket[]
 }
 
 export interface OrderCharts {
   price_series: PriceSeriesPoint[]
   trade_markers: TradeMarker[]
+}
+
+export interface DistributionBucket {
+  low: number
+  high: number
+  count: number
+  unit: string
+}
+
+export interface VolumeProfileBucket {
+  price_low: number
+  price_high: number
+  amount: number
 }
 
 export interface BacktestPayload {
@@ -646,6 +668,11 @@ export interface QuantResearchPayload {
     return_ratio: number
     max_drawdown: number
     score: number
+  }>
+  strategy_equity_curves: Array<{
+    strategy_name: string
+    display_name: string
+    points: EquityCurvePoint[]
   }>
   ai_learning_context: string
 }
@@ -780,6 +807,15 @@ export interface ArenaAgentDashboardPayload {
       mode: string
       label: string
       holding_period: string
+    }
+    charts?: {
+      action_distribution?: Array<{ name: string; value: number }>
+      symbol_exposure?: Array<{
+        symbol: string
+        name: string
+        market_value: number
+        unrealized_pnl: number
+      }>
     }
   }
   morning: { recommendations: ArenaAgentRecommendation[] }

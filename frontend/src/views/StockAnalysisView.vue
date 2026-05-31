@@ -123,6 +123,30 @@
               subtitle="用于解释 AI 评分结构"
               :items="analysis.charts.factor_radar"
             />
+            <DistributionChart
+              title="收益分布"
+              subtitle="观察波动是否偏态"
+              :items="analysis.charts.return_distribution"
+            />
+            <VolumeProfileChart
+              title="成交价量分布"
+              subtitle="识别筹码密集区"
+              :items="analysis.charts.volume_profile"
+            />
+          </div>
+          <div class="support-grid">
+            <div>
+              <span>支撑</span>
+              <strong>{{ formatPrice(analysis.charts.support_resistance.support) }}</strong>
+            </div>
+            <div>
+              <span>压力</span>
+              <strong>{{ formatPrice(analysis.charts.support_resistance.resistance) }}</strong>
+            </div>
+            <div>
+              <span>最新收盘</span>
+              <strong>{{ formatPrice(analysis.charts.support_resistance.last_close) }}</strong>
+            </div>
           </div>
           <div class="source-chips">
             <span v-for="source in analysis.data_sources" :key="source">{{ source }}</span>
@@ -141,8 +165,10 @@
 import { computed, ref } from 'vue'
 import { api } from '@/services/api'
 import type { QuantCandidate, StockAnalysisPayload } from '@/types'
+import DistributionChart from '@/components/charts/DistributionChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
+import VolumeProfileChart from '@/components/charts/VolumeProfileChart.vue'
 
 const candidateLimit = ref(5)
 const symbolText = ref('')
@@ -381,6 +407,33 @@ function retailList(key: string): string[] {
   align-items: start;
 }
 
+.analysis-chart-grid > :first-child {
+  grid-row: span 2;
+}
+
+.support-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.support-grid div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.support-grid span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.support-grid strong {
+  color: #111827;
+}
+
 .analysis-metrics div {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -455,8 +508,13 @@ function retailList(key: string): string[] {
 @media (max-width: 980px) {
   .analysis-hero,
   .analysis-grid,
-  .analysis-chart-grid {
+  .analysis-chart-grid,
+  .support-grid {
     grid-template-columns: 1fr;
+  }
+
+  .analysis-chart-grid > :first-child {
+    grid-row: auto;
   }
 
   .analysis-hero,

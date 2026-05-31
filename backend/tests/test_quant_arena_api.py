@@ -980,6 +980,16 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
     assert charts["equity_curve"][-1]["value"] == payload["best_strategy"]["final_assets"]
     assert charts["drawdown_curve"][0]["drawdown"] == 0.0
     assert len(charts["drawdown_curve"]) == 3
+    assert set(charts["risk_metrics"]) >= {
+        "total_return",
+        "volatility",
+        "sharpe",
+        "max_drawdown",
+        "calmar",
+    }
+    assert charts["return_distribution"]
+    assert len(payload["strategy_equity_curves"]) == 3
+    assert payload["strategy_equity_curves"][0]["strategy_name"] == "daily_momentum"
     assert "daily_momentum" in payload["ai_learning_context"]
     assert "最大回撤" in payload["ai_learning_context"]
 
@@ -1838,6 +1848,10 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["charts"]["signal_markers"][0]["action"] == payload["action"]
     assert payload["charts"]["signal_markers"][0]["symbol"] == "000001.SZ"
     assert payload["charts"]["factor_radar"]
+    assert payload["charts"]["support_resistance"]["support"] == 9.7
+    assert payload["charts"]["support_resistance"]["resistance"] == 12.2
+    assert payload["charts"]["return_distribution"]
+    assert payload["charts"]["volume_profile"]
 
     _reset_state()
 
@@ -2279,6 +2293,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     order_chart = payload["intraday"]["orders"][0]["charts"]
     assert order_chart["trade_markers"][0]["action"] in {"BUY", "SELL"}
     assert order_chart["price_series"]
+    assert payload["summary"]["charts"]["action_distribution"]
+    assert payload["summary"]["charts"]["symbol_exposure"]
     assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"
     assert payload["learning"]["reviews"][0]["memory_type"] == "nightly_learning"
 

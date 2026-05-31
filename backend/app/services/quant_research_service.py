@@ -65,6 +65,7 @@ class QuantResearchService:
             "best_strategy": best_strategy,
             "strategies": strategies,
             "comparison_chart": self._comparison_chart(strategies),
+            "strategy_equity_curves": self._strategy_equity_curves(strategies),
             "ai_learning_context": self._learning_context(best_strategy, strategies),
         }
 
@@ -304,6 +305,16 @@ class QuantResearchService:
                 "return_ratio": item["return_ratio"],
                 "max_drawdown": item["max_drawdown"],
                 "score": item["score"],
+            }
+            for item in strategies
+        ]
+
+    def _strategy_equity_curves(self, strategies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "strategy_name": item["strategy_name"],
+                "display_name": item["display_name"],
+                "points": item.get("charts", {}).get("equity_curve", []),
             }
             for item in strategies
         ]

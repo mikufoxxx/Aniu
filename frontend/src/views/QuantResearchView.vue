@@ -117,15 +117,41 @@
         subtitle="同一股票池横向对比"
         :items="research.comparison_chart"
       />
+      <MultiEquityCurveChart
+        title="多策略权益曲线"
+        subtitle="用于观察策略稳定性和分化"
+        :curves="research.strategy_equity_curves"
+      />
+      <DistributionChart
+        title="单日收益分布"
+        subtitle="检查收益是否集中在少数日期"
+        :items="research.best_strategy.charts.return_distribution"
+      />
+      <section class="panel quant-risk-panel">
+        <div class="panel-head">
+          <div>
+            <h2>风险指标</h2>
+            <p class="quant-muted">参考 TradingView / Portfolio 类工具的核心风险读数。</p>
+          </div>
+        </div>
+        <div class="quant-risk-grid">
+          <div v-for="item in riskMetricItems" :key="item.key">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+          </div>
+        </div>
+      </section>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '@/services/api'
 import type { QuantCandidate, QuantResearchPayload } from '@/types'
+import DistributionChart from '@/components/charts/DistributionChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
+import MultiEquityCurveChart from '@/components/charts/MultiEquityCurveChart.vue'
 import PerformanceDashboard from '@/components/charts/PerformanceDashboard.vue'
 import StrategyComparisonChart from '@/components/charts/StrategyComparisonChart.vue'
 
@@ -138,6 +164,17 @@ const symbolsText = ref('600011.SH,000767.SZ,600023.SH')
 const startDate = ref('20250101')
 const endDate = ref('20260531')
 const research = ref<QuantResearchPayload | null>(null)
+
+const riskMetricItems = computed(() => {
+  const metrics = research.value?.best_strategy.charts.risk_metrics ?? {}
+  return [
+    { key: 'total_return', label: '累计收益', value: formatPercent(Number(metrics.total_return ?? 0)) },
+    { key: 'volatility', label: '年化波动', value: formatPercent(Number(metrics.volatility ?? 0)) },
+    { key: 'sharpe', label: 'Sharpe', value: Number(metrics.sharpe ?? 0).toFixed(2) },
+    { key: 'max_drawdown', label: '最大回撤', value: formatPercent(Number(metrics.max_drawdown ?? 0)) },
+    { key: 'calmar', label: 'Calmar', value: Number(metrics.calmar ?? 0).toFixed(2) },
+  ]
+})
 
 async function loadCandidates(): Promise<void> {
   loading.value = true
@@ -244,13 +281,41 @@ function formatAmount(value: number): string {
 
 .quant-chart-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   gap: 14px;
   align-items: start;
 }
 
 .quant-chart-grid > :first-child {
   grid-row: span 2;
+}
+
+.quant-risk-panel {
+  padding: 12px;
+}
+
+.quant-risk-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quant-risk-grid div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.quant-risk-grid span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.quant-risk-grid strong {
+  color: #111827;
+  font-size: 14px;
 }
 
 .quant-limit,
@@ -366,6 +431,10 @@ function formatAmount(value: number): string {
 
   .quant-chart-grid > :first-child {
     grid-row: auto;
+  }
+
+  .quant-risk-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .quant-hero {

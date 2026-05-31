@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+from statistics import mean, pstdev
 from typing import Any
 
 from sqlalchemy import select
@@ -78,6 +80,8 @@ class ChartDataService:
             ],
             "equity_curve": equity_curve,
             "drawdown_curve": drawdown_curve,
+            "risk_metrics": self.risk_metrics(equity_curve, drawdown_curve),
+            "return_distribution": self.return_distribution_from_equity(equity_curve),
         }
 
     def stock_analysis_charts(
@@ -109,6 +113,9 @@ class ChartDataService:
                 for key, value in factor_scores.items()
                 if isinstance(value, (int, float))
             ][:8],
+            "support_resistance": self.support_resistance(series),
+            "return_distribution": self.return_distribution_from_prices(series),
+            "volume_profile": self.volume_profile(series),
         }
 
     def order_charts(
@@ -133,6 +140,129 @@ class ChartDataService:
                     "quantity": int(quantity or 0),
                 }
             ],
+        }
+
+    def risk_metrics(
+        self,
+        equity_curve: list[dict[str, Any]],
+        drawdown_curve: list[dict[str, Any]],
+    ) -> dict[str, float]:
+        returns = [float(item.get("return_ratio") or 0) for item in equity_curve]
+        daily_returns = [
+            returns[index] - returns[index - 1]
+            for index in range(1, len(returns))
+        ]
+        total_return = returns[-1] if returns else 0.0
+        volatility = pstdev(daily_returns) * math.sqrt(252) if len(daily_returns) > 1 else 0.0
+        average_return = mean(daily_returns) if daily_returns else 0.0
+        sharpe = average_return / pstdev(daily_returns) * math.sqrt(252) if len(daily_returns) > 1 and pstdev(daily_returns) > 0 else 0.0
+        max_drawdown = min((float(item.get("drawdown") or 0) for item in drawdown_curve), default=0.0)
+        calmar = total_return / abs(max_drawdown) if max_drawdown < 0 else 0.0
+        return {
+            "total_return": round(total_return, 6),
+            "volatility": round(volatility, 6),
+            "sharpe": round(sharpe, 6),
+            "max_drawdown": round(max_drawdown, 6),
+            "calmar": round(calmar, 6),
+        }
+
+    def return_distribution_from_equity(
+        self,
+        equity_curve: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        returns = [
+            float(equity_curve[index].get("return_ratio") or 0)
+            - float(equity_curve[index - 1].get("return_ratio") or 0)
+            for index in range(1, len(equity_curve))
+        ]
+        return self._histogram(returns, bucket_count=5, unit="ratio")
+
+    def return_distribution_from_prices(
+        self,
+        price_series: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        returns = [
+            (float(price_series[index].get("close") or 0) - float(price_series[index - 1].get("close") or 0))
+            / float(price_series[index - 1].get("close") or 1)
+            for index in range(1, len(price_series))
+            if float(price_series[index - 1].get("close") or 0) > 0
+        ]
+        return self._histogram(returns, bucket_count=5, unit="ratio")
+
+    def support_resistance(self, price_series: list[dict[str, Any]]) -> dict[str, float | None]:
+        if not price_series:
+            return {"support": None, "resistance": None, "last_close": None}
+        lows = [float(item.get("low") or item.get("close") or 0) for item in price_series]
+        highs = [float(item.get("high") or item.get("close") or 0) for item in price_series]
+        last = price_series[-1]
+        return {
+            "support": round(min(lows), 4),
+            "resistance": round(max(highs), 4),
+            "last_close": round(float(last.get("close") or 0), 4),
+        }
+
+    def volume_profile(
+        self,
+        price_series: list[dict[str, Any]],
+        *,
+        bucket_count: int = 6,
+    ) -> list[dict[str, Any]]:
+        if not price_series:
+            return []
+        closes = [float(item.get("close") or 0) for item in price_series]
+        low = min(closes)
+        high = max(closes)
+        if high <= low:
+            return [
+                {
+                    "price_low": round(low, 4),
+                    "price_high": round(high, 4),
+                    "amount": round(sum(float(item.get("amount") or 0) for item in price_series), 2),
+                }
+            ]
+        width = (high - low) / bucket_count
+        buckets = [
+            {"price_low": low + width * index, "price_high": low + width * (index + 1), "amount": 0.0}
+            for index in range(bucket_count)
+        ]
+        for point in price_series:
+            close = float(point.get("close") or 0)
+            index = min(bucket_count - 1, max(0, int((close - low) / width)))
+            buckets[index]["amount"] += float(point.get("amount") or 0)
+        return [
+            {
+                "price_low": round(item["price_low"], 4),
+                "price_high": round(item["price_high"], 4),
+                "amount": round(item["amount"], 2),
+            }
+            for item in buckets
+        ]
+
+    def arena_summary_charts(
+        self,
+        *,
+        orders: list[dict[str, Any]],
+        positions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        action_totals: dict[str, float] = {}
+        for order in orders:
+            action = str(order.get("action") or "UNKNOWN")
+            action_totals[action] = action_totals.get(action, 0.0) + float(order.get("amount") or 0)
+        symbol_exposure = [
+            {
+                "symbol": str(item.get("symbol") or ""),
+                "name": str(item.get("name") or item.get("symbol") or ""),
+                "market_value": round(float(item.get("market_value") or 0), 2),
+                "unrealized_pnl": round(float(item.get("unrealized_pnl") or 0), 2),
+            }
+            for item in positions
+        ]
+        return {
+            "action_distribution": [
+                {"name": action, "value": round(amount, 2)}
+                for action, amount in sorted(action_totals.items())
+            ],
+            "symbol_exposure": symbol_exposure,
         }
 
     def equity_curve_from_values(
@@ -171,6 +301,34 @@ class ChartDataService:
         if len(closes) < window:
             return None
         return round(sum(closes[-window:]) / window, 4)
+
+    def _histogram(
+        self,
+        values: list[float],
+        *,
+        bucket_count: int,
+        unit: str,
+    ) -> list[dict[str, Any]]:
+        if not values:
+            return []
+        low = min(values)
+        high = max(values)
+        if high <= low:
+            return [{"low": round(low, 6), "high": round(high, 6), "count": len(values), "unit": unit}]
+        width = (high - low) / bucket_count
+        buckets = [{"low": low + width * index, "high": low + width * (index + 1), "count": 0, "unit": unit} for index in range(bucket_count)]
+        for value in values:
+            index = min(bucket_count - 1, max(0, int((value - low) / width)))
+            buckets[index]["count"] += 1
+        return [
+            {
+                "low": round(item["low"], 6),
+                "high": round(item["high"], 6),
+                "count": item["count"],
+                "unit": unit,
+            }
+            for item in buckets
+        ]
 
     def _factor_label(self, key: str) -> str:
         labels = {

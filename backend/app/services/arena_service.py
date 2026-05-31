@@ -202,6 +202,7 @@ class ArenaService:
                 data_sources=agent_data_sources,
             )
             decision = sell_decision or self._decide_for_agent(
+                db=db,
                 account=account,
                 agent=agent,
                 candidates=agent_candidates,
@@ -384,6 +385,32 @@ class ArenaService:
             "context": str(result.get("context") or ""),
             "context_length": int(result.get("context_length") or 0),
         }
+
+    def _merge_dimensions(
+        self,
+        base_dimensions: list[str],
+        extra_dimensions: list[str],
+    ) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for item in [*base_dimensions, *extra_dimensions]:
+            dimension = str(item or "").strip().lower()
+            if not dimension or dimension in seen:
+                continue
+            seen.add(dimension)
+            merged.append(dimension)
+        return merged
+
+    def _ai_data_request_lookback_days(
+        self,
+        ai_data_request: dict[str, Any] | None,
+        fallback: int,
+    ) -> int:
+        for action in (ai_data_request or {}).get("actions") or []:
+            window = action.get("temporal_window") or {}
+            if window.get("lookback_days"):
+                return int(window["lookback_days"])
+        return fallback
 
     def _candidate_pool_scope(
         self,
@@ -878,6 +905,7 @@ class ArenaService:
     def _decide_for_agent(
         self,
         *,
+        db: Session,
         account: ArenaAccount,
         agent: dict[str, str],
         candidates: list[dict[str, Any]],
@@ -893,6 +921,33 @@ class ArenaService:
         if not candidates:
             return None
         style = str(agent.get("style") or "balanced")
+        llm_config = self._resolve_llm_config(agent=agent, app_settings=app_settings)
+        dimension_request = None
+        if llm_config is not None:
+            base_dimensions = list((ai_data_request or {}).get("requested_dimensions") or [])
+            dimension_request = self._llm_dimension_request(
+                agent=agent,
+                candidates=candidates,
+                snapshot_id=snapshot_id,
+                base_dimensions=base_dimensions,
+                llm_config=llm_config,
+            )
+            if dimension_request:
+                ai_data_request = self._agent_ai_data_request(
+                    db=db,
+                    candidates=candidates,
+                    selection_plan={
+                        "dimensions": self._merge_dimensions(
+                            base_dimensions,
+                            list(dimension_request.get("dimensions") or []),
+                        ),
+                        "lookback_days": self._ai_data_request_lookback_days(
+                            ai_data_request,
+                            get_settings().market_data_maintenance_lookback_days,
+                        ),
+                    },
+                    lookback_days=get_settings().market_data_maintenance_lookback_days,
+                )
         llm_decision = self._llm_decision(
             agent=agent,
             candidates=candidates,
@@ -900,6 +955,8 @@ class ArenaService:
             snapshot_id=snapshot_id,
             data_sources=data_sources,
             ai_data_request=ai_data_request,
+            dimension_request=dimension_request,
+            llm_config=llm_config,
             app_settings=app_settings,
             recent_memories=recent_memories,
         )
@@ -1067,10 +1124,11 @@ class ArenaService:
         snapshot_id: str,
         data_sources: list[str],
         ai_data_request: dict[str, Any] | None,
+        dimension_request: dict[str, Any] | None,
+        llm_config: dict[str, str] | None,
         app_settings: AppSettings,
         recent_memories: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        llm_config = self._resolve_llm_config(agent=agent, app_settings=app_settings)
         if llm_config is None:
             return None
         model = llm_config["model"]
@@ -1129,6 +1187,7 @@ class ArenaService:
                 "provider": llm_config["provider"],
                 "model": model,
                 "raw_decision": raw_decision,
+                "data_dimension_request": dimension_request or {},
             }
             if action == "SELL":
                 position = next(
@@ -1170,6 +1229,92 @@ class ArenaService:
             }
         except Exception:
             return None
+
+    def _llm_dimension_request(
+        self,
+        *,
+        agent: dict[str, str],
+        candidates: list[dict[str, Any]],
+        snapshot_id: str,
+        base_dimensions: list[str],
+        llm_config: dict[str, str],
+    ) -> dict[str, Any] | None:
+        allowed_dimensions = [
+            "quote",
+            "daily_history",
+            "moneyflow",
+            "sector_heat",
+            "limit_event",
+            "financial_indicator",
+            "valuation",
+            "pledge_stat",
+            "stock_profile",
+        ]
+        prompt_payload = {
+            "snapshot_id": snapshot_id,
+            "agent": {
+                "id": agent.get("id"),
+                "name": agent.get("name"),
+                "style": agent.get("style"),
+                "prompt": agent.get("prompt"),
+            },
+            "base_dimensions": base_dimensions,
+            "allowed_dimensions": allowed_dimensions,
+            "candidates": [
+                {
+                    "symbol": item.get("symbol"),
+                    "name": item.get("name"),
+                    "score": item.get("score"),
+                    "ai_selection": item.get("ai_selection") or {},
+                    "retail_analysis": item.get("retail_analysis") or {},
+                }
+                for item in candidates[:5]
+            ],
+            "output_schema": {
+                "dimensions": "从 allowed_dimensions 里选择还想补看的维度数组",
+                "reason": "一句话说明为什么需要这些数据",
+            },
+        }
+        payload = {
+            "model": llm_config["model"],
+            "temperature": 0.1,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是A股竞技场AI的数据研究员。"
+                        "只判断交易前还需要补充哪些数据维度，只返回JSON。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(prompt_payload, ensure_ascii=False, default=str),
+                },
+            ],
+        }
+        try:
+            response = llm_service._call_llm(
+                base_url=llm_config["base_url"],
+                api_key=llm_config["api_key"],
+                payload=payload,
+                timeout_seconds=45,
+            )
+            raw = self._extract_llm_json(response)
+        except Exception:
+            return None
+        dimensions = [
+            str(item or "").strip().lower()
+            for item in raw.get("dimensions") or []
+            if str(item or "").strip().lower() in allowed_dimensions
+        ]
+        dimensions = self._merge_dimensions([], dimensions)
+        if not dimensions:
+            return None
+        return {
+            "dimensions": dimensions,
+            "reason": str(raw.get("reason") or ""),
+            "raw_decision": raw,
+        }
 
     def _resolve_llm_config(
         self,

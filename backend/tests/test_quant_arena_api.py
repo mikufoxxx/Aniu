@@ -1885,6 +1885,151 @@ def test_arena_decision_uses_agent_on_demand_data_request(monkeypatch, tmp_path)
     _reset_state()
 
 
+def test_arena_llm_can_request_extra_data_dimensions_before_decision(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_data_request_service import ai_data_request_service
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    data_requests: list[dict[str, object]] = []
+    llm_payloads: list[dict[str, object]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 3.2,
+                "amount": 900_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:20:00",
+            }
+        ]
+
+    def fake_data_request(db, *, symbols, dimensions, limit, lookback_days, prefer_realtime, refresh, end_date=None):
+        data_requests.append(
+            {
+                "symbols": symbols,
+                "dimensions": dimensions,
+                "limit": limit,
+                "lookback_days": lookback_days,
+                "prefer_realtime": prefer_realtime,
+                "refresh": refresh,
+                "end_date": end_date,
+            }
+        )
+        return {
+            "requested_symbols": symbols,
+            "requested_dimensions": dimensions,
+            "actions": [
+                {
+                    "dimension": dimension,
+                    "source": f"source:{dimension}",
+                    "temporal_window": {"lookback_days": lookback_days, "frequency": "daily"},
+                }
+                for dimension in dimensions
+            ],
+            "refresh": None,
+            "dataset": {"item_count": 1, "data_sources": ["easy_tdx"], "coverage": {}},
+            "context": "LLM 自主请求后的补数上下文",
+            "context_length": 15,
+        }
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        llm_payloads.append(payload)
+        prompt = json.loads(payload["messages"][1]["content"])
+        if "allowed_dimensions" in prompt:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "dimensions": ["financial_indicator", "pledge_stat"],
+                                    "reason": "需要财务质量和质押风险确认。",
+                                },
+                                ensure_ascii=False,
+                            )
+                        }
+                    }
+                ]
+            }
+        assert "financial_indicator" in prompt["ai_data_request"]["requested_dimensions"]
+        assert "pledge_stat" in prompt["ai_data_request"]["requested_dimensions"]
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "action": "BUY",
+                                "symbol": "000001.SZ",
+                                "allocation_ratio": 0.1,
+                                "reason": "补齐财务和质押数据后买入。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(ai_data_request_service, "execute", fake_data_request)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            settings = db.query(AppSettings).first()
+            assert settings is not None
+            settings.provider_name = "openai-compatible"
+            settings.llm_base_url = "https://llm.example/v1"
+            settings.llm_api_key = "llm-key"
+            settings.llm_model = "model-a"
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500))
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "initial_cash": 200000,
+                "agents": [
+                    {
+                        "id": "llm_data_ai",
+                        "name": "LLM 补数 AI",
+                        "style": "risk_control",
+                        "provider": "openai-compatible",
+                        "model": "model-a",
+                    },
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert len(llm_payloads) == 2
+    assert data_requests[-1]["dimensions"] == [
+        "quote",
+        "daily_history",
+        "financial_indicator",
+        "valuation",
+        "pledge_stat",
+    ]
+    context = response.json()["orders"][0]["decision_context"]
+    assert context["llm_decision"]["data_dimension_request"]["dimensions"] == [
+        "financial_indicator",
+        "pledge_stat",
+    ]
+    assert "financial_indicator" in context["ai_data_request"]["requested_dimensions"]
+    assert "pledge_stat" in context["ai_data_request"]["requested_dimensions"]
+
+    _reset_state()
+
+
 def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 
@@ -2157,11 +2302,19 @@ def test_arena_run_uses_llm_decision_for_each_agent_when_configured(
     payload = response.json()
     assert [call["payload"]["model"] for call in calls] == [
         "deepseek-chat",
+        "deepseek-chat",
+        "gpt-4o-mini",
         "gpt-4o-mini",
     ]
     assert all(call["base_url"] == "https://llm.example/v1" for call in calls)
     assert all(call["api_key"] == "llm-key" for call in calls)
-    user_prompts = [call["payload"]["messages"][1]["content"] for call in calls]
+    decision_calls = [
+        call
+        for call in calls
+        if "allowed_dimensions"
+        not in json.loads(call["payload"]["messages"][1]["content"])
+    ]
+    user_prompts = [call["payload"]["messages"][1]["content"] for call in decision_calls]
     assert all("arena-" in prompt for prompt in user_prompts)
     assert all("600519.SH" in prompt and "000001.SZ" in prompt for prompt in user_prompts)
     orders_by_agent = {order["agent_id"]: order for order in payload["orders"]}
@@ -2290,6 +2443,8 @@ def test_arena_run_resolves_llm_credentials_by_agent_provider(
         for call in calls
     ] == [
         ("https://deepseek.example/v1", "deepseek-key", "deepseek-chat"),
+        ("https://deepseek.example/v1", "deepseek-key", "deepseek-chat"),
+        ("https://openai.example/v1", "openai-key", "gpt-4o-mini"),
         ("https://openai.example/v1", "openai-key", "gpt-4o-mini"),
     ]
     payload = response.json()

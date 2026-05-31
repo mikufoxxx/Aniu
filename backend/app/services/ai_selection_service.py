@@ -53,15 +53,17 @@ class AISelectionService:
         risk_flags = self._risk_flags(item, retail, temporal)
         reasons = self._reasons(item, retail, temporal, risk_flags)
         score = self._score(item, retail, temporal, risk_flags, plan)
+        data_request = self._data_request(item, plan)
         item["retail_analysis"] = retail
         item["ai_selection"] = {
             "score": score,
             "strategy": plan["strategy"],
             "plan": plan,
+            "data_request": data_request,
             "temporal_profile": temporal,
             "risk_flags": risk_flags,
             "selection_reasons": reasons,
-            "data_used": self._data_used(item),
+            "data_used": data_request["available_dimensions"],
         }
         return item
 
@@ -184,18 +186,80 @@ class AISelectionService:
             reasons.append(f"风险扣分: {flag}")
         return reasons[:8]
 
-    def _data_used(self, candidate: dict[str, Any]) -> list[str]:
-        sources = ["realtime_quote"]
+    def _data_request(
+        self,
+        candidate: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        requested = list(plan.get("dimensions") or [])
+        checks = {dimension: self._dimension_status(candidate, dimension) for dimension in requested}
+        available = [
+            dimension
+            for dimension, item in checks.items()
+            if item["status"] == "available"
+        ]
+        missing = [
+            dimension
+            for dimension, item in checks.items()
+            if item["status"] != "available"
+        ]
+        return {
+            "requested_dimensions": requested,
+            "available_dimensions": available,
+            "missing_dimensions": missing,
+            "checks": checks,
+        }
+
+    def _dimension_status(
+        self,
+        candidate: dict[str, Any],
+        dimension: str,
+    ) -> dict[str, Any]:
         daily = candidate.get("daily_factors") or {}
-        if int(daily.get("bars_used") or 0) > 0:
-            sources.append("daily_history")
-        if _number(daily.get("moneyflow_net_amount")):
-            sources.append("moneyflow")
-        if candidate.get("financial_factors"):
-            sources.append("financial_indicator")
-        if candidate.get("profile"):
-            sources.append("stock_profile")
-        return sources
+        financial = candidate.get("financial_factors") or {}
+        profile = candidate.get("profile") or {}
+        available = False
+        summary = ""
+        if dimension == "quote":
+            available = candidate.get("price") is not None or bool(candidate.get("source"))
+            summary = str(candidate.get("source") or "quote")
+        elif dimension == "daily_history":
+            bars_used = int(daily.get("bars_used") or 0)
+            available = bars_used > 0
+            summary = f"{bars_used} bars"
+        elif dimension == "moneyflow":
+            available = any(
+                _number(daily.get(key)) != 0
+                for key in (
+                    "moneyflow_net_amount",
+                    "moneyflow_net_d5_amount",
+                    "moneyflow_buy_lg_amount_rate",
+                )
+            )
+            summary = f"net={_number(daily.get('moneyflow_net_amount')):.2f}"
+        elif dimension == "sector_heat":
+            sectors = daily.get("sector_heat") or []
+            available = bool(sectors)
+            summary = f"{len(sectors)} sectors"
+        elif dimension == "limit_event":
+            available = bool(daily.get("limit_event"))
+            summary = "limit event" if available else "none"
+        elif dimension == "financial_indicator":
+            available = bool(financial)
+            summary = str(financial.get("end_date") or financial.get("ann_date") or "")
+        elif dimension == "valuation":
+            available = _number(daily.get("pe_ttm")) > 0 or _number(daily.get("pb")) > 0
+            summary = f"pe={_number(daily.get('pe_ttm')):.2f}, pb={_number(daily.get('pb')):.2f}"
+        elif dimension == "pledge_stat":
+            available = bool(daily.get("pledge_stat"))
+            summary = "pledge stat" if available else "none"
+        elif dimension == "stock_profile":
+            available = bool(profile)
+            summary = str(profile.get("industry") or profile.get("market") or "")
+        return {
+            "status": "available" if available else "missing",
+            "summary": summary,
+        }
 
 
 ai_selection_service = AISelectionService()

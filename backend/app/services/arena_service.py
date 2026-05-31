@@ -63,11 +63,15 @@ class ArenaService:
         )
         candidates = self._combined_candidates(agent_candidate_contexts)
         data_sources = self._combined_data_sources(agent_candidate_contexts)
+        candidate_pool_scope = self._candidate_pool_scope(agent_candidate_contexts)
+        agent_candidate_pools = self._agent_candidate_pools(agent_candidate_contexts)
         candidate_payload = {
             "universe_size": len(candidates),
             "candidate_count": len(candidates),
             "data_sources": data_sources,
             "candidates": candidates,
+            "candidate_pool_scope": candidate_pool_scope,
+            "agent_candidate_pools": agent_candidate_pools,
             "stock_pick_snapshot": None,
             "agent_stock_pick_snapshots": {
                 agent_id: context["stock_pick_snapshot"]
@@ -109,6 +113,8 @@ class ArenaService:
                 "leaderboard": [],
                 "orders": [],
                 "data_sources": candidate_payload["data_sources"],
+                "candidate_pool_scope": candidate_pool_scope,
+                "agent_candidate_pools": agent_candidate_pools,
                 "stock_pick_snapshot": None,
             }
 
@@ -137,6 +143,8 @@ class ArenaService:
                 "leaderboard": leaderboard,
                 "orders": [],
                 "data_sources": candidate_payload["data_sources"],
+                "candidate_pool_scope": candidate_pool_scope,
+                "agent_candidate_pools": agent_candidate_pools,
                 "stock_pick_snapshot": None,
             }
 
@@ -166,6 +174,8 @@ class ArenaService:
                 "leaderboard": leaderboard,
                 "orders": [],
                 "data_sources": candidate_payload["data_sources"],
+                "candidate_pool_scope": candidate_pool_scope,
+                "agent_candidate_pools": agent_candidate_pools,
                 "stock_pick_snapshot": None,
             }
 
@@ -262,6 +272,8 @@ class ArenaService:
             "leaderboard": leaderboard,
             "orders": orders,
             "data_sources": candidate_payload["data_sources"],
+            "candidate_pool_scope": candidate_pool_scope,
+            "agent_candidate_pools": agent_candidate_pools,
             "stock_pick_snapshot": None,
         }
 
@@ -302,10 +314,44 @@ class ArenaService:
                 "stock_pick_snapshot": stock_pick_snapshot,
                 "stock_pick_snapshot_id": stock_pick_snapshot["snapshot_id"],
                 "selection_plan": stock_pick_snapshot.get("selection_plan") or {},
+                "selection_mode": stock_pick_snapshot.get("selection_mode") or "auto_universe",
                 "candidates": stock_pick_snapshot["recommendations"],
                 "data_sources": list(stock_pick_snapshot.get("data_sources") or []),
             }
         return contexts
+
+    def _candidate_pool_scope(
+        self,
+        agent_candidate_contexts: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        return {
+            "mode": "agent_independent_auto_universe",
+            "user_candidate_pool": "stock_analysis_only",
+            "arena_user_symbols_effect": "ignored",
+            "agent_pool_count": len(agent_candidate_contexts),
+        }
+
+    def _agent_candidate_pools(
+        self,
+        agent_candidate_contexts: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        pools: list[dict[str, Any]] = []
+        for agent_id, context in agent_candidate_contexts.items():
+            candidates = context["candidates"]
+            pools.append(
+                {
+                    "agent_id": agent_id,
+                    "selection_mode": context["selection_mode"],
+                    "snapshot_id": context["stock_pick_snapshot_id"],
+                    "candidate_count": len(candidates),
+                    "symbols": [
+                        str(candidate.get("symbol"))
+                        for candidate in candidates
+                        if candidate.get("symbol")
+                    ],
+                }
+            )
+        return pools
 
     def _combined_candidates(
         self,

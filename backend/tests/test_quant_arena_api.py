@@ -778,6 +778,14 @@ def test_ai_stock_picker_uses_agent_specific_selection_plan(monkeypatch, tmp_pat
     assert "pledge_risk" in risk_control["selection_plan"]["risk_checks"]
     assert momentum["recommendations"][0]["ai_selection"]["strategy"] == "momentum"
     assert risk_control["recommendations"][0]["ai_selection"]["strategy"] == "risk_control"
+    momentum_request = momentum["recommendations"][0]["ai_selection"]["data_request"]
+    risk_request = risk_control["recommendations"][0]["ai_selection"]["data_request"]
+    assert "sector_heat" in momentum_request["requested_dimensions"]
+    assert "daily_history" in momentum_request["available_dimensions"]
+    assert "sector_heat" in momentum_request["missing_dimensions"]
+    assert "pledge_stat" in risk_request["requested_dimensions"]
+    assert "pledge_stat" in risk_request["missing_dimensions"]
+    assert risk_request["checks"]["daily_history"]["status"] == "available"
 
     _reset_state()
 
@@ -1119,6 +1127,28 @@ def test_arena_run_ignores_user_symbols_and_builds_independent_snapshot_per_agen
         (None, 1000, True, 1825, "balanced"),
     ]
     payload = response.json()
+    assert payload["candidate_pool_scope"] == {
+        "mode": "agent_independent_auto_universe",
+        "user_candidate_pool": "stock_analysis_only",
+        "arena_user_symbols_effect": "ignored",
+        "agent_pool_count": 2,
+    }
+    assert payload["agent_candidate_pools"] == [
+        {
+            "agent_id": "deepseek",
+            "selection_mode": "auto_universe",
+            "snapshot_id": "ai-picks-agent-1",
+            "candidate_count": 1,
+            "symbols": ["600001.SH"],
+        },
+        {
+            "agent_id": "gpt",
+            "selection_mode": "auto_universe",
+            "snapshot_id": "ai-picks-agent-2",
+            "candidate_count": 1,
+            "symbols": ["600002.SH"],
+        },
+    ]
     order_contexts = [order["decision_context"] for order in payload["orders"]]
     assert {context["stock_pick_snapshot_id"] for context in order_contexts} == {
         "ai-picks-agent-1",
@@ -1646,6 +1676,7 @@ def test_arena_order_context_includes_retail_a_share_analysis(monkeypatch, tmp_p
     assert context["selected_candidate"]["ai_selection"]["score"] > 0
     assert context["selected_candidate"]["ai_selection"]["strategy"] == "balanced"
     assert context["selected_candidate"]["ai_selection"]["temporal_profile"]
+    assert context["selected_candidate"]["ai_selection"]["data_request"]["requested_dimensions"]
     assert context["selection_plan"]["strategy"] == "balanced"
 
     _reset_state()

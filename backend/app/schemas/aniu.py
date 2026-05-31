@@ -721,6 +721,8 @@ class ArenaRunResponse(BaseModel):
     leaderboard: list[ArenaLeaderboardItemRead]
     orders: list[ArenaOrderRead]
     data_sources: list[str]
+    candidate_pool_scope: dict[str, Any] = Field(default_factory=dict)
+    agent_candidate_pools: list[dict[str, Any]] = Field(default_factory=list)
     stock_pick_snapshot: AIStockPicksResponse | None = None
 
 

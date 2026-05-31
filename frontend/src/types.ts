@@ -673,6 +673,14 @@ export interface ArenaRunPayload {
   leaderboard: ArenaLeaderboardItem[]
   orders: ArenaOrder[]
   data_sources: string[]
+  candidate_pool_scope: Record<string, unknown>
+  agent_candidate_pools: Array<{
+    agent_id: string
+    selection_mode: string
+    snapshot_id: string
+    candidate_count: number
+    symbols: string[]
+  }>
   stock_pick_snapshot?: AIStockPicksPayload | null
 }
 

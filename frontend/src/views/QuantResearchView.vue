@@ -134,9 +134,9 @@ const candidates = ref<QuantCandidate[]>([])
 const loading = ref(false)
 const researching = ref(false)
 const errorMessage = ref('')
-const symbolsText = ref('600519.SH,300750.SZ,000001.SZ')
-const startDate = ref('20240101')
-const endDate = ref('20241231')
+const symbolsText = ref('600011.SH,000767.SZ,600023.SH')
+const startDate = ref('20250101')
+const endDate = ref('20260531')
 const research = ref<QuantResearchPayload | null>(null)
 
 async function loadCandidates(): Promise<void> {

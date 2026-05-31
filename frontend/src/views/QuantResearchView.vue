@@ -459,8 +459,12 @@ function formatAmount(value: number): string {
   }
 
   .quant-hero {
-    align-items: stretch;
+    align-items: flex-start;
     flex-direction: column;
+  }
+
+  .quant-hero .button {
+    min-width: 160px;
   }
 }
 </style>

@@ -23,8 +23,7 @@
           v-for="tab in sidebarNavigation"
           :key="tab.id"
           :to="tab.path"
-          class="tab-button"
-          active-class="active"
+          :class="['tab-button', { active: isSidebarTabActive(tab) }]"
         >
           {{ tab.name }}
         </router-link>
@@ -85,6 +84,13 @@ const arenaDetailNavigation = computed(() => {
   ]
 })
 const sidebarNavigation = computed(() => isArenaAgentDetail.value ? arenaDetailNavigation.value : appNavigation)
+
+function isSidebarTabActive(tab: { id: string; path: string }): boolean {
+  if (isArenaAgentDetail.value) {
+    return (route.query.section ?? 'morning') === tab.id
+  }
+  return route.path === tab.path
+}
 
 function handleLogout() {
   clearStoredToken()

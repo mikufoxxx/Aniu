@@ -1913,13 +1913,14 @@ textarea {
 }
 
 .button.ghost.soft-header-button {
-  background: rgba(9, 14, 24, 0.96);
-  color: #94aac8;
-  border: 1px solid rgba(145, 170, 214, 0.14);
+  background: #ffffff;
+  color: #3f3f3f;
+  border: 1px solid #e4e4e1;
 }
 
 .button.ghost.soft-header-button:hover:not(:disabled) {
-  background: rgba(12, 18, 30, 0.98);
+  background: #f4f4f2;
+  border-color: #d8d8d4;
 }
 
 .head-main {

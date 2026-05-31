@@ -529,8 +529,12 @@ function retailList(key: string): string[] {
 
   .analysis-hero,
   .analysis-controls {
-    align-items: stretch;
+    align-items: flex-start;
     flex-direction: column;
+  }
+
+  .analysis-controls .button {
+    min-width: 160px;
   }
 }
 </style>

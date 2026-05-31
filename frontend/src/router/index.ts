@@ -29,6 +29,11 @@ const router = createRouter({
       component: () => import('@/views/ArenaAgentDetailView.vue')
     },
     {
+      path: '/market-map',
+      name: 'market-map',
+      component: () => import('@/views/MarketMapView.vue')
+    },
+    {
       path: '/stock-analysis',
       name: 'stock-analysis',
       component: () => import('@/views/StockAnalysisView.vue')

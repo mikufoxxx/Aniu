@@ -713,6 +713,26 @@ class ArenaRunResponse(BaseModel):
     stock_pick_snapshot: AIStockPicksResponse | None = None
 
 
+class StockAnalysisRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=16)
+    initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
+
+
+class StockAnalysisResponse(BaseModel):
+    symbol: str
+    name: str
+    price: float
+    score: float
+    action: Literal["BUY", "HOLD", "SELL"]
+    rating: str
+    reason: str
+    decision: dict[str, Any] = Field(default_factory=dict)
+    llm_decision: dict[str, Any] = Field(default_factory=dict)
+    data_sources: list[str]
+    context: str
+    stock_pick_snapshot: AIStockPicksResponse | None = None
+
+
 class ChatAttachmentRef(BaseModel):
     """Reference to a previously uploaded attachment.
 

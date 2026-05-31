@@ -1240,6 +1240,53 @@ def test_arena_nightly_phase_records_backtest_learning_memory(
     _reset_state()
 
 
+def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.0,
+                "change_pct": 4.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.8,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:20:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500))
+        response = client.post(
+            "/api/aniu/stocks/analyze",
+            headers=headers,
+            json={"symbol": "000001.SZ", "initial_cash": 200000},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "000001.SZ"
+    assert payload["name"] == "平安银行"
+    assert payload["action"] in {"BUY", "HOLD", "SELL"}
+    assert payload["price"] == 12.0
+    assert payload["score"] > 0
+    assert payload["decision"]["target_allocation_ratio"] >= 0
+    assert payload["llm_decision"]["used"] is False
+    assert "easy_tdx" in payload["data_sources"]
+
+    _reset_state()
+
+
 def test_arena_run_uses_llm_decision_for_each_agent_when_configured(
     monkeypatch,
     tmp_path,

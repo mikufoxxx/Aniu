@@ -113,6 +113,37 @@
       <section class="panel arena-source-panel">
         <div class="panel-head">
           <div class="head-main">
+            <h2>单股分析</h2>
+            <p class="section-kicker">Stock</p>
+          </div>
+          <div class="panel-head-actions">
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :class="{ 'is-loading': stockAnalysisLoading }"
+              :disabled="stockAnalysisLoading"
+              @click="analyzeStock"
+            >
+              {{ stockAnalysisLoading ? '分析中…' : '分析股票' }}
+            </button>
+          </div>
+        </div>
+        <div class="arena-form-grid">
+          <label class="arena-field">
+            <span>股票代码</span>
+            <input v-model="stockAnalysisSymbol" type="text" placeholder="000001.SZ" />
+          </label>
+        </div>
+        <div v-if="stockAnalysisResult" class="arena-history-result">
+          <strong>{{ stockAnalysisResult.name }} {{ stockAnalysisResult.symbol }}</strong>
+          <span>{{ stockAnalysisResult.action }} · {{ stockAnalysisResult.rating }}</span>
+          <span>现价 {{ formatPrice(stockAnalysisResult.price) }} · 评分 {{ stockAnalysisResult.score.toFixed(2) }}</span>
+          <span>{{ stockAnalysisResult.reason }}</span>
+        </div>
+      </section>
+
+      <section class="panel arena-source-panel">
+        <div class="panel-head">
+          <div class="head-main">
             <h2>数据源状态</h2>
             <p class="section-kicker">Sources</p>
           </div>
@@ -573,7 +604,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '@/services/api'
-import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunRecord, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload } from '@/types'
+import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunRecord, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload, StockAnalysisPayload } from '@/types'
 
 const defaultSymbols = ['600519.SH', '000001.SZ', '300750.SZ', '601318.SH', '000858.SZ']
 const maxDataLookbackDays = 1825
@@ -590,6 +621,7 @@ const initialCash = ref(200000)
 const loading = ref(false)
 const historyLoading = ref(false)
 const reportLoading = ref(false)
+const stockAnalysisLoading = ref(false)
 const agentSaving = ref(false)
 const errorMessage = ref('')
 const agents = ref<ArenaAgentConfig[]>(defaultAgents.map((agent) => ({ ...agent })))
@@ -600,6 +632,8 @@ const quantDataset = ref<QuantDatasetPayload | null>(null)
 const aiMarketContext = ref<AIMarketContextPayload | null>(null)
 const arenaResult = ref<ArenaRunPayload | null>(null)
 const arenaLeaderboard = ref<ArenaLeaderboardPayload | null>(null)
+const stockAnalysisSymbol = ref('000001.SZ')
+const stockAnalysisResult = ref<StockAnalysisPayload | null>(null)
 const dailyRefreshResult = ref<DailyRangeRefreshPayload | null>(null)
 const maintenanceJob = ref<MarketDataMaintenanceJobPayload | null>(null)
 const maintenanceRuns = ref<MarketDataMaintenanceRunRecord[]>([])
@@ -831,6 +865,30 @@ async function runArena(phase: 'morning_recommendation' | 'intraday_trade' | 'cl
     errorMessage.value = error instanceof Error ? error.message : '竞技场运行失败。'
   } finally {
     loading.value = false
+  }
+}
+
+async function analyzeStock(): Promise<void> {
+  stockAnalysisLoading.value = true
+  errorMessage.value = ''
+  try {
+    const payload = await api.analyzeStock({
+      symbol: stockAnalysisSymbol.value,
+      initial_cash: initialCash.value,
+    })
+    stockAnalysisResult.value = payload
+    if (payload.stock_pick_snapshot) {
+      quantDataset.value = payload.stock_pick_snapshot.dataset
+      candidates.value = payload.stock_pick_snapshot.recommendations
+      aiMarketContext.value = {
+        context: payload.stock_pick_snapshot.context,
+        context_length: payload.stock_pick_snapshot.context_length,
+      }
+    }
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '股票分析失败。'
+  } finally {
+    stockAnalysisLoading.value = false
   }
 }
 

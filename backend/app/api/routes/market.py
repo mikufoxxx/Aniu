@@ -37,12 +37,15 @@ from app.schemas.aniu import (
     QuantCandidatesResponse,
     QuantDatasetRequest,
     QuantDatasetResponse,
+    StockAnalysisRequest,
+    StockAnalysisResponse,
 )
 from app.services.ai_market_context_service import ai_market_context_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.arena_service import arena_service
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_maintenance_service import market_data_maintenance_service
+from app.services.stock_analysis_service import stock_analysis_service
 from app.services.market_data_service import market_data_service
 from app.services.market_report_service import market_report_service
 from app.services.quant_service import quant_service
@@ -296,6 +299,22 @@ def run_quant_backtest(
             symbols=payload.symbols,
             start_date=payload.start_date,
             end_date=payload.end_date,
+            initial_cash=payload.initial_cash,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/stocks/analyze", response_model=StockAnalysisResponse)
+def analyze_stock(
+    payload: StockAnalysisRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> StockAnalysisResponse:
+    try:
+        return stock_analysis_service.analyze(
+            db,
+            symbol=payload.symbol,
             initial_cash=payload.initial_cash,
         )
     except ValueError as exc:

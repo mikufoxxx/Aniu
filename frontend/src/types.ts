@@ -645,6 +645,21 @@ export interface ArenaRunPayload {
   stock_pick_snapshot?: AIStockPicksPayload | null
 }
 
+export interface StockAnalysisPayload {
+  symbol: string
+  name: string
+  price: number
+  score: number
+  action: 'BUY' | 'HOLD' | 'SELL'
+  rating: string
+  reason: string
+  decision: Record<string, unknown>
+  llm_decision: Record<string, unknown>
+  data_sources: string[]
+  context: string
+  stock_pick_snapshot?: AIStockPicksPayload | null
+}
+
 export interface ChatToolCall {
   tool_call_id?: string | null
   tool_name: string

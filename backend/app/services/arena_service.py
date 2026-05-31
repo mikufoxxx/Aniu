@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -34,6 +35,9 @@ STOP_LOSS_BY_STYLE = {
 
 
 class ArenaService:
+    def _utcnow(self) -> datetime:
+        return datetime.now(UTC).replace(tzinfo=None)
+
     def run_once(
         self,
         db: Session,
@@ -75,6 +79,7 @@ class ArenaService:
         leaderboard: list[dict[str, Any]] = []
         orders: list[dict[str, Any]] = []
         for index, agent in enumerate(active_agents):
+            decision_started_at = self._utcnow()
             account = self._get_or_create_account(
                 db,
                 agent=agent,
@@ -98,11 +103,20 @@ class ArenaService:
                 data_sources=data_sources,
                 app_settings=app_settings,
             )
+            decision_generated_at = self._utcnow()
             if decision is not None:
                 if decision["action"] == "SELL":
                     self._apply_sell(account, decision)
                 else:
                     self._apply_buy(account, decision)
+                decision_recorded_at = self._utcnow()
+                timing = self._decision_timing(
+                    decision_started_at=decision_started_at,
+                    decision_generated_at=decision_generated_at,
+                    decision_recorded_at=decision_recorded_at,
+                )
+                decision_context = dict(decision.get("decision_context") or {})
+                decision_context["timing"] = timing
                 order = ArenaOrder(
                     arena_run_id=arena_run.id,
                     agent_id=decision["agent_id"],
@@ -116,7 +130,12 @@ class ArenaService:
                     amount=decision["amount"],
                     remaining_cash=decision["remaining_cash"],
                     reason=decision["reason"],
-                    decision_payload=decision.get("decision_context"),
+                    decision_payload=decision_context,
+                    decision_started_at=decision_started_at,
+                    decision_generated_at=decision_generated_at,
+                    decision_recorded_at=decision_recorded_at,
+                    decision_latency_ms=timing["decision_latency_ms"],
+                    record_latency_ms=timing["record_latency_ms"],
                 )
                 db.add(order)
                 db.flush()
@@ -207,6 +226,53 @@ class ArenaService:
         for item in saved:
             db.refresh(item)
         return {"agents": [self._agent_config_payload(item) for item in saved]}
+
+    def get_agent(self, db: Session, *, agent_id: str) -> dict[str, Any] | None:
+        record = db.scalar(
+            select(ArenaAgentConfig).where(ArenaAgentConfig.agent_id == agent_id)
+        )
+        if record is None:
+            return None
+        return self._agent_config_payload(record)
+
+    def upsert_agent(
+        self,
+        db: Session,
+        *,
+        agent_id: str,
+        agent: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_id = str(agent_id or "").strip()
+        if not normalized_id:
+            raise ValueError("AI 选手 id 不能为空。")
+        record = db.scalar(
+            select(ArenaAgentConfig).where(ArenaAgentConfig.agent_id == normalized_id)
+        )
+        if record is None:
+            record = ArenaAgentConfig(agent_id=normalized_id)
+        record.agent_name = str(agent.get("name") or normalized_id)
+        record.style = str(agent.get("style") or "balanced")
+        record.provider = str(agent.get("provider") or "openai-compatible")
+        record.model = str(agent.get("model") or "")
+        record.prompt = str(agent.get("prompt") or "")
+        record.enabled = bool(agent.get("enabled", True))
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return self._agent_config_payload(record)
+
+    def delete_agent(self, db: Session, *, agent_id: str) -> dict[str, Any] | None:
+        record = db.scalar(
+            select(ArenaAgentConfig).where(ArenaAgentConfig.agent_id == agent_id)
+        )
+        if record is None:
+            return None
+        db.delete(record)
+        db.commit()
+        stored = db.scalars(
+            select(ArenaAgentConfig).order_by(ArenaAgentConfig.id)
+        ).all()
+        return {"agents": [self._agent_config_payload(item) for item in stored]}
 
     def enabled_agents(self, db: Session) -> list[dict[str, Any]]:
         records = db.scalars(
@@ -732,6 +798,27 @@ class ArenaService:
             "llm_decision": llm_decision or {"used": False},
         }
 
+    def _decision_timing(
+        self,
+        *,
+        decision_started_at: datetime,
+        decision_generated_at: datetime,
+        decision_recorded_at: datetime,
+    ) -> dict[str, Any]:
+        decision_latency_ms = int(
+            (decision_generated_at - decision_started_at).total_seconds() * 1000
+        )
+        record_latency_ms = int(
+            (decision_recorded_at - decision_generated_at).total_seconds() * 1000
+        )
+        return {
+            "decision_started_at": decision_started_at.isoformat(),
+            "decision_generated_at": decision_generated_at.isoformat(),
+            "decision_recorded_at": decision_recorded_at.isoformat(),
+            "decision_latency_ms": max(decision_latency_ms, 0),
+            "record_latency_ms": max(record_latency_ms, 0),
+        }
+
     def _get_or_create_account(
         self,
         db: Session,
@@ -893,6 +980,17 @@ class ArenaService:
             "remaining_cash": order.remaining_cash,
             "reason": order.reason,
             "decision_context": order.decision_payload or {},
+            "decision_started_at": order.decision_started_at.isoformat()
+            if order.decision_started_at
+            else None,
+            "decision_generated_at": order.decision_generated_at.isoformat()
+            if order.decision_generated_at
+            else None,
+            "decision_recorded_at": order.decision_recorded_at.isoformat()
+            if order.decision_recorded_at
+            else None,
+            "decision_latency_ms": int(order.decision_latency_ms or 0),
+            "record_latency_ms": int(order.record_latency_ms or 0),
         }
 
 

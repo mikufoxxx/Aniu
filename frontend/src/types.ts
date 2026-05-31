@@ -576,6 +576,11 @@ export interface ArenaOrder {
   remaining_cash: number
   reason: string
   decision_context?: Record<string, unknown>
+  decision_started_at?: string | null
+  decision_generated_at?: string | null
+  decision_recorded_at?: string | null
+  decision_latency_ms?: number
+  record_latency_ms?: number
 }
 
 export interface ArenaLeaderboardItem {

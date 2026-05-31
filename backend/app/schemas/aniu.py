@@ -642,6 +642,11 @@ class ArenaOrderRead(BaseModel):
     remaining_cash: float
     reason: str
     decision_context: dict[str, Any] = Field(default_factory=dict)
+    decision_started_at: str | None = None
+    decision_generated_at: str | None = None
+    decision_recorded_at: str | None = None
+    decision_latency_ms: int = 0
+    record_latency_ms: int = 0
 
 
 class ArenaPositionRead(BaseModel):

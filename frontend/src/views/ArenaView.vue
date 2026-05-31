@@ -11,6 +11,13 @@
             <button
               class="button ghost small soft-header-button overview-refresh-button"
               :disabled="agentSaving"
+              @click="addAgent"
+            >
+              新增AI
+            </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :disabled="agentSaving"
               @click="saveAgents"
             >
               {{ agentSaving ? '保存中…' : '保存选手' }}
@@ -41,6 +48,16 @@
 
         <div class="arena-agent-grid">
           <div v-for="agent in agents" :key="agent.id" class="arena-agent-card">
+            <div class="arena-agent-card-head">
+              <strong>{{ agent.name || agent.id || '新AI' }}</strong>
+              <button
+                class="button ghost small soft-header-button overview-refresh-button"
+                :disabled="agentSaving"
+                @click="removeAgent(agent.id)"
+              >
+                删除
+              </button>
+            </div>
             <label>
               <span>ID</span>
               <input v-model="agent.id" type="text" />
@@ -475,6 +492,7 @@
             <div class="arena-order-reason">
               <span>{{ order.reason }}</span>
               <small>快照 {{ orderSnapshotId(order.decision_context) }}</small>
+              <small>决策 {{ latencyText(order.decision_latency_ms) }} / 写入 {{ latencyText(order.record_latency_ms) }}</small>
             </div>
           </div>
         </div>
@@ -589,6 +607,23 @@ async function saveAgents(): Promise<void> {
   } finally {
     agentSaving.value = false
   }
+}
+
+function addAgent(): void {
+  const nextIndex = agents.value.length + 1
+  agents.value.push({
+    id: `custom_ai_${nextIndex}`,
+    name: `自定义 AI ${nextIndex}`,
+    style: 'balanced',
+    provider: 'openai-compatible',
+    model: '',
+    enabled: true,
+    prompt: '',
+  })
+}
+
+function removeAgent(agentId: string): void {
+  agents.value = agents.value.filter((agent) => agent.id !== agentId)
 }
 
 async function loadLeaderboard(): Promise<void> {
@@ -992,6 +1027,11 @@ function orderSnapshotId(decisionContext: Record<string, unknown> | undefined): 
   return typeof snapshotId === 'string' && snapshotId ? snapshotId : '--'
 }
 
+function latencyText(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
+  return `${Math.max(0, Math.round(value))}ms`
+}
+
 function sourceStatusClass(status: string): string {
   return status === 'available' ? 'profit-up' : 'profit-down'
 }
@@ -1347,6 +1387,13 @@ onMounted(async () => {
 
 .arena-agent-card {
   display: grid;
+  gap: 8px;
+}
+
+.arena-agent-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 

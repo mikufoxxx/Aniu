@@ -476,6 +476,26 @@ export const api = {
   getArenaAgents() {
     return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents`)
   },
+  createArenaAgent(payload: ArenaAgentConfig) {
+    return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+  getArenaAgent(agentId: string) {
+    return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}`)
+  },
+  updateArenaAgent(agentId: string, payload: ArenaAgentConfig) {
+    return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  },
+  deleteArenaAgent(agentId: string) {
+    return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}`, {
+      method: 'DELETE',
+    })
+  },
   updateArenaAgents(payload: { agents: ArenaAgentConfig[] }) {
     return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents`, {
       method: 'PUT',

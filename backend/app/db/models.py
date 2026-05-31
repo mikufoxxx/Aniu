@@ -738,6 +738,11 @@ class ArenaOrder(Base):
     remaining_cash: Mapped[float] = mapped_column(Float)
     reason: Mapped[str] = mapped_column(Text, default="")
     decision_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    decision_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_recorded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    record_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     arena_run: Mapped[ArenaRun] = relationship(back_populates="orders")

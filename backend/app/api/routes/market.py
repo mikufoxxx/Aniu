@@ -10,6 +10,7 @@ from app.schemas.aniu import (
     AIMarketContextResponse,
     AIStockPicksRequest,
     AIStockPicksResponse,
+    ArenaAgentRequest,
     ArenaRunRequest,
     ArenaRunResponse,
     ArenaLeaderboardResponse,
@@ -338,6 +339,22 @@ def list_arena_agents(
     return arena_service.list_agents(db)
 
 
+@router.post("/arena/agents", response_model=ArenaAgentRequest)
+def create_arena_agent(
+    payload: ArenaAgentRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentRequest:
+    try:
+        return arena_service.upsert_agent(
+            db,
+            agent_id=payload.id,
+            agent=payload.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.put("/arena/agents", response_model=ArenaAgentsResponse)
 def replace_arena_agents(
     payload: ArenaAgentsUpdateRequest,
@@ -351,3 +368,44 @@ def replace_arena_agents(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/arena/agents/{agent_id}", response_model=ArenaAgentRequest)
+def get_arena_agent(
+    agent_id: str,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentRequest:
+    agent = arena_service.get_agent(db, agent_id=agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="AI 选手不存在。")
+    return agent
+
+
+@router.put("/arena/agents/{agent_id}", response_model=ArenaAgentRequest)
+def update_arena_agent(
+    agent_id: str,
+    payload: ArenaAgentRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentRequest:
+    try:
+        return arena_service.upsert_agent(
+            db,
+            agent_id=agent_id,
+            agent=payload.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/arena/agents/{agent_id}", response_model=ArenaAgentsResponse)
+def delete_arena_agent(
+    agent_id: str,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentsResponse:
+    result = arena_service.delete_agent(db, agent_id=agent_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="AI 选手不存在。")
+    return result

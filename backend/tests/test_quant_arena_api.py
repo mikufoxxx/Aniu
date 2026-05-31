@@ -917,6 +917,68 @@ def test_arena_orders_store_shared_snapshot_and_agent_decision_context(
     _reset_state()
 
 
+def test_arena_orders_record_decision_timing_for_latency_audit(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from datetime import datetime, timedelta
+
+    from app.services.arena_service import arena_service
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 3.0,
+                "amount": 10_000_000,
+                "turnover": 0.6,
+                "volume_ratio": 1.4,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:20:00",
+            }
+        ]
+
+    base = datetime(2026, 5, 29, 10, 20, 0)
+    ticks = iter(
+        [
+            base,
+            base + timedelta(milliseconds=180),
+            base + timedelta(milliseconds=240),
+        ]
+    )
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(arena_service, "_utcnow", lambda: next(ticks), raising=False)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900))
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "symbols": ["600519.SH"],
+                "initial_cash": 200000,
+                "agents": [{"id": "timely_ai", "name": "及时 AI", "style": "momentum"}],
+            },
+        )
+
+    assert response.status_code == 200
+    order = response.json()["orders"][0]
+    assert order["decision_started_at"] == "2026-05-29T10:20:00"
+    assert order["decision_generated_at"] == "2026-05-29T10:20:00.180000"
+    assert order["decision_recorded_at"] == "2026-05-29T10:20:00.240000"
+    assert order["decision_latency_ms"] == 180
+    assert order["record_latency_ms"] == 60
+    assert order["decision_context"]["timing"]["decision_latency_ms"] == 180
+    assert order["decision_context"]["timing"]["record_latency_ms"] == 60
+
+    _reset_state()
+
+
 def test_arena_run_uses_llm_decision_for_each_agent_when_configured(
     monkeypatch,
     tmp_path,
@@ -1452,5 +1514,65 @@ def test_arena_agents_can_be_saved_and_used_as_default_runner(monkeypatch, tmp_p
     payload = run_response.json()
     assert [item["agent_id"] for item in payload["leaderboard"]] == ["deepseek_ai"]
     assert payload["orders"][0]["agent_name"] == "DeepSeek 量化"
+
+    _reset_state()
+
+
+def test_arena_agents_support_individual_crud(monkeypatch, tmp_path) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        create_response = client.post(
+            "/api/aniu/arena/agents",
+            headers=headers,
+            json={
+                "id": "claude_ai",
+                "name": "Claude 稳健",
+                "style": "risk_control",
+                "provider": "anthropic-compatible",
+                "model": "claude-sonnet",
+                "enabled": True,
+                "prompt": "偏低回撤和交易纪律。",
+            },
+        )
+        detail_response = client.get(
+            "/api/aniu/arena/agents/claude_ai",
+            headers=headers,
+        )
+        update_response = client.put(
+            "/api/aniu/arena/agents/claude_ai",
+            headers=headers,
+            json={
+                "id": "ignored_id",
+                "name": "Claude 趋势",
+                "style": "momentum",
+                "provider": "anthropic-compatible",
+                "model": "claude-opus",
+                "enabled": False,
+                "prompt": "偏趋势突破，但禁用。",
+            },
+        )
+        list_after_update = client.get("/api/aniu/arena/agents", headers=headers)
+        delete_response = client.delete(
+            "/api/aniu/arena/agents/claude_ai",
+            headers=headers,
+        )
+        detail_after_delete = client.get(
+            "/api/aniu/arena/agents/claude_ai",
+            headers=headers,
+        )
+
+    assert create_response.status_code == 200
+    assert create_response.json()["id"] == "claude_ai"
+    assert detail_response.status_code == 200
+    assert detail_response.json()["prompt"] == "偏低回撤和交易纪律。"
+    assert update_response.status_code == 200
+    assert update_response.json()["id"] == "claude_ai"
+    assert update_response.json()["name"] == "Claude 趋势"
+    assert update_response.json()["style"] == "momentum"
+    assert update_response.json()["enabled"] is False
+    assert [item["id"] for item in list_after_update.json()["agents"]] == ["claude_ai"]
+    assert delete_response.status_code == 200
+    assert delete_response.json()["agents"] == []
+    assert detail_after_delete.status_code == 404
 
     _reset_state()

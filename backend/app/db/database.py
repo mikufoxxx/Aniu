@@ -430,12 +430,24 @@ def _ensure_arena_order_columns(engine) -> None:
     if "arena_orders" not in table_names:
         return
 
-    columns = {column["name"] for column in inspector.get_columns("arena_orders")}
-    if "decision_payload" in columns:
-        return
+    required_columns = {
+        "decision_payload": "ALTER TABLE arena_orders ADD COLUMN decision_payload JSON",
+        "decision_started_at": "ALTER TABLE arena_orders ADD COLUMN decision_started_at DATETIME",
+        "decision_generated_at": "ALTER TABLE arena_orders ADD COLUMN decision_generated_at DATETIME",
+        "decision_recorded_at": "ALTER TABLE arena_orders ADD COLUMN decision_recorded_at DATETIME",
+        "decision_latency_ms": "ALTER TABLE arena_orders ADD COLUMN decision_latency_ms INTEGER",
+        "record_latency_ms": "ALTER TABLE arena_orders ADD COLUMN record_latency_ms INTEGER",
+    }
 
     with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE arena_orders ADD COLUMN decision_payload JSON"))
+        for column_name, statement in required_columns.items():
+            current_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("arena_orders")
+            }
+            if column_name in current_columns:
+                continue
+            connection.execute(text(statement))
 
 
 def _ensure_run_event_indexes(engine) -> None:

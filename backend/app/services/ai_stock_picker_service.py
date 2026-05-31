@@ -36,7 +36,10 @@ class AIStockPickerService:
             prefer_realtime=prefer_realtime,
             lookback_days=normalized_lookback_days,
         )
-        selection_plan = ai_selection_service.selection_plan(agent)
+        selection_plan = {
+            **ai_selection_service.selection_plan(agent),
+            "lookback_days": normalized_lookback_days,
+        }
         enriched_items = [
             ai_selection_service.enrich(item, selection_plan)
             for item in dataset.get("items", [])

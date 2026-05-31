@@ -15,6 +15,63 @@ def _number(value: Any, default: float = 0.0) -> float:
 class AISelectionService:
     """AI-ready A-share selection context built from quote, daily and retail signals."""
 
+    _DIMENSION_ACTIONS = {
+        "quote": {
+            "source": "low_frequency_quote",
+            "tables": [],
+            "refresh_endpoint": "/api/aniu/quant/dataset",
+            "cadence": "30-60s",
+        },
+        "daily_history": {
+            "source": "tushare_daily",
+            "tables": ["daily_bars"],
+            "refresh_endpoint": "/api/aniu/market/daily/refresh-range",
+            "cadence": "daily",
+        },
+        "moneyflow": {
+            "source": "tushare_moneyflow",
+            "tables": ["daily_bars"],
+            "refresh_endpoint": "/api/aniu/market/maintenance/run",
+            "cadence": "daily",
+        },
+        "sector_heat": {
+            "source": "tushare_sector_member",
+            "tables": ["sector_bars", "sector_members"],
+            "refresh_endpoint": "/api/aniu/market/maintenance/run",
+            "cadence": "daily",
+        },
+        "limit_event": {
+            "source": "tushare_limit_list_d",
+            "tables": ["limit_events"],
+            "refresh_endpoint": "/api/aniu/market/maintenance/run",
+            "cadence": "daily",
+        },
+        "financial_indicator": {
+            "source": "tushare_fina_indicator",
+            "tables": ["financial_indicators"],
+            "refresh_endpoint": "/api/aniu/market/maintenance/run",
+            "cadence": "quarterly",
+        },
+        "valuation": {
+            "source": "tushare_daily_basic",
+            "tables": ["daily_bars"],
+            "refresh_endpoint": "/api/aniu/market/daily/refresh-range",
+            "cadence": "daily",
+        },
+        "pledge_stat": {
+            "source": "tushare_pledge_stat",
+            "tables": ["pledge_stats"],
+            "refresh_endpoint": "/api/aniu/market/maintenance/run",
+            "cadence": "event_or_periodic",
+        },
+        "stock_profile": {
+            "source": "tushare_stock_basic",
+            "tables": ["stock_profiles"],
+            "refresh_endpoint": "/api/aniu/market/maintenance/run",
+            "cadence": "daily",
+        },
+    }
+
     def selection_plan(self, agent: dict[str, Any] | None = None) -> dict[str, Any]:
         style = str((agent or {}).get("style") or "balanced").strip().lower()
         if style == "momentum":
@@ -193,6 +250,10 @@ class AISelectionService:
     ) -> dict[str, Any]:
         requested = list(plan.get("dimensions") or [])
         checks = {dimension: self._dimension_status(candidate, dimension) for dimension in requested}
+        actions = [
+            self._dimension_action(dimension, checks[dimension], plan)
+            for dimension in requested
+        ]
         available = [
             dimension
             for dimension, item in checks.items()
@@ -208,6 +269,38 @@ class AISelectionService:
             "available_dimensions": available,
             "missing_dimensions": missing,
             "checks": checks,
+            "actions": actions,
+        }
+
+    def _dimension_action(
+        self,
+        dimension: str,
+        status: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        meta = self._DIMENSION_ACTIONS.get(
+            dimension,
+            {
+                "source": "unknown",
+                "tables": [],
+                "refresh_endpoint": None,
+                "cadence": "unknown",
+            },
+        )
+        lookback_days = int(plan.get("lookback_days") or 1825)
+        temporal_window = {
+            "lookback_days": lookback_days,
+            "frequency": "daily" if dimension != "quote" else "low_frequency",
+        }
+        return {
+            "dimension": dimension,
+            "status": status["status"],
+            "summary": status["summary"],
+            "source": meta["source"],
+            "tables": list(meta["tables"]),
+            "refresh_endpoint": meta["refresh_endpoint"],
+            "cadence": meta["cadence"],
+            "temporal_window": temporal_window,
         }
 
     def _dimension_status(

@@ -786,6 +786,20 @@ def test_ai_stock_picker_uses_agent_specific_selection_plan(monkeypatch, tmp_pat
     assert "pledge_stat" in risk_request["requested_dimensions"]
     assert "pledge_stat" in risk_request["missing_dimensions"]
     assert risk_request["checks"]["daily_history"]["status"] == "available"
+    momentum_actions = {
+        item["dimension"]: item
+        for item in momentum_request["actions"]
+    }
+    risk_actions = {
+        item["dimension"]: item
+        for item in risk_request["actions"]
+    }
+    assert momentum_actions["sector_heat"]["source"] == "tushare_sector_member"
+    assert momentum_actions["sector_heat"]["status"] == "missing"
+    assert momentum_actions["sector_heat"]["refresh_endpoint"] == "/api/aniu/market/maintenance/run"
+    assert momentum_actions["daily_history"]["temporal_window"]["lookback_days"] == 1825
+    assert risk_actions["pledge_stat"]["source"] == "tushare_pledge_stat"
+    assert risk_actions["pledge_stat"]["tables"] == ["pledge_stats"]
 
     _reset_state()
 

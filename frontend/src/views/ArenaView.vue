@@ -26,9 +26,17 @@
               class="button ghost small soft-header-button overview-refresh-button"
               :class="{ 'is-loading': loading }"
               :disabled="loading"
-              @click="runArena"
+              @click="runArena('morning_recommendation')"
             >
-              {{ loading ? '运行中…' : '运行一轮' }}
+              {{ loading ? '运行中…' : '早盘推荐' }}
+            </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :class="{ 'is-loading': loading }"
+              :disabled="loading"
+              @click="runArena('intraday_trade')"
+            >
+              {{ loading ? '运行中…' : '盘中模拟' }}
             </button>
           </div>
         </div>
@@ -496,6 +504,27 @@
             </div>
           </div>
         </div>
+        <div class="positions-surface" v-else-if="arenaResult?.agent_recommendations.length">
+          <div class="arena-order-row arena-table-head">
+            <div>AI</div>
+            <div>标的</div>
+            <div>价格</div>
+            <div>评分</div>
+            <div>动作</div>
+            <div>依据</div>
+          </div>
+          <div v-for="item in arenaResult.agent_recommendations" :key="`${item.agent_id}-${item.symbol}`" class="arena-order-row">
+            <div>{{ item.agent_name }}</div>
+            <div>{{ item.name }} {{ item.symbol }}</div>
+            <div>{{ formatPrice(item.price) }}</div>
+            <div>{{ typeof item.score === 'number' ? item.score.toFixed(2) : '--' }}</div>
+            <div>{{ item.action }}</div>
+            <div class="arena-order-reason">
+              <span>{{ item.reason }}</span>
+              <small>快照 {{ orderSnapshotId(item.decision_context) }}</small>
+            </div>
+          </div>
+        </div>
         <div v-else class="empty-state">
           <p>暂无模拟交易记录。</p>
         </div>
@@ -742,11 +771,12 @@ async function generateReport(reportType: 'morning' | 'closing'): Promise<void> 
   }
 }
 
-async function runArena(): Promise<void> {
+async function runArena(phase: 'morning_recommendation' | 'intraday_trade'): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
     const payload = await api.runArena({
+      phase,
       symbols: parseSymbols(),
       initial_cash: initialCash.value,
     })

@@ -47,6 +47,7 @@ def init_db() -> None:
     _ensure_strategy_schedule_columns(engine)
     _ensure_strategy_run_columns(engine)
     _ensure_run_event_columns(engine)
+    _ensure_arena_run_columns(engine)
     _ensure_arena_order_columns(engine)
     _ensure_daily_bar_columns(engine)
     _ensure_chat_session_indexes(engine)
@@ -448,6 +449,33 @@ def _ensure_arena_order_columns(engine) -> None:
             if column_name in current_columns:
                 continue
             connection.execute(text(statement))
+
+
+def _ensure_arena_run_columns(engine) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "arena_runs" not in table_names:
+        return
+
+    required_columns = {
+        "phase": "ALTER TABLE arena_runs ADD COLUMN phase VARCHAR(32) DEFAULT 'intraday_trade'",
+    }
+
+    with engine.begin() as connection:
+        for column_name, statement in required_columns.items():
+            current_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("arena_runs")
+            }
+            if column_name in current_columns:
+                continue
+            connection.execute(text(statement))
+        connection.execute(
+            text(
+                "UPDATE arena_runs SET phase = 'intraday_trade' "
+                "WHERE phase IS NULL OR trim(phase) = ''"
+            )
+        )
 
 
 def _ensure_run_event_indexes(engine) -> None:

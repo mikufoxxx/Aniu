@@ -634,6 +634,7 @@ class ArenaRun(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    phase: Mapped[str] = mapped_column(String(32), default="intraday_trade", index=True)
     initial_cash: Mapped[float] = mapped_column(Float, default=200000.0)
     universe_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     candidate_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

@@ -42,10 +42,12 @@ class ArenaService:
         self,
         db: Session,
         *,
+        phase: str = "intraday_trade",
         symbols: list[str] | None = None,
         agents: list[dict[str, str]] | None = None,
         initial_cash: float = 200000.0,
     ) -> dict[str, Any]:
+        normalized_phase = self._normalize_phase(phase)
         active_agents = agents or self.enabled_agents(db)
         settings = get_settings()
         app_settings = settings_service.get_or_create_settings(db)
@@ -63,9 +65,11 @@ class ArenaService:
             "data_sources": stock_pick_snapshot["data_sources"],
             "candidates": stock_pick_snapshot["recommendations"],
             "stock_pick_snapshot": stock_pick_snapshot,
+            "agent_recommendations": [],
         }
         candidates = candidate_payload["candidates"]
         arena_run = ArenaRun(
+            phase=normalized_phase,
             initial_cash=initial_cash,
             universe_json=symbols,
             candidate_payload=candidate_payload,
@@ -75,6 +79,33 @@ class ArenaService:
         db.flush()
         snapshot_id = f"arena-{arena_run.id}"
         data_sources = list(candidate_payload.get("data_sources") or [])
+
+        if normalized_phase == "morning_recommendation":
+            recommendations = self._morning_recommendations(
+                agents=active_agents,
+                candidates=candidates,
+                snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
+                data_sources=data_sources,
+            )
+            candidate_payload = {
+                **candidate_payload,
+                "agent_recommendations": recommendations,
+            }
+            arena_run.candidate_payload = candidate_payload
+            db.add(arena_run)
+            db.commit()
+            return {
+                "run_id": arena_run.id,
+                "phase": normalized_phase,
+                "candidate_count": candidate_payload["candidate_count"],
+                "candidates": candidates,
+                "agent_recommendations": recommendations,
+                "leaderboard": [],
+                "orders": [],
+                "data_sources": candidate_payload["data_sources"],
+                "stock_pick_snapshot": stock_pick_snapshot,
+            }
 
         leaderboard: list[dict[str, Any]] = []
         orders: list[dict[str, Any]] = []
@@ -151,13 +182,64 @@ class ArenaService:
         db.commit()
         return {
             "run_id": arena_run.id,
+            "phase": normalized_phase,
             "candidate_count": candidate_payload["candidate_count"],
             "candidates": candidates,
+            "agent_recommendations": [],
             "leaderboard": leaderboard,
             "orders": orders,
             "data_sources": candidate_payload["data_sources"],
             "stock_pick_snapshot": stock_pick_snapshot,
         }
+
+    def _normalize_phase(self, phase: str) -> str:
+        normalized = str(phase or "intraday_trade").strip().lower()
+        if normalized not in {"morning_recommendation", "intraday_trade"}:
+            raise ValueError("竞技场阶段必须是 morning_recommendation 或 intraday_trade。")
+        return normalized
+
+    def _morning_recommendations(
+        self,
+        *,
+        agents: list[dict[str, str]],
+        candidates: list[dict[str, Any]],
+        snapshot_id: str,
+        stock_pick_snapshot_id: str,
+        data_sources: list[str],
+    ) -> list[dict[str, Any]]:
+        recommendations: list[dict[str, Any]] = []
+        for index, agent in enumerate(agents):
+            style = str(agent.get("style") or "balanced")
+            preferred_index = 0 if style == "momentum" else min(index, len(candidates) - 1)
+            candidate = candidates[preferred_index] if candidates else None
+            if candidate is None:
+                continue
+            recommendations.append(
+                {
+                    "agent_id": str(agent.get("id") or f"agent_{index + 1}"),
+                    "agent_name": str(agent.get("name") or f"AI {index + 1}"),
+                    "style": style,
+                    "action": "WATCH",
+                    "symbol": candidate.get("symbol"),
+                    "name": candidate.get("name") or candidate.get("symbol"),
+                    "score": candidate.get("score"),
+                    "price": candidate.get("price"),
+                    "reason": (
+                        f"{style} 早盘关注 {candidate.get('symbol')}，"
+                        f"候选评分 {float(candidate.get('score') or 0):.2f}。"
+                    ),
+                    "decision_context": self._decision_context(
+                        snapshot_id=snapshot_id,
+                        stock_pick_snapshot_id=stock_pick_snapshot_id,
+                        agent=agent,
+                        data_sources=data_sources,
+                        candidate=candidate,
+                        action="WATCH",
+                        llm_decision=None,
+                    ),
+                }
+            )
+        return recommendations
 
     def leaderboard(self, db: Session) -> dict[str, Any]:
         accounts = db.scalars(

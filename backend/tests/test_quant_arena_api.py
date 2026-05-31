@@ -979,6 +979,82 @@ def test_arena_orders_record_decision_timing_for_latency_audit(
     _reset_state()
 
 
+def test_arena_morning_phase_records_agent_recommendations_without_orders(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.db.models import ArenaRun
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 100.0,
+                "change_pct": 3.0,
+                "amount": 10_000_000,
+                "turnover": 0.6,
+                "volume_ratio": 1.4,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 08:20:00",
+            },
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 5_000_000,
+                "turnover": 0.4,
+                "volume_ratio": 1.1,
+                "source": "tencent",
+                "timestamp": "2026-05-29 08:20:00",
+            },
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "phase": "morning_recommendation",
+                "symbols": ["600519.SH", "000001.SZ"],
+                "initial_cash": 200000,
+                "agents": [
+                    {"id": "momentum_ai", "name": "动量 AI", "style": "momentum"},
+                    {"id": "risk_ai", "name": "风控 AI", "style": "risk_control"},
+                ],
+            },
+        )
+        with session_scope() as db:
+            stored_run = db.get(ArenaRun, response.json()["run_id"])
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["phase"] == "morning_recommendation"
+    assert payload["orders"] == []
+    assert [item["agent_id"] for item in payload["agent_recommendations"]] == [
+        "momentum_ai",
+        "risk_ai",
+    ]
+    assert payload["agent_recommendations"][0]["action"] == "WATCH"
+    assert payload["agent_recommendations"][0]["decision_context"]["action"] == "WATCH"
+    assert stored_run.phase == "morning_recommendation"
+    assert stored_run.candidate_payload["agent_recommendations"][0]["agent_id"] == "momentum_ai"
+
+    _reset_state()
+
+
 def test_arena_run_uses_llm_decision_for_each_agent_when_configured(
     monkeypatch,
     tmp_path,

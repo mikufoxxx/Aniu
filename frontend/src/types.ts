@@ -583,6 +583,19 @@ export interface ArenaOrder {
   record_latency_ms?: number
 }
 
+export interface ArenaAgentRecommendation {
+  agent_id: string
+  agent_name: string
+  style: string
+  action: string
+  symbol: string
+  name: string
+  score?: number
+  price?: number | null
+  reason: string
+  decision_context?: Record<string, unknown>
+}
+
 export interface ArenaLeaderboardItem {
   agent_id: string
   agent_name: string
@@ -610,8 +623,10 @@ export interface ArenaLeaderboardPayload {
 
 export interface ArenaRunPayload {
   run_id: number
+  phase: string
   candidate_count: number
   candidates: QuantCandidate[]
+  agent_recommendations: ArenaAgentRecommendation[]
   leaderboard: ArenaLeaderboardItem[]
   orders: ArenaOrder[]
   data_sources: string[]

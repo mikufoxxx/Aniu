@@ -466,7 +466,7 @@ export const api = {
       timeoutMs: 60000,
     })
   },
-  runArena(payload: { symbols?: string[]; agents?: ArenaAgentConfig[]; initial_cash?: number }) {
+  runArena(payload: { phase?: 'morning_recommendation' | 'intraday_trade'; symbols?: string[]; agents?: ArenaAgentConfig[]; initial_cash?: number }) {
     return request<ArenaRunPayload>(`${API_PREFIX}/arena/run`, {
       method: 'POST',
       body: JSON.stringify(payload),

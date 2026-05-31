@@ -41,6 +41,64 @@ textarea {
   resize: vertical;
 }
 
+.chart-shell {
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.chart-head div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chart-head strong {
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.chart-head span,
+.chart-legend span {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.chart-canvas {
+  width: 100%;
+  height: 370px;
+}
+
+.performance-canvas {
+  width: 100%;
+  height: 300px;
+}
+
+.comparison-canvas,
+.radar-canvas {
+  width: 100%;
+  height: 260px;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

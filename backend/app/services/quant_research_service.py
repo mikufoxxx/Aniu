@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import DailyBar
+from app.services.chart_data_service import chart_data_service
 from app.services.historical_data_service import _normalize_trade_date
 from app.services.market_data_service import normalize_symbol
 
@@ -63,6 +64,7 @@ class QuantResearchService:
             "initial_cash": initial_cash,
             "best_strategy": best_strategy,
             "strategies": strategies,
+            "comparison_chart": self._comparison_chart(strategies),
             "ai_learning_context": self._learning_context(best_strategy, strategies),
         }
 
@@ -81,6 +83,20 @@ class QuantResearchService:
         return {
             "symbol": first.symbol,
             "bars": bars,
+            "price_series": [
+                {
+                    "trade_date": bar.trade_date,
+                    "open": round(float(bar.open or bar.close or 0), 4),
+                    "high": round(float(bar.high or bar.close or 0), 4),
+                    "low": round(float(bar.low or bar.close or 0), 4),
+                    "close": round(float(bar.close or 0), 4),
+                    "volume": float(bar.vol or 0),
+                    "amount": float(bar.amount or 0),
+                    "ma5": None,
+                    "ma20": None,
+                }
+                for bar in bars
+            ],
             "first_close": first_close,
             "last_close": last_close,
             "period_return": (last_close - first_close) / first_close,
@@ -165,6 +181,15 @@ class QuantResearchService:
             )
         return_ratio = (final_assets - initial_cash) / initial_cash
         max_drawdown = self._max_drawdown(equity_curve)
+        equity_points = chart_data_service.equity_curve_from_values(
+            trade_dates=trade_dates,
+            values=equity_curve,
+            initial_cash=initial_cash,
+        )
+        drawdown_points = chart_data_service.drawdown_curve_from_values(
+            trade_dates=trade_dates,
+            values=equity_curve,
+        )
         return {
             "strategy_name": "equal_weight",
             "display_name": "等权分散",
@@ -177,6 +202,12 @@ class QuantResearchService:
             "reason": "同一股票池等权买入，作为量化研究里的分散基准。",
             "metrics": {"candidate_symbols": len(profiles), "cash_remaining": round(cash, 2)},
             "trades": trades,
+            "charts": chart_data_service.strategy_charts(
+                price_series=profiles[0]["price_series"],
+                trades=trades,
+                equity_curve=equity_points,
+                drawdown_curve=drawdown_points,
+            ),
         }
 
     def _single_symbol_trade(
@@ -194,10 +225,20 @@ class QuantResearchService:
         final_assets = cash + quantity * profile["last_close"]
         return_ratio = (final_assets - initial_cash) / initial_cash
         equity_curve = [cash + quantity * float(bar.close or 0) for bar in profile["bars"]]
+        trade_dates = [bar.trade_date for bar in profile["bars"]]
         trades = [
             self._trade("BUY", profile["symbol"], profile["bars"][0].trade_date, profile["first_close"], quantity),
             self._trade("SELL", profile["symbol"], profile["bars"][-1].trade_date, profile["last_close"], quantity),
         ]
+        equity_points = chart_data_service.equity_curve_from_values(
+            trade_dates=trade_dates,
+            values=equity_curve,
+            initial_cash=initial_cash,
+        )
+        drawdown_points = chart_data_service.drawdown_curve_from_values(
+            trade_dates=trade_dates,
+            values=equity_curve,
+        )
         return {
             "strategy_name": strategy_name,
             "display_name": display_name,
@@ -215,6 +256,12 @@ class QuantResearchService:
                 "quantity": quantity,
             },
             "trades": trades,
+            "charts": chart_data_service.strategy_charts(
+                price_series=profile["price_series"],
+                trades=trades,
+                equity_curve=equity_points,
+                drawdown_curve=drawdown_points,
+            ),
         }
 
     def _trade(self, action: str, symbol: str, trade_date: str, price: float, quantity: int) -> dict[str, Any]:
@@ -248,6 +295,18 @@ class QuantResearchService:
             "策略对比："
             + "；".join(rows)
         )
+
+    def _comparison_chart(self, strategies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {
+                "strategy_name": item["strategy_name"],
+                "display_name": item["display_name"],
+                "return_ratio": item["return_ratio"],
+                "max_drawdown": item["max_drawdown"],
+                "score": item["score"],
+            }
+            for item in strategies
+        ]
 
 
 quant_research_service = QuantResearchService()

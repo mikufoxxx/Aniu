@@ -98,6 +98,26 @@
         </div>
       </section>
     </section>
+
+    <section v-if="research" class="quant-chart-grid">
+      <MarketKlineChart
+        title="价格走势与交易点"
+        :subtitle="research.best_strategy.selected_symbols.join(', ')"
+        :price-series="research.best_strategy.charts.price_series"
+        :markers="research.best_strategy.charts.trade_markers"
+      />
+      <PerformanceDashboard
+        title="权益曲线与回撤"
+        :subtitle="research.best_strategy.display_name"
+        :equity-curve="research.best_strategy.charts.equity_curve"
+        :drawdown-curve="research.best_strategy.charts.drawdown_curve"
+      />
+      <StrategyComparisonChart
+        title="策略收益 / 回撤 / 评分"
+        subtitle="同一股票池横向对比"
+        :items="research.comparison_chart"
+      />
+    </section>
   </div>
 </template>
 
@@ -105,6 +125,9 @@
 import { ref } from 'vue'
 import { api } from '@/services/api'
 import type { QuantCandidate, QuantResearchPayload } from '@/types'
+import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
+import PerformanceDashboard from '@/components/charts/PerformanceDashboard.vue'
+import StrategyComparisonChart from '@/components/charts/StrategyComparisonChart.vue'
 
 const limit = ref(20)
 const candidates = ref<QuantCandidate[]>([])
@@ -219,6 +242,17 @@ function formatAmount(value: number): string {
   align-items: start;
 }
 
+.quant-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.quant-chart-grid > :first-child {
+  grid-row: span 2;
+}
+
 .quant-limit,
 .quant-form label {
   display: grid;
@@ -325,8 +359,13 @@ function formatAmount(value: number): string {
 
 @media (max-width: 980px) {
   .quant-hero,
-  .quant-grid {
+  .quant-grid,
+  .quant-chart-grid {
     grid-template-columns: 1fr;
+  }
+
+  .quant-chart-grid > :first-child {
+    grid-row: auto;
   }
 
   .quant-hero {

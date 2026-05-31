@@ -943,6 +943,43 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
     assert payload["best_strategy"]["strategy_name"] == "daily_momentum"
     assert payload["best_strategy"]["selected_symbols"] == ["000001.SZ"]
     assert payload["best_strategy"]["return_ratio"] > payload["strategies"][-1]["return_ratio"]
+    assert payload["comparison_chart"] == [
+        {
+            "strategy_name": "daily_momentum",
+            "display_name": "日线动量",
+            "return_ratio": payload["strategies"][0]["return_ratio"],
+            "max_drawdown": payload["strategies"][0]["max_drawdown"],
+            "score": payload["strategies"][0]["score"],
+        },
+        {
+            "strategy_name": "equal_weight",
+            "display_name": "等权分散",
+            "return_ratio": payload["strategies"][1]["return_ratio"],
+            "max_drawdown": payload["strategies"][1]["max_drawdown"],
+            "score": payload["strategies"][1]["score"],
+        },
+        {
+            "strategy_name": "low_drawdown",
+            "display_name": "低波动回撤",
+            "return_ratio": payload["strategies"][2]["return_ratio"],
+            "max_drawdown": payload["strategies"][2]["max_drawdown"],
+            "score": payload["strategies"][2]["score"],
+        },
+    ]
+    charts = payload["best_strategy"]["charts"]
+    assert [point["close"] for point in charts["price_series"]] == [10.0, 11.0, 12.0]
+    assert charts["trade_markers"] == [
+        {"action": "BUY", "symbol": "000001.SZ", "trade_date": "20260101", "price": 10.0, "quantity": 20000},
+        {"action": "SELL", "symbol": "000001.SZ", "trade_date": "20260103", "price": 12.0, "quantity": 20000},
+    ]
+    assert [point["trade_date"] for point in charts["equity_curve"]] == [
+        "20260101",
+        "20260102",
+        "20260103",
+    ]
+    assert charts["equity_curve"][-1]["value"] == payload["best_strategy"]["final_assets"]
+    assert charts["drawdown_curve"][0]["drawdown"] == 0.0
+    assert len(charts["drawdown_curve"]) == 3
     assert "daily_momentum" in payload["ai_learning_context"]
     assert "最大回撤" in payload["ai_learning_context"]
 
@@ -1768,7 +1805,9 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
         with session_scope() as db:
-            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260526", open=9.8, high=10.3, low=9.7, close=10, amount=500))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260527", open=10.0, high=11.1, low=9.9, close=11, amount=800))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", open=11.0, high=12.2, low=10.8, close=12, amount=1200))
         response = client.post(
             "/api/aniu/stocks/analyze",
             headers=headers,
@@ -1791,6 +1830,14 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
         "liquidity",
     }
     assert "easy_tdx" in payload["data_sources"]
+    assert [point["trade_date"] for point in payload["charts"]["price_series"]] == [
+        "20260526",
+        "20260527",
+        "20260528",
+    ]
+    assert payload["charts"]["signal_markers"][0]["action"] == payload["action"]
+    assert payload["charts"]["signal_markers"][0]["symbol"] == "000001.SZ"
+    assert payload["charts"]["factor_radar"]
 
     _reset_state()
 
@@ -2229,6 +2276,9 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert all(pick["ai_selection_score"] > 0 for pick in morning["picks"])
     assert all("risk_flags" in pick for pick in morning["picks"])
     assert len(payload["intraday"]["orders"]) >= 1
+    order_chart = payload["intraday"]["orders"][0]["charts"]
+    assert order_chart["trade_markers"][0]["action"] in {"BUY", "SELL"}
+    assert order_chart["price_series"]
     assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"
     assert payload["learning"]["reviews"][0]["memory_type"] == "nightly_learning"
 

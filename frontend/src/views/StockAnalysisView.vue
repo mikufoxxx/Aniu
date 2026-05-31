@@ -111,6 +111,19 @@
             </ul>
           </div>
           <p>{{ analysis.reason }}</p>
+          <div class="analysis-chart-grid">
+            <MarketKlineChart
+              title="价格走势与 AI 信号"
+              :subtitle="`${analysis.name} ${analysis.symbol}`"
+              :price-series="analysis.charts.price_series"
+              :markers="analysis.charts.signal_markers"
+            />
+            <FactorRadarChart
+              title="量化因子雷达"
+              subtitle="用于解释 AI 评分结构"
+              :items="analysis.charts.factor_radar"
+            />
+          </div>
           <div class="source-chips">
             <span v-for="source in analysis.data_sources" :key="source">{{ source }}</span>
           </div>
@@ -128,6 +141,8 @@
 import { computed, ref } from 'vue'
 import { api } from '@/services/api'
 import type { QuantCandidate, StockAnalysisPayload } from '@/types'
+import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
+import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
 
 const candidateLimit = ref(5)
 const symbolText = ref('')
@@ -359,6 +374,13 @@ function retailList(key: string): string[] {
   gap: 10px;
 }
 
+.analysis-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.55fr);
+  gap: 10px;
+  align-items: start;
+}
+
 .analysis-metrics div {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -432,7 +454,8 @@ function retailList(key: string): string[] {
 
 @media (max-width: 980px) {
   .analysis-hero,
-  .analysis-grid {
+  .analysis-grid,
+  .analysis-chart-grid {
     grid-template-columns: 1fr;
   }
 

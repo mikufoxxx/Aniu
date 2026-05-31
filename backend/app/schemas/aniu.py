@@ -612,6 +612,61 @@ class BacktestTradeRead(BaseModel):
     amount: float
 
 
+class PriceSeriesPointRead(BaseModel):
+    trade_date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+    amount: float = 0.0
+    ma5: float | None = None
+    ma20: float | None = None
+
+
+class TradeMarkerRead(BaseModel):
+    action: str
+    symbol: str
+    trade_date: str | None = None
+    price: float
+    quantity: int = 0
+
+
+class EquityCurvePointRead(BaseModel):
+    trade_date: str
+    value: float
+    return_ratio: float
+
+
+class DrawdownCurvePointRead(BaseModel):
+    trade_date: str
+    drawdown: float
+
+
+class FactorRadarPointRead(BaseModel):
+    name: str
+    key: str
+    value: float
+
+
+class StrategyChartsRead(BaseModel):
+    price_series: list[PriceSeriesPointRead] = Field(default_factory=list)
+    trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
+    equity_curve: list[EquityCurvePointRead] = Field(default_factory=list)
+    drawdown_curve: list[DrawdownCurvePointRead] = Field(default_factory=list)
+
+
+class StockAnalysisChartsRead(BaseModel):
+    price_series: list[PriceSeriesPointRead] = Field(default_factory=list)
+    signal_markers: list[TradeMarkerRead] = Field(default_factory=list)
+    factor_radar: list[FactorRadarPointRead] = Field(default_factory=list)
+
+
+class OrderChartsRead(BaseModel):
+    price_series: list[PriceSeriesPointRead] = Field(default_factory=list)
+    trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
+
+
 class BacktestResponse(BaseModel):
     run_id: int
     strategy_name: str
@@ -646,6 +701,7 @@ class QuantResearchStrategyRead(BaseModel):
     reason: str
     metrics: dict[str, Any]
     trades: list[BacktestTradeRead]
+    charts: StrategyChartsRead
 
 
 class QuantResearchResponse(BaseModel):
@@ -656,6 +712,7 @@ class QuantResearchResponse(BaseModel):
     initial_cash: float
     best_strategy: QuantResearchStrategyRead
     strategies: list[QuantResearchStrategyRead]
+    comparison_chart: list[dict[str, Any]] = Field(default_factory=list)
     ai_learning_context: str
 
 
@@ -710,6 +767,7 @@ class ArenaOrderRead(BaseModel):
     decision_recorded_at: str | None = None
     decision_latency_ms: int = 0
     record_latency_ms: int = 0
+    charts: OrderChartsRead | None = None
 
 
 class ArenaPositionRead(BaseModel):
@@ -797,6 +855,7 @@ class StockAnalysisResponse(BaseModel):
     data_sources: list[str]
     context: str
     stock_pick_snapshot: AIStockPicksResponse | None = None
+    charts: StockAnalysisChartsRead
 
 
 class ChatAttachmentRef(BaseModel):

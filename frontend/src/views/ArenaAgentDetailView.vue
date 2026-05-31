@@ -97,6 +97,13 @@
                 <span>{{ order.quantity }} / {{ formatPrice(order.price) }}</span>
               </div>
               <p>{{ order.reason }}</p>
+              <MarketKlineChart
+                v-if="order.charts"
+                title="交易走势与买卖点"
+                :subtitle="`${order.name} ${order.symbol}`"
+                :price-series="order.charts.price_series"
+                :markers="order.charts.trade_markers"
+              />
               <small>决策 {{ latencyText(order.decision_latency_ms) }} / 写入 {{ latencyText(order.record_latency_ms) }}</small>
             </article>
           </div>
@@ -138,6 +145,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation } from '@/types'
+import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 
 type ArenaPhase = 'morning_recommendation' | 'intraday_trade' | 'closing_review' | 'nightly_learning'
 type DetailSection = 'morning' | 'intraday' | 'closing' | 'learning'

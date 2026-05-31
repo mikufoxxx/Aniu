@@ -21,6 +21,7 @@ from app.db.models import (
 )
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.services.ai_data_request_service import ai_data_request_service
+from app.services.chart_data_service import chart_data_service
 from app.services.llm_service import llm_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.historical_data_service import historical_data_service
@@ -255,7 +256,7 @@ class ArenaService:
                 )
                 db.add(order)
                 db.flush()
-                order_payload = self._order_payload(order)
+                order_payload = self._order_payload(db, order)
                 orders.append(order_payload)
             else:
                 order_payload = None
@@ -1825,6 +1826,14 @@ class ArenaService:
                 "amount": order.amount,
                 "reason": order.reason,
                 "created_at": order.created_at.isoformat() if order.created_at else None,
+                "charts": chart_data_service.order_charts(
+                    db,
+                    symbol=order.symbol,
+                    action=order.action,
+                    trade_date=order.created_at.strftime("%Y%m%d") if order.created_at else None,
+                    price=order.price,
+                    quantity=order.quantity,
+                ),
             }
             for order in orders
         ]
@@ -1902,7 +1911,7 @@ class ArenaService:
                 return candidate
         return None
 
-    def _order_payload(self, order: ArenaOrder) -> dict[str, Any]:
+    def _order_payload(self, db: Session, order: ArenaOrder) -> dict[str, Any]:
         return {
             "id": order.id,
             "agent_id": order.agent_id,
@@ -1928,6 +1937,14 @@ class ArenaService:
             else None,
             "decision_latency_ms": int(order.decision_latency_ms or 0),
             "record_latency_ms": int(order.record_latency_ms or 0),
+            "charts": chart_data_service.order_charts(
+                db,
+                symbol=order.symbol,
+                action=order.action,
+                trade_date=order.created_at.strftime("%Y%m%d") if order.created_at else None,
+                price=order.price,
+                quantity=order.quantity,
+            ),
         }
 
 

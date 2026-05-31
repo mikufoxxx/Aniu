@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.core.config import get_settings
+from app.services.chart_data_service import chart_data_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.llm_service import llm_service
 from app.services.market_data_service import normalize_symbol
@@ -55,6 +56,14 @@ class StockAnalysisService:
         )
         if llm_decision.get("used"):
             decision = self._merge_llm_decision(decision, llm_decision)
+        charts = chart_data_service.stock_analysis_charts(
+            db,
+            symbol=normalized_symbol,
+            action=decision["action"],
+            price=float(candidate.get("price") or 0),
+            quantity=int(decision.get("suggested_quantity") or 0),
+            factor_scores=candidate.get("factor_scores") or {},
+        )
 
         return {
             "symbol": normalized_symbol,
@@ -70,6 +79,7 @@ class StockAnalysisService:
             "data_sources": snapshot["data_sources"],
             "context": snapshot["context"],
             "stock_pick_snapshot": snapshot,
+            "charts": charts,
         }
 
     def _heuristic_decision(

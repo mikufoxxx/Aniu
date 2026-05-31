@@ -547,6 +547,61 @@ export interface BacktestTrade {
   amount: number
 }
 
+export interface PriceSeriesPoint {
+  trade_date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  amount: number
+  ma5?: number | null
+  ma20?: number | null
+}
+
+export interface TradeMarker {
+  action: string
+  symbol: string
+  trade_date?: string | null
+  price: number
+  quantity: number
+}
+
+export interface EquityCurvePoint {
+  trade_date: string
+  value: number
+  return_ratio: number
+}
+
+export interface DrawdownCurvePoint {
+  trade_date: string
+  drawdown: number
+}
+
+export interface FactorRadarPoint {
+  name: string
+  key: string
+  value: number
+}
+
+export interface StrategyCharts {
+  price_series: PriceSeriesPoint[]
+  trade_markers: TradeMarker[]
+  equity_curve: EquityCurvePoint[]
+  drawdown_curve: DrawdownCurvePoint[]
+}
+
+export interface StockAnalysisCharts {
+  price_series: PriceSeriesPoint[]
+  signal_markers: TradeMarker[]
+  factor_radar: FactorRadarPoint[]
+}
+
+export interface OrderCharts {
+  price_series: PriceSeriesPoint[]
+  trade_markers: TradeMarker[]
+}
+
 export interface BacktestPayload {
   run_id: number
   strategy_name: string
@@ -574,6 +629,7 @@ export interface QuantResearchStrategy {
   reason: string
   metrics: Record<string, unknown>
   trades: BacktestTrade[]
+  charts: StrategyCharts
 }
 
 export interface QuantResearchPayload {
@@ -584,6 +640,13 @@ export interface QuantResearchPayload {
   initial_cash: number
   best_strategy: QuantResearchStrategy
   strategies: QuantResearchStrategy[]
+  comparison_chart: Array<{
+    strategy_name: string
+    display_name: string
+    return_ratio: number
+    max_drawdown: number
+    score: number
+  }>
   ai_learning_context: string
 }
 
@@ -620,6 +683,7 @@ export interface ArenaOrder {
   decision_recorded_at?: string | null
   decision_latency_ms?: number
   record_latency_ms?: number
+  charts?: OrderCharts | null
 }
 
 export interface ArenaAgentRecommendation {
@@ -738,6 +802,7 @@ export interface StockAnalysisPayload {
   data_sources: string[]
   context: string
   stock_pick_snapshot?: AIStockPicksPayload | null
+  charts: StockAnalysisCharts
 }
 
 export interface ChatToolCall {

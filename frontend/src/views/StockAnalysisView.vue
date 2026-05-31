@@ -331,8 +331,8 @@ function retailList(key: string): string[] {
 .analysis-controls input,
 .analysis-field textarea {
   width: 100%;
-  border: 1px solid #d1d5db;
-  border-radius: 9px;
+  border: 1px solid #dededb;
+  border-radius: 12px;
   background: #ffffff;
   color: #111827;
   padding: 9px 10px;
@@ -360,17 +360,19 @@ function retailList(key: string): string[] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 112px;
   gap: 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
   background: #ffffff;
-  padding: 10px;
+  padding: 12px;
   text-align: left;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .candidate-row.selected,
 .candidate-row:hover {
-  border-color: #111827;
-  background: #f9fafb;
+  border-color: #b7b7b2;
+  background: #fcfcfb;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .candidate-main,
@@ -443,9 +445,9 @@ function retailList(key: string): string[] {
 }
 
 .analysis-metrics div {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  padding: 12px;
 }
 
 .source-chips {

@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, "IBM Plex Sans", "Segoe UI", sans-serif;
-  color: #111827;
-  background: #f7f7f8;
+  color: #202123;
+  background: #f7f7f5;
   --overview-table-head-height: 45px;
   --overview-table-row-height: 80px;
   --overview-table-visible-rows: 5;
@@ -24,6 +24,7 @@ body,
 
 body {
   min-width: 320px;
+  background: #f7f7f5;
 }
 
 button,
@@ -43,10 +44,11 @@ textarea {
 
 .chart-shell {
   min-width: 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
   background: #ffffff;
-  padding: 10px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
 
 .chart-head {
@@ -64,7 +66,7 @@ textarea {
 }
 
 .chart-head strong {
-  color: #111827;
+  color: #202123;
   font-size: 13px;
   line-height: 1.2;
 }
@@ -87,17 +89,17 @@ textarea {
   display: inline-flex;
   gap: 4px;
   margin-bottom: 8px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid #e7e7e4;
+  border-radius: 10px;
   padding: 3px;
-  background: #f9fafb;
+  background: #f4f4f2;
 }
 
 .chart-interval-controls button {
   width: 42px;
   height: 26px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: #4b5563;
   font-size: 12px;
@@ -105,8 +107,9 @@ textarea {
 }
 
 .chart-interval-controls button.active {
-  background: #111827;
-  color: #ffffff;
+  background: #ffffff;
+  color: #202123;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .chart-canvas {
@@ -172,10 +175,10 @@ textarea {
   height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 18px;
-  padding: 18px 12px;
-  border-right: 1px solid #ececf1;
-  background: #ffffff;
+  gap: 22px;
+  padding: 20px 12px;
+  border-right: 1px solid #ececea;
+  background: #fbfbfa;
 }
 
 .app-brand {
@@ -187,14 +190,14 @@ textarea {
 
 .sidebar-collapse-button {
   margin-left: auto;
-  width: 26px;
-  height: 26px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e4e4e1;
+  border-radius: 10px;
   background: #ffffff;
-  color: #4b5563;
+  color: #6b6b6b;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .app-brand-logo {
@@ -215,7 +218,7 @@ textarea {
   font-size: 15px;
   line-height: 1.2;
   letter-spacing: 0;
-  color: #111827;
+  color: #202123;
 }
 
 .app-brand-copy span {
@@ -243,6 +246,7 @@ textarea {
 .page-shell.is-sidebar-collapsed .header-action-button {
   padding-inline: 4px;
   font-size: 12px;
+  text-align: center;
 }
 
 .app-header-nav {
@@ -269,10 +273,10 @@ textarea {
   gap: 8px;
   height: 36px;
   padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  border: 1px solid #e4e4e1;
   background: #ffffff;
-  color: #374151;
+  color: #3f3f3f;
   font-size: 13px;
   font-weight: 600;
   text-decoration: none;
@@ -280,9 +284,9 @@ textarea {
 }
 
 .header-action-button:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
-  color: #111827;
+  background: #f4f4f2;
+  border-color: #d8d8d4;
+  color: #202123;
 }
 
 .header-action-link {
@@ -302,28 +306,28 @@ textarea {
 
 .tab-button {
   min-width: 0;
-  padding: 7px 9px;
+  padding: 9px 10px;
   border: none;
   background: transparent;
-  color: #4b5563;
+  color: #4f4f4f;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.2;
-  border-radius: 8px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  text-align: center;
+  transition: background 0.18s ease, color 0.18s ease;
+  text-align: left;
   text-decoration: none;
 }
 
 .tab-button:hover {
-  background: #f3f4f6;
-  color: #111827;
+  background: #efefed;
+  color: #202123;
 }
 
 .tab-button.active {
-  background: #111827;
-  color: #ffffff;
+  background: #ececea;
+  color: #202123;
   font-weight: 600;
   box-shadow: none;
 }
@@ -3294,9 +3298,9 @@ textarea {
 .editor-summary > div,
 .schedule-meta > div,
 .settings-intro > div {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #ececf1;
   background: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
 
 .notice,
@@ -3320,10 +3324,12 @@ textarea {
 
 .stack-layout {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   align-content: start;
   min-width: 0;
-  padding: 20px;
+  width: min(100%, 1180px);
+  padding: 22px 24px;
+  justify-self: center;
   margin-top: 0;
 }
 
@@ -3342,8 +3348,8 @@ textarea {
 }
 
 .panel {
-  padding: 16px;
-  border-radius: 8px;
+  padding: 18px;
+  border-radius: 12px;
   backdrop-filter: none;
 }
 
@@ -3358,8 +3364,8 @@ textarea {
 .panel-head h2,
 .editor-head h2 {
   margin: 0;
-  font-size: 16px;
-  color: #111827;
+  font-size: 17px;
+  color: #202123;
 }
 
 .meta-label {
@@ -3415,13 +3421,13 @@ textarea {
 
 .button {
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 8px 12px;
-  transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .button:hover:not(:disabled) {
-  transform: translateY(-1px);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
 .button:disabled {
@@ -3430,25 +3436,25 @@ textarea {
 }
 
 .button.primary {
-  background: #111827;
+  background: #0d0d0d;
   color: #ffffff;
   font-weight: 650;
   box-shadow: none;
 }
 
 .button.primary:hover:not(:disabled) {
-  background: #1f2937;
+  background: #202123;
   box-shadow: none;
 }
 
 .button.ghost {
   background: #ffffff;
-  color: #374151;
-  border: 1px solid #e5e7eb;
+  color: #3f3f3f;
+  border: 1px solid #e4e4e1;
 }
 
 .button.ghost:hover:not(:disabled) {
-  background: #f9fafb;
+  background: #f4f4f2;
 }
 
 .button.ghost.danger {
@@ -4121,18 +4127,18 @@ textarea {
 .toggle {
   width: 100%;
   padding: 13px 14px;
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  border: 1px solid #dededb;
   background: #ffffff;
-  color: #111827;
+  color: #202123;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
 .field input:focus,
 .field textarea:focus {
   outline: none;
-  border-color: #111827;
-  box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+  border-color: #9b9b96;
+  box-shadow: 0 0 0 3px rgba(32, 33, 35, 0.07);
 }
 
 .field input:disabled {

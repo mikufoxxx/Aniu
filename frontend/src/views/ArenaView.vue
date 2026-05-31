@@ -347,11 +347,12 @@ onMounted(() => {
   grid-template-columns: 44px minmax(0, 1fr) minmax(260px, 0.75fr);
   gap: 12px;
   align-items: center;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
   background: #ffffff;
-  padding: 10px 78px 10px 10px;
+  padding: 12px 82px 12px 12px;
   cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .arena-card-config {
@@ -362,8 +363,9 @@ onMounted(() => {
 }
 
 .arena-agent-row:hover {
-  border-color: #cfd4dc;
-  background: #fbfbfc;
+  border-color: #dededb;
+  background: #fcfcfb;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .arena-rank {
@@ -397,11 +399,11 @@ onMounted(() => {
 .arena-pick-chips span {
   display: grid;
   gap: 2px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f9fafb;
+  border: 1px solid #ececf1;
+  border-radius: 10px;
+  background: #f7f7f5;
   color: #374151;
-  padding: 5px 7px;
+  padding: 6px 8px;
   font-size: 12px;
   min-width: 148px;
 }
@@ -444,9 +446,9 @@ onMounted(() => {
 }
 
 .arena-agent-editor {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  padding: 12px;
   color: #6b7280;
   font-size: 12px;
 }
@@ -454,8 +456,8 @@ onMounted(() => {
 .arena-agent-editor input,
 .arena-agent-editor select {
   width: 100%;
-  border: 1px solid #d1d5db;
-  border-radius: 9px;
+  border: 1px solid #dededb;
+  border-radius: 10px;
   background: #ffffff;
   color: #111827;
   padding: 8px 10px;

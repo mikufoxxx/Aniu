@@ -318,7 +318,7 @@ onMounted(() => {
 
 .arena-agent-detail-summary div,
 .arena-agent-section-list article {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #ececf1;
   border-radius: 12px;
   background: #ffffff;
   padding: 12px;

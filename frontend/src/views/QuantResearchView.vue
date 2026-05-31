@@ -350,8 +350,8 @@ function formatAmount(value: number): string {
 .quant-form input,
 .quant-form textarea {
   width: 100%;
-  border: 1px solid #d1d5db;
-  border-radius: 9px;
+  border: 1px solid #dededb;
+  border-radius: 12px;
   background: #ffffff;
   color: #111827;
   padding: 8px 10px;
@@ -371,9 +371,10 @@ function formatAmount(value: number): string {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 104px;
   gap: 8px 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 10px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  padding: 12px;
+  background: #ffffff;
 }
 
 .quant-candidate-list article > p {

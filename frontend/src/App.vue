@@ -7,8 +7,14 @@
           <strong>Aniu</strong>
           <span>AI Trading Lab</span>
         </div>
-        <button class="sidebar-collapse-button" type="button" @click="sidebarCollapsed = !sidebarCollapsed">
-          {{ sidebarCollapsed ? '>' : '<' }}
+        <button
+          class="sidebar-collapse-button"
+          type="button"
+          :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+        >
+          {{ sidebarCollapsed ? '›' : '‹' }}
         </button>
       </div>
 

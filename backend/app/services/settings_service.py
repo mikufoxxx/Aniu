@@ -22,6 +22,8 @@ class SettingsService:
             instance = AppSettings(
                 provider_name="openai-compatible",
                 mx_api_key=env.mx_apikey,
+                tushare_token=env.tushare_token,
+                tushare_api_url=env.tushare_api_url,
                 llm_base_url=env.openai_base_url,
                 llm_api_key=env.openai_api_key,
                 llm_model=env.openai_model,
@@ -39,7 +41,7 @@ class SettingsService:
 
     def update_settings(self, db: Session, payload: AppSettingsUpdate) -> AppSettings:
         instance = self.get_or_create_settings(db)
-        sensitive_fields = {"mx_api_key", "llm_api_key"}
+        sensitive_fields = {"mx_api_key", "tushare_token", "llm_api_key"}
         changed_fields: list[str] = []
         for field, value in payload.model_dump().items():
             if field in sensitive_fields and isinstance(value, str) and "****" in value:

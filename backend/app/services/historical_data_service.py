@@ -12,7 +12,9 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.db.database import session_scope
 from app.db.models import (
+    AppSettings,
     BacktestRun,
     BlockTrade,
     DailyBar,
@@ -261,7 +263,7 @@ class HistoricalDataService:
         symbols: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新日频数据。")
 
         normalized_date = _normalize_trade_date(trade_date)
@@ -286,7 +288,7 @@ class HistoricalDataService:
         symbols: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare daily_basic 数据。")
 
         normalized_date = _normalize_trade_date(trade_date)
@@ -310,7 +312,7 @@ class HistoricalDataService:
         symbols: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare moneyflow_ths 数据。")
 
         normalized_date = _normalize_trade_date(trade_date)
@@ -330,7 +332,7 @@ class HistoricalDataService:
 
     def fetch_index_daily_rows(self, trade_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare index_daily 数据。")
 
         normalized_date = _normalize_trade_date(trade_date)
@@ -349,13 +351,13 @@ class HistoricalDataService:
 
     def fetch_sector_index_rows(self) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_index 数据。")
         return self._request_tushare_ths_index({"exchange": "A"})
 
     def fetch_sector_daily_rows(self, trade_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_daily 数据。")
         return self._request_tushare_ths_daily(
             {"trade_date": _normalize_trade_date(trade_date)}
@@ -363,7 +365,7 @@ class HistoricalDataService:
 
     def fetch_sector_member_rows(self, sector_symbols: list[str]) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare ths_member 数据。")
         self._last_sector_member_error = None
         if len(sector_symbols) <= 1:
@@ -396,13 +398,13 @@ class HistoricalDataService:
 
     def fetch_stock_basic_rows(self) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare stock_basic 数据。")
         return self._request_tushare_stock_basic({"list_status": "L"})
 
     def fetch_limit_list_rows(self, trade_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare limit_list_d 数据。")
         return self._request_tushare_limit_list_d(
             {"trade_date": _normalize_trade_date(trade_date)}
@@ -410,7 +412,7 @@ class HistoricalDataService:
 
     def fetch_margin_detail_rows(self, trade_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare margin_detail 数据。")
         return self._request_tushare_margin_detail(
             {"trade_date": _normalize_trade_date(trade_date)}
@@ -418,19 +420,19 @@ class HistoricalDataService:
 
     def fetch_top_list_rows(self, trade_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare top_list 数据。")
         return self._request_tushare_top_list({"trade_date": _normalize_trade_date(trade_date)})
 
     def fetch_top_inst_rows(self, trade_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare top_inst 数据。")
         return self._request_tushare_top_inst({"trade_date": _normalize_trade_date(trade_date)})
 
     def fetch_block_trade_rows(self, trade_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare block_trade 数据。")
         return self._request_tushare_block_trade(
             {"trade_date": _normalize_trade_date(trade_date)}
@@ -438,7 +440,7 @@ class HistoricalDataService:
 
     def fetch_shareholder_number_rows(self, ann_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare stk_holdernumber 数据。")
         return self._request_tushare_shareholder_number(
             {"ann_date": _normalize_trade_date(ann_date)}
@@ -446,7 +448,7 @@ class HistoricalDataService:
 
     def fetch_shareholder_trade_rows(self, ann_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare stk_holdertrade 数据。")
         return self._request_tushare_shareholder_trade(
             {"ann_date": _normalize_trade_date(ann_date)}
@@ -454,7 +456,7 @@ class HistoricalDataService:
 
     def fetch_pledge_stat_rows(self, end_date: str) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare pledge_stat 数据。")
         normalized_date = _normalize_trade_date(end_date)
         base_date = datetime.strptime(normalized_date, "%Y%m%d")
@@ -467,7 +469,7 @@ class HistoricalDataService:
 
     def fetch_financial_indicator_rows(self, symbols: list[str]) -> list[dict[str, Any]]:
         settings = get_settings()
-        if not settings.tushare_token:
+        if not self._tushare_runtime_config()[0]:
             raise RuntimeError("未配置 TUSHARE_TOKEN，无法刷新 Tushare fina_indicator 数据。")
         rows: list[dict[str, Any]] = []
         for symbol in symbols:
@@ -628,11 +630,10 @@ class HistoricalDataService:
         fields: str,
         label: str,
     ) -> list[dict[str, Any]]:
-        settings = get_settings()
-        url = settings.tushare_api_url or "http://api.tushare.pro"
+        token, url = self._tushare_runtime_config()
         payload = {
             "api_name": api_name,
-            "token": settings.tushare_token,
+            "token": token,
             "params": params,
             "fields": fields,
         }
@@ -690,6 +691,20 @@ class HistoricalDataService:
                 continue
             rows.append(dict(zip(fields, item, strict=False)))
         return rows
+
+    def _tushare_runtime_config(self) -> tuple[str | None, str]:
+        settings = get_settings()
+        token = settings.tushare_token
+        url = settings.tushare_api_url
+        try:
+            with session_scope() as db:
+                app_settings = db.scalar(select(AppSettings).limit(1))
+                if app_settings is not None:
+                    token = app_settings.tushare_token or token
+                    url = app_settings.tushare_api_url or url
+        except Exception:
+            pass
+        return token, url or "http://api.tushare.pro"
 
     def refresh_daily_bars(
         self,

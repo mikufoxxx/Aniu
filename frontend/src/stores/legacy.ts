@@ -32,6 +32,8 @@ type ScheduleEditor = Omit<ScheduleConfig, 'created_at' | 'updated_at'> & { loca
 const defaultSettings = (): SettingsPayload => ({
   provider_name: 'openai-compatible',
   mx_api_key: '',
+  tushare_token: '',
+  tushare_api_url: '',
   llm_base_url: '',
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
@@ -167,6 +169,8 @@ export const useAppStore = defineStore('app', () => {
   function applySettings(payload: AppSettings) {
     settings.provider_name = payload.provider_name
     settings.mx_api_key = payload.mx_api_key ?? ''
+    settings.tushare_token = payload.tushare_token ?? ''
+    settings.tushare_api_url = payload.tushare_api_url ?? ''
     settings.llm_base_url = payload.llm_base_url ?? ''
     settings.llm_api_key = payload.llm_api_key ?? ''
     settings.llm_model = payload.llm_model
@@ -284,6 +288,8 @@ export const useAppStore = defineStore('app', () => {
       const payload = await api.updateSettings({
         ...settings,
         mx_api_key: settings.mx_api_key || null,
+        tushare_token: settings.tushare_token || null,
+        tushare_api_url: settings.tushare_api_url || null,
         llm_base_url: settings.llm_base_url || null,
         llm_api_key: settings.llm_api_key || null,
         llm_provider_configs: settings.llm_provider_configs ?? {},

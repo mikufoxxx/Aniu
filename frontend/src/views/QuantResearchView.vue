@@ -104,6 +104,8 @@
         title="价格走势与交易点"
         :subtitle="research.best_strategy.selected_symbols.join(', ')"
         :price-series="research.best_strategy.charts.price_series"
+        :interval-series="research.best_strategy.charts.interval_series"
+        :forecast-series="research.best_strategy.charts.forecast_series"
         :markers="research.best_strategy.charts.trade_markers"
       />
       <PerformanceDashboard
@@ -183,8 +185,12 @@ const riskMetricItems = computed(() => {
   const metrics = research.value?.best_strategy.charts.risk_metrics ?? {}
   return [
     { key: 'total_return', label: '累计收益', value: formatPercent(Number(metrics.total_return ?? 0)) },
+    { key: 'annual_return', label: '年化收益', value: formatPercent(Number(metrics.annual_return ?? 0)) },
     { key: 'volatility', label: '年化波动', value: formatPercent(Number(metrics.volatility ?? 0)) },
     { key: 'sharpe', label: 'Sharpe', value: Number(metrics.sharpe ?? 0).toFixed(2) },
+    { key: 'sortino', label: 'Sortino', value: Number(metrics.sortino ?? 0).toFixed(2) },
+    { key: 'win_rate', label: '胜率', value: formatPercent(Number(metrics.win_rate ?? 0)) },
+    { key: 'omega', label: 'Omega', value: Number(metrics.omega ?? 0).toFixed(2) },
     { key: 'max_drawdown', label: '最大回撤', value: formatPercent(Number(metrics.max_drawdown ?? 0)) },
     { key: 'calmar', label: 'Calmar', value: Number(metrics.calmar ?? 0).toFixed(2) },
   ]

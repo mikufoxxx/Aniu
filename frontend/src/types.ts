@@ -2,6 +2,8 @@ export interface AppSettings {
   id: number
   provider_name: string
   mx_api_key: string | null
+  tushare_token: string | null
+  tushare_api_url: string | null
   llm_base_url: string | null
   llm_api_key: string | null
   llm_model: string
@@ -590,6 +592,8 @@ export interface FactorRadarPoint {
 
 export interface StrategyCharts {
   price_series: PriceSeriesPoint[]
+  interval_series: Record<'daily' | 'weekly' | 'monthly' | 'hourly', PriceSeriesPoint[]>
+  forecast_series: ForecastPoint[]
   trade_markers: TradeMarker[]
   equity_curve: EquityCurvePoint[]
   drawdown_curve: DrawdownCurvePoint[]
@@ -604,8 +608,18 @@ export interface AlphaCurvePoint {
   alpha: number
 }
 
+export interface ForecastPoint {
+  trade_date: string
+  price: number
+  upper?: number | null
+  lower?: number | null
+  source?: string
+}
+
 export interface StockAnalysisCharts {
   price_series: PriceSeriesPoint[]
+  interval_series: Record<'daily' | 'weekly' | 'monthly' | 'hourly', PriceSeriesPoint[]>
+  forecast_series: ForecastPoint[]
   signal_markers: TradeMarker[]
   factor_radar: FactorRadarPoint[]
   support_resistance: {
@@ -619,6 +633,8 @@ export interface StockAnalysisCharts {
 
 export interface OrderCharts {
   price_series: PriceSeriesPoint[]
+  interval_series: Record<'daily' | 'weekly' | 'monthly' | 'hourly', PriceSeriesPoint[]>
+  forecast_series: ForecastPoint[]
   trade_markers: TradeMarker[]
 }
 

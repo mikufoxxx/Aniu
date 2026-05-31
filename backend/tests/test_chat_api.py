@@ -10,6 +10,7 @@ import pytest
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import get_settings
+from app.core.constants import DEFAULT_SYSTEM_PROMPT
 from app.core import rate_limit as rate_limit_module
 from app.db import database as database_module
 from app.db.database import session_scope
@@ -334,6 +335,62 @@ def test_settings_endpoint_updates_max_context_tokens(monkeypatch, tmp_path) -> 
 
     database_module._engine = None
     database_module._session_local = None
+    get_settings.cache_clear()
+
+
+def test_settings_endpoint_masks_and_preserves_tushare_config(monkeypatch, tmp_path) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.put(
+            "/api/aniu/settings",
+            headers=headers,
+            json={
+                "provider_name": "openai-compatible",
+                "mx_api_key": None,
+                "tushare_token": "tushare-secret-token",
+                "tushare_api_url": "http://tushare-proxy.test",
+                "llm_base_url": "https://example.com/v1",
+                "llm_api_key": "sk-test",
+                "llm_model": "gpt-4o-mini",
+                "llm_provider_configs": {},
+                "automation_context_window_tokens": 128000,
+                "automation_recent_message_limit": 24,
+                "automation_enable_auto_compaction": True,
+                "automation_idle_summary_hours": 12,
+                "system_prompt": DEFAULT_SYSTEM_PROMPT,
+            },
+        )
+        assert response.status_code == 200
+        masked = response.json()["tushare_token"]
+        assert masked.startswith("tus****")
+
+        preserve_response = client.put(
+            "/api/aniu/settings",
+            headers=headers,
+            json={
+                "provider_name": "openai-compatible",
+                "mx_api_key": None,
+                "tushare_token": masked,
+                "tushare_api_url": "http://tushare-proxy-2.test",
+                "llm_base_url": "https://example.com/v1",
+                "llm_api_key": "sk-test",
+                "llm_model": "gpt-4o-mini",
+                "llm_provider_configs": {},
+                "automation_context_window_tokens": 128000,
+                "automation_recent_message_limit": 24,
+                "automation_enable_auto_compaction": True,
+                "automation_idle_summary_hours": 12,
+                "system_prompt": DEFAULT_SYSTEM_PROMPT,
+            },
+        )
+
+    assert preserve_response.status_code == 200
+    with session_scope() as db:
+        settings = db.query(AppSettings).first()
+        assert settings is not None
+        assert settings.tushare_token == "tushare-secret-token"
+        assert settings.tushare_api_url == "http://tushare-proxy-2.test"
+
     get_settings.cache_clear()
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import math
 from statistics import mean, pstdev
 from typing import Any
@@ -81,6 +82,8 @@ class ChartDataService:
     ) -> dict[str, Any]:
         return {
             "price_series": price_series,
+            "interval_series": self.interval_series(price_series),
+            "forecast_series": self.forecast_series(price_series),
             "trade_markers": [
                 {
                     "action": trade["action"],
@@ -112,6 +115,8 @@ class ChartDataService:
         marker_price = float(price or (series[-1]["close"] if series else 0))
         return {
             "price_series": series,
+            "interval_series": self.interval_series(series),
+            "forecast_series": self.forecast_series(series),
             "signal_markers": [
                 {
                     "action": action,
@@ -144,6 +149,8 @@ class ChartDataService:
         series = self.price_series(db, symbol=symbol, limit=90)
         return {
             "price_series": series,
+            "interval_series": self.interval_series(series),
+            "forecast_series": self.forecast_series(series),
             "trade_markers": [
                 {
                     "action": action,
@@ -166,18 +173,85 @@ class ChartDataService:
             for index in range(1, len(returns))
         ]
         total_return = returns[-1] if returns else 0.0
+        periods = max(1, len(daily_returns))
+        annual_return = (1 + total_return) ** (252 / periods) - 1 if total_return > -1 else -1.0
         volatility = pstdev(daily_returns) * math.sqrt(252) if len(daily_returns) > 1 else 0.0
         average_return = mean(daily_returns) if daily_returns else 0.0
         sharpe = average_return / pstdev(daily_returns) * math.sqrt(252) if len(daily_returns) > 1 and pstdev(daily_returns) > 0 else 0.0
+        downside_returns = [value for value in daily_returns if value < 0]
+        downside_dev = (
+            pstdev(downside_returns) if len(downside_returns) > 1
+            else abs(downside_returns[0]) if downside_returns else 0.0
+        )
+        sortino = average_return / downside_dev * math.sqrt(252) if downside_dev > 0 else 0.0
+        positive_sum = sum(value for value in daily_returns if value > 0)
+        negative_sum = abs(sum(value for value in daily_returns if value < 0))
+        omega = positive_sum / negative_sum if negative_sum > 0 else (1.0 if positive_sum > 0 else 0.0)
+        win_rate = (
+            len([value for value in daily_returns if value > 0]) / len(daily_returns)
+            if daily_returns else 0.0
+        )
+        profit_factor = omega
         max_drawdown = min((float(item.get("drawdown") or 0) for item in drawdown_curve), default=0.0)
         calmar = total_return / abs(max_drawdown) if max_drawdown < 0 else 0.0
         return {
             "total_return": round(total_return, 6),
+            "annual_return": round(annual_return, 6),
             "volatility": round(volatility, 6),
             "sharpe": round(sharpe, 6),
+            "sortino": round(sortino, 6),
+            "omega": round(omega, 6),
+            "win_rate": round(win_rate, 6),
+            "profit_factor": round(profit_factor, 6),
             "max_drawdown": round(max_drawdown, 6),
             "calmar": round(calmar, 6),
         }
+
+    def interval_series(self, price_series: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+        return {
+            "daily": price_series,
+            "weekly": self._aggregate_price_series(price_series, "week"),
+            "monthly": self._aggregate_price_series(price_series, "month"),
+            "hourly": self._synthetic_hourly_series(price_series),
+        }
+
+    def forecast_series(
+        self,
+        price_series: list[dict[str, Any]],
+        *,
+        horizon: int = 10,
+    ) -> list[dict[str, Any]]:
+        if not price_series:
+            return []
+        closes = [float(item.get("close") or 0) for item in price_series if float(item.get("close") or 0) > 0]
+        if not closes:
+            return []
+        returns = [
+            (closes[index] - closes[index - 1]) / closes[index - 1]
+            for index in range(1, len(closes))
+            if closes[index - 1] > 0
+        ]
+        recent_returns = returns[-20:]
+        drift = mean(recent_returns) if recent_returns else 0.0
+        last_return = recent_returns[-1] if recent_returns else 0.0
+        volatility = pstdev(recent_returns) if len(recent_returns) > 1 else abs(last_return) / 2
+        expected_return = max(-0.08, min(0.08, drift * 0.55 + last_return * 0.45))
+        current = closes[-1]
+        trade_date = self._parse_trade_date(str(price_series[-1].get("trade_date") or ""))
+        points: list[dict[str, Any]] = []
+        for step in range(1, horizon + 1):
+            current = max(0.01, current * (1 + expected_return))
+            confidence = volatility * math.sqrt(step)
+            points.append(
+                {
+                    "trade_date": (trade_date + timedelta(days=step)).strftime("%Y%m%d"),
+                    "price": round(current, 4),
+                    "upper": round(current * (1 + confidence), 4),
+                    "lower": round(max(0.01, current * (1 - confidence)), 4),
+                    "source": "ai_simulation",
+                }
+            )
+        return points
 
     def return_distribution_from_equity(
         self,
@@ -314,6 +388,104 @@ class ChartDataService:
         if len(closes) < window:
             return None
         return round(sum(closes[-window:]) / window, 4)
+
+    def _aggregate_price_series(
+        self,
+        price_series: list[dict[str, Any]],
+        interval: str,
+    ) -> list[dict[str, Any]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for point in price_series:
+            key = self._period_key(str(point.get("trade_date") or ""), interval)
+            grouped.setdefault(key, []).append(point)
+        rows: list[dict[str, Any]] = []
+        for key in sorted(grouped):
+            items = grouped[key]
+            first = items[0]
+            last = items[-1]
+            rows.append(
+                {
+                    "trade_date": key,
+                    "open": round(float(first.get("open") or first.get("close") or 0), 4),
+                    "high": round(max(float(item.get("high") or item.get("close") or 0) for item in items), 4),
+                    "low": round(min(float(item.get("low") or item.get("close") or 0) for item in items), 4),
+                    "close": round(float(last.get("close") or 0), 4),
+                    "volume": sum(float(item.get("volume") or 0) for item in items),
+                    "amount": sum(float(item.get("amount") or 0) for item in items),
+                    "ma5": None,
+                    "ma20": None,
+                }
+            )
+        return self._enrich_price_points(rows)
+
+    def _synthetic_hourly_series(self, price_series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for point in price_series[-20:]:
+            trade_date = str(point.get("trade_date") or "")[:8]
+            open_price = float(point.get("open") or point.get("close") or 0)
+            high_price = float(point.get("high") or point.get("close") or open_price)
+            low_price = float(point.get("low") or point.get("close") or open_price)
+            close_price = float(point.get("close") or open_price)
+            amount = float(point.get("amount") or 0) / 4
+            volume = float(point.get("volume") or 0) / 4
+            path = [
+                ("10:30", open_price, max(open_price, high_price), min(open_price, high_price), high_price),
+                ("11:30", high_price, high_price, min(low_price, high_price), (high_price + close_price) / 2),
+                ("14:00", (high_price + close_price) / 2, max(high_price, close_price), low_price, low_price),
+                ("15:00", low_price, max(low_price, close_price), min(low_price, close_price), close_price),
+            ]
+            for time_label, open_value, high_value, low_value, close_value in path:
+                rows.append(
+                    {
+                        "trade_date": f"{trade_date} {time_label}",
+                        "open": round(open_value, 4),
+                        "high": round(high_value, 4),
+                        "low": round(low_value, 4),
+                        "close": round(close_value, 4),
+                        "volume": volume,
+                        "amount": amount,
+                    }
+                )
+        return self._enrich_price_points(rows)
+
+    def _enrich_price_points(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        closes: list[float] = []
+        macd_values: list[float] = []
+        enriched: list[dict[str, Any]] = []
+        for row in rows:
+            close = float(row.get("close") or 0)
+            closes.append(close)
+            macd = self._macd(closes)
+            if macd is not None:
+                macd_values.append(macd)
+            macd_signal = self._ema(macd_values, 9) if macd_values else None
+            macd_hist = macd - macd_signal if macd is not None and macd_signal is not None else None
+            enriched.append(
+                {
+                    **row,
+                    "ma5": self._moving_average(closes, 5),
+                    "ma20": self._moving_average(closes, 20),
+                    "rsi14": self._rsi(closes, 14),
+                    "macd": round(macd, 6) if macd is not None else None,
+                    "macd_signal": round(macd_signal, 6) if macd_signal is not None else None,
+                    "macd_hist": round(macd_hist, 6) if macd_hist is not None else None,
+                }
+            )
+        return enriched
+
+    def _period_key(self, value: str, interval: str) -> str:
+        trade_date = self._parse_trade_date(value)
+        if interval == "month":
+            return trade_date.strftime("%Y%m")
+        year, week, _weekday = trade_date.isocalendar()
+        return f"{year}W{week:02d}"
+
+    def _parse_trade_date(self, value: str) -> datetime:
+        compact = value[:8]
+        try:
+            return datetime.strptime(compact, "%Y%m%d")
+        except ValueError:
+            return datetime.utcnow()
 
     def _rsi(self, closes: list[float], window: int) -> float | None:
         if len(closes) <= window:

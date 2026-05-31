@@ -68,6 +68,10 @@ def _ensure_app_settings_columns(engine) -> None:
     statements: list[str] = []
     if "mx_api_key" not in columns:
         statements.append("ALTER TABLE app_settings ADD COLUMN mx_api_key VARCHAR(255)")
+    if "tushare_token" not in columns:
+        statements.append("ALTER TABLE app_settings ADD COLUMN tushare_token VARCHAR(512)")
+    if "tushare_api_url" not in columns:
+        statements.append("ALTER TABLE app_settings ADD COLUMN tushare_api_url VARCHAR(512)")
     if "disabled_skill_ids_json" not in columns:
         statements.append(
             "ALTER TABLE app_settings ADD COLUMN disabled_skill_ids_json TEXT DEFAULT '[]'"

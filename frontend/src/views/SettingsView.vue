@@ -38,6 +38,18 @@
               <input v-model="settings.mx_api_key" type="password" placeholder="妙想接口 apikey" />
               <p class="field-help">用于访问东方财富妙想接口的密钥。</p>
             </label>
+            <div class="settings-inline-fields">
+              <label class="field">
+                <span>Tushare Token</span>
+                <input v-model="settings.tushare_token" type="password" placeholder="Tushare token" />
+                <p class="field-help">优先级高于服务器环境变量，用于日线、资金流、财务和回测数据。</p>
+              </label>
+              <label class="field">
+                <span>Tushare URL</span>
+                <input v-model="settings.tushare_api_url" placeholder="http://api.tushare.pro" />
+                <p class="field-help">支持官方地址或你自己的代理地址。</p>
+              </label>
+            </div>
             <label class="field">
               <span>多 AI 服务商</span>
               <textarea v-model="providerConfigsText" rows="8" spellcheck="false" />

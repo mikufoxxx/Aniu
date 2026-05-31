@@ -83,6 +83,32 @@ textarea {
   flex: 0 0 auto;
 }
 
+.chart-interval-controls {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 3px;
+  background: #f9fafb;
+}
+
+.chart-interval-controls button {
+  width: 42px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.chart-interval-controls button.active {
+  background: #111827;
+  color: #ffffff;
+}
+
 .chart-canvas {
   width: 100%;
   height: 370px;
@@ -132,6 +158,10 @@ textarea {
   padding: 0;
 }
 
+.page-shell.is-sidebar-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
 .page-shell.is-login-shell {
   display: block;
 }
@@ -153,6 +183,18 @@ textarea {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.sidebar-collapse-button {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .app-brand-logo {
@@ -181,6 +223,26 @@ textarea {
   color: #6b7280;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.page-shell.is-sidebar-collapsed .app-sidebar {
+  padding: 18px 8px;
+}
+
+.page-shell.is-sidebar-collapsed .app-brand {
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.page-shell.is-sidebar-collapsed .app-brand-copy,
+.page-shell.is-sidebar-collapsed .app-sidebar-footer small {
+  display: none;
+}
+
+.page-shell.is-sidebar-collapsed .tab-button,
+.page-shell.is-sidebar-collapsed .header-action-button {
+  padding-inline: 4px;
+  font-size: 12px;
 }
 
 .app-header-nav {

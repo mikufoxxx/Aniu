@@ -20,6 +20,8 @@ class AppSettings(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     provider_name: Mapped[str] = mapped_column(String(32), default="openai-compatible")
     mx_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tushare_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    tushare_api_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     llm_base_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     llm_api_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     llm_model: Mapped[str] = mapped_column(String(128), default="gpt-4o-mini")

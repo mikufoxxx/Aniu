@@ -1,5 +1,8 @@
 from pathlib import Path
+import json
+import subprocess
 import sys
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -8,8 +11,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from app.core.config import get_settings
 from app.core import rate_limit as rate_limit_module
 from app.db import database as database_module
-from app.db.database import session_scope
-from app.db.models import DailyBar, IndexBar, SectorBar, SectorMember
+from app.db.database import init_db, session_scope
+from app.db.models import AppSettings, DailyBar, IndexBar, SectorBar, SectorMember
 from app.main import create_app
 from app.services.scheduler_service import scheduler_service
 from app.services.trading_calendar_service import trading_calendar_service
@@ -104,6 +107,52 @@ def test_fetch_daily_rows_uses_tushare_http_protocol_with_timeout(monkeypatch) -
     assert '"api_name": "daily"' in command[-2]
     assert '"token": "test-token"' in command[-2]
     assert '"trade_date": "20260528"' in command[-2]
+
+    _reset_state()
+
+
+def test_tushare_request_prefers_app_settings_config(monkeypatch, tmp_path) -> None:
+    from app.services.historical_data_service import historical_data_service
+
+    monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "historical.db"))
+    monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
+    monkeypatch.delenv("TUSHARE_API_URL", raising=False)
+    get_settings.cache_clear()
+    database_module._engine = None
+    database_module._session_local = None
+    init_db()
+    with session_scope() as db:
+        db.add(
+            AppSettings(
+                provider_name="openai-compatible",
+                tushare_token="db-token",
+                tushare_api_url="http://db-tushare.test",
+                llm_model="gpt-4o-mini",
+                system_prompt="test",
+            )
+        )
+
+    captured: dict[str, object] = {}
+
+    def fake_run(command, *, capture_output, text, timeout, check):
+        captured["command"] = command
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(command[command.index("-d") + 1])
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {"code": 0, "data": {"fields": ["ts_code"], "items": [["000001.SZ"]]}}
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    rows = historical_data_service._request_tushare_daily({"trade_date": "20260528"})
+
+    assert rows == [{"ts_code": "000001.SZ"}]
+    assert captured["payload"]["token"] == "db-token"
+    assert captured["command"][-1] == "http://db-tushare.test"
 
     _reset_state()
 

@@ -116,6 +116,8 @@
               title="价格走势与 AI 信号"
               :subtitle="`${analysis.name} ${analysis.symbol}`"
               :price-series="analysis.charts.price_series"
+              :interval-series="analysis.charts.interval_series"
+              :forecast-series="analysis.charts.forecast_series"
               :markers="analysis.charts.signal_markers"
             />
             <FactorRadarChart

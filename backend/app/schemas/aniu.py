@@ -32,6 +32,8 @@ def _mask_provider_configs(value: dict[str, Any] | None) -> dict[str, Any]:
 class AppSettingsBase(BaseModel):
     provider_name: str = "openai-compatible"
     mx_api_key: str | None = Field(default=None, max_length=512)
+    tushare_token: str | None = Field(default=None, max_length=512)
+    tushare_api_url: str | None = Field(default=None, max_length=512)
     llm_base_url: str | None = Field(default=None, max_length=512)
     llm_api_key: str | None = Field(default=None, max_length=512)
     llm_model: str = Field(default="gpt-4o-mini", max_length=128)
@@ -54,6 +56,7 @@ class AppSettingsRead(AppSettingsBase):
     @model_validator(mode="after")
     def mask_sensitive_fields(self) -> "AppSettingsRead":
         self.mx_api_key = _mask_key(self.mx_api_key)
+        self.tushare_token = _mask_key(self.tushare_token)
         self.llm_api_key = _mask_key(self.llm_api_key)
         self.llm_provider_configs = _mask_provider_configs(self.llm_provider_configs)
         return self
@@ -655,6 +658,8 @@ class FactorRadarPointRead(BaseModel):
 
 class StrategyChartsRead(BaseModel):
     price_series: list[PriceSeriesPointRead] = Field(default_factory=list)
+    interval_series: dict[str, list[PriceSeriesPointRead]] = Field(default_factory=dict)
+    forecast_series: list[dict[str, Any]] = Field(default_factory=list)
     trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
     equity_curve: list[EquityCurvePointRead] = Field(default_factory=list)
     drawdown_curve: list[DrawdownCurvePointRead] = Field(default_factory=list)
@@ -664,6 +669,8 @@ class StrategyChartsRead(BaseModel):
 
 class StockAnalysisChartsRead(BaseModel):
     price_series: list[PriceSeriesPointRead] = Field(default_factory=list)
+    interval_series: dict[str, list[PriceSeriesPointRead]] = Field(default_factory=dict)
+    forecast_series: list[dict[str, Any]] = Field(default_factory=list)
     signal_markers: list[TradeMarkerRead] = Field(default_factory=list)
     factor_radar: list[FactorRadarPointRead] = Field(default_factory=list)
     support_resistance: dict[str, Any] = Field(default_factory=dict)
@@ -673,6 +680,8 @@ class StockAnalysisChartsRead(BaseModel):
 
 class OrderChartsRead(BaseModel):
     price_series: list[PriceSeriesPointRead] = Field(default_factory=list)
+    interval_series: dict[str, list[PriceSeriesPointRead]] = Field(default_factory=dict)
+    forecast_series: list[dict[str, Any]] = Field(default_factory=list)
     trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
 
 

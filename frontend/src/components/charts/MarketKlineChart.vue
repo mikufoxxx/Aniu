@@ -9,7 +9,19 @@
         <span>MA5</span>
         <span>MA20</span>
         <span>成交额</span>
+        <span v-if="forecastSeries?.length">AI未来线</span>
       </div>
+    </div>
+    <div class="chart-interval-controls">
+      <button
+        v-for="option in intervalOptions"
+        :key="option.key"
+        type="button"
+        :class="{ active: activeInterval === option.key }"
+        @click="activeInterval = option.key"
+      >
+        {{ option.label }}
+      </button>
     </div>
     <div ref="chartEl" class="chart-canvas"></div>
   </section>
@@ -19,30 +31,75 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import type { ECharts, EChartsOption } from 'echarts'
-import type { PriceSeriesPoint, TradeMarker } from '@/types'
+import type { ForecastPoint, PriceSeriesPoint, TradeMarker } from '@/types'
+
+type ChartInterval = 'daily' | 'weekly' | 'monthly' | 'hourly'
 
 const props = defineProps<{
   title: string
   subtitle?: string
   priceSeries: PriceSeriesPoint[]
+  intervalSeries?: Record<ChartInterval, PriceSeriesPoint[]>
+  forecastSeries?: ForecastPoint[]
   markers?: TradeMarker[]
 }>()
 
 const chartEl = ref<HTMLDivElement | null>(null)
+const activeInterval = ref<ChartInterval>('daily')
 let chart: ECharts | null = null
 
 const subtitle = computed(() => props.subtitle || `${props.priceSeries.length} 根日线`)
+const intervalOptions: Array<{ key: ChartInterval; label: string }> = [
+  { key: 'daily', label: '日' },
+  { key: 'weekly', label: '周' },
+  { key: 'monthly', label: '月' },
+  { key: 'hourly', label: '小时' },
+]
+
+const selectedPriceSeries = computed(() => {
+  return props.intervalSeries?.[activeInterval.value]?.length
+    ? props.intervalSeries[activeInterval.value]
+    : props.priceSeries
+})
 
 function resize(): void {
   chart?.resize()
 }
 
 function buildOption(): EChartsOption {
-  const dates = props.priceSeries.map((item) => item.trade_date)
-  const candles = props.priceSeries.map((item) => [item.open, item.close, item.low, item.high])
-  const ma5 = props.priceSeries.map((item) => item.ma5 ?? null)
-  const ma20 = props.priceSeries.map((item) => item.ma20 ?? null)
-  const amounts = props.priceSeries.map((item) => Number(item.amount || 0))
+  const visibleSeries = selectedPriceSeries.value
+  const forecast = props.forecastSeries || []
+  const dates = [
+    ...visibleSeries.map((item) => item.trade_date),
+    ...forecast.map((item) => item.trade_date),
+  ]
+  const candles = [
+    ...visibleSeries.map((item) => [item.open, item.close, item.low, item.high]),
+  ]
+  const ma5 = [
+    ...visibleSeries.map((item) => item.ma5 ?? null),
+    ...forecast.map(() => null),
+  ]
+  const ma20 = [
+    ...visibleSeries.map((item) => item.ma20 ?? null),
+    ...forecast.map(() => null),
+  ]
+  const amounts = [
+    ...visibleSeries.map((item) => Number(item.amount || 0)),
+    ...forecast.map(() => 0),
+  ]
+  const forecastLine = [
+    ...visibleSeries.map(() => null),
+    ...forecast.map((item) => item.price),
+  ]
+  const forecastUpper = [
+    ...visibleSeries.map(() => null),
+    ...forecast.map((item) => item.upper ?? null),
+  ]
+  const forecastLower = [
+    ...visibleSeries.map(() => null),
+    ...forecast.map((item) => item.lower ?? null),
+  ]
   const markerData = (props.markers || [])
     .filter((marker): marker is TradeMarker & { trade_date: string } => Boolean(marker.trade_date))
     .map((marker) => ({
@@ -97,6 +154,17 @@ function buildOption(): EChartsOption {
       { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { width: 1.4, color: '#2563eb' } },
       { name: 'MA20', type: 'line', data: ma20, smooth: true, symbol: 'none', lineStyle: { width: 1.4, color: '#7c3aed' } },
       {
+        name: 'AI未来线',
+        type: 'line',
+        data: forecastLine,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 4,
+        lineStyle: { width: 1.8, color: '#0f766e', type: 'dashed' },
+      },
+      { name: '上沿', type: 'line', data: forecastUpper, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#99f6e4', type: 'dotted' } },
+      { name: '下沿', type: 'line', data: forecastLower, smooth: true, symbol: 'none', lineStyle: { width: 1, color: '#99f6e4', type: 'dotted' } },
+      {
         name: '成交额',
         type: 'bar',
         xAxisIndex: 1,
@@ -125,5 +193,5 @@ onBeforeUnmount(() => {
   chart = null
 })
 
-watch(() => [props.priceSeries, props.markers], render, { deep: true })
+watch(() => [props.priceSeries, props.intervalSeries, props.forecastSeries, props.markers, activeInterval.value], render, { deep: true })
 </script>

@@ -56,20 +56,6 @@
     </section>
 
     <section v-if="dashboard" class="arena-agent-detail-layout">
-      <aside class="panel arena-agent-detail-sidebar">
-        <button
-          v-for="tab in sectionTabs"
-          :key="tab.id"
-          class="detail-nav-button"
-          :class="{ active: activeSection === tab.id }"
-          type="button"
-          @click="activeSection = tab.id"
-        >
-          <span>{{ tab.title }}</span>
-          <small>{{ tab.count }} 条</small>
-        </button>
-      </aside>
-
       <section class="panel arena-agent-detail-section">
         <div class="panel-head">
           <div class="head-main">
@@ -116,6 +102,8 @@
                 title="交易走势与买卖点"
                 :subtitle="`${order.name} ${order.symbol}`"
                 :price-series="order.charts.price_series"
+                :interval-series="order.charts.interval_series"
+                :forecast-series="order.charts.forecast_series"
                 :markers="order.charts.trade_markers"
               />
               <small>决策 {{ latencyText(order.decision_latency_ms) }} / 写入 {{ latencyText(order.record_latency_ms) }}</small>
@@ -156,7 +144,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation } from '@/types'
 import BreakdownChart from '@/components/charts/BreakdownChart.vue'
@@ -175,12 +163,22 @@ interface DetailTab {
 }
 
 const route = useRoute()
+const router = useRouter()
 const agentId = computed(() => String(route.params.agentId || ''))
 const dashboard = ref<ArenaAgentDashboardPayload | null>(null)
 const loading = ref(false)
 const runningPhase = ref<ArenaPhase | null>(null)
 const errorMessage = ref('')
-const activeSection = ref<DetailSection>('morning')
+const detailSections: DetailSection[] = ['morning', 'intraday', 'closing', 'learning']
+const activeSection = computed<DetailSection>({
+  get() {
+    const section = String(route.query.section || 'morning')
+    return detailSections.includes(section as DetailSection) ? section as DetailSection : 'morning'
+  },
+  set(section) {
+    router.replace({ path: route.path, query: { ...route.query, section } })
+  },
+})
 
 const morningRecommendation = computed<ArenaAgentRecommendation | null>(() => {
   return dashboard.value?.morning.recommendations[0] ?? null
@@ -342,7 +340,7 @@ onMounted(() => {
 
 .arena-agent-detail-layout {
   display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }

@@ -982,12 +982,22 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
     assert len(charts["drawdown_curve"]) == 3
     assert set(charts["risk_metrics"]) >= {
         "total_return",
+        "annual_return",
         "volatility",
         "sharpe",
+        "sortino",
+        "omega",
+        "win_rate",
         "max_drawdown",
         "calmar",
     }
     assert charts["return_distribution"]
+    assert {"daily", "weekly", "monthly", "hourly"} <= set(charts["interval_series"])
+    assert charts["interval_series"]["daily"] == charts["price_series"]
+    assert charts["interval_series"]["monthly"][-1]["close"] == 12.0
+    assert charts["interval_series"]["hourly"]
+    assert len(charts["forecast_series"]) >= 5
+    assert charts["forecast_series"][0]["trade_date"] > charts["price_series"][-1]["trade_date"]
     assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(charts["price_series"][-1])
     assert len(payload["benchmark_curve"]) == 3
     assert payload["benchmark_curve"][0]["return_ratio"] == 0.0
@@ -1858,6 +1868,12 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["charts"]["support_resistance"]["resistance"] == 12.2
     assert payload["charts"]["return_distribution"]
     assert payload["charts"]["volume_profile"]
+    assert {"daily", "weekly", "monthly", "hourly"} <= set(payload["charts"]["interval_series"])
+    assert payload["charts"]["interval_series"]["daily"] == payload["charts"]["price_series"]
+    assert payload["charts"]["interval_series"]["weekly"][-1]["close"] == 12.0
+    assert payload["charts"]["interval_series"]["hourly"]
+    assert len(payload["charts"]["forecast_series"]) >= 5
+    assert payload["charts"]["forecast_series"][0]["trade_date"] > payload["charts"]["price_series"][-1]["trade_date"]
     assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(payload["charts"]["price_series"][-1])
 
     _reset_state()

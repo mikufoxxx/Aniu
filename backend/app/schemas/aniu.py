@@ -627,6 +627,38 @@ class BacktestResponse(BaseModel):
     trades: list[BacktestTradeRead]
 
 
+class QuantResearchRequest(BaseModel):
+    symbols: list[str] = Field(min_length=1, max_length=200)
+    start_date: str = Field(min_length=8, max_length=10)
+    end_date: str = Field(min_length=8, max_length=10)
+    initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
+
+
+class QuantResearchStrategyRead(BaseModel):
+    strategy_name: str
+    display_name: str
+    selected_symbols: list[str]
+    final_assets: float
+    return_ratio: float
+    max_drawdown: float
+    trade_count: int
+    score: float
+    reason: str
+    metrics: dict[str, Any]
+    trades: list[BacktestTradeRead]
+
+
+class QuantResearchResponse(BaseModel):
+    symbol_count: int
+    bar_count: int
+    start_date: str
+    end_date: str
+    initial_cash: float
+    best_strategy: QuantResearchStrategyRead
+    strategies: list[QuantResearchStrategyRead]
+    ai_learning_context: str
+
+
 class ArenaAgentRequest(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=120)

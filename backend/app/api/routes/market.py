@@ -40,6 +40,8 @@ from app.schemas.aniu import (
     QuantCandidatesResponse,
     QuantDatasetRequest,
     QuantDatasetResponse,
+    QuantResearchRequest,
+    QuantResearchResponse,
     StockAnalysisRequest,
     StockAnalysisResponse,
 )
@@ -53,6 +55,7 @@ from app.services.stock_analysis_service import stock_analysis_service
 from app.services.market_data_service import market_data_service
 from app.services.market_report_service import market_report_service
 from app.services.quant_service import quant_service
+from app.services.quant_research_service import quant_research_service
 
 router = APIRouter(tags=["aniu-market-quant-arena"])
 
@@ -322,6 +325,24 @@ def run_quant_backtest(
 ) -> BacktestResponse:
     try:
         return historical_data_service.run_daily_momentum_backtest(
+            db,
+            symbols=payload.symbols,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            initial_cash=payload.initial_cash,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/quant/research", response_model=QuantResearchResponse)
+def run_quant_research(
+    payload: QuantResearchRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> QuantResearchResponse:
+    try:
+        return quant_research_service.run_research(
             db,
             symbols=payload.symbols,
             start_date=payload.start_date,

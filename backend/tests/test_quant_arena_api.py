@@ -903,6 +903,52 @@ def test_ai_data_request_endpoint_refreshes_requested_dimensions(monkeypatch, tm
     _reset_state()
 
 
+def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_path) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="000001.SZ", trade_date="20260101", close=10, amount=1000),
+                    DailyBar(symbol="000001.SZ", trade_date="20260102", close=11, amount=1100),
+                    DailyBar(symbol="000001.SZ", trade_date="20260103", close=12, amount=1200),
+                    DailyBar(symbol="600519.SH", trade_date="20260101", close=100, amount=2000),
+                    DailyBar(symbol="600519.SH", trade_date="20260102", close=99, amount=2000),
+                    DailyBar(symbol="600519.SH", trade_date="20260103", close=105, amount=2100),
+                    DailyBar(symbol="300750.SZ", trade_date="20260101", close=80, amount=1500),
+                    DailyBar(symbol="300750.SZ", trade_date="20260102", close=70, amount=1500),
+                    DailyBar(symbol="300750.SZ", trade_date="20260103", close=76, amount=1500),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/quant/research",
+            headers=headers,
+            json={
+                "symbols": ["000001.SZ", "600519.SH", "300750.SZ"],
+                "start_date": "20260101",
+                "end_date": "20260103",
+                "initial_cash": 200000,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol_count"] == 3
+    assert payload["bar_count"] == 9
+    assert [item["strategy_name"] for item in payload["strategies"]] == [
+        "daily_momentum",
+        "equal_weight",
+        "low_drawdown",
+    ]
+    assert payload["best_strategy"]["strategy_name"] == "daily_momentum"
+    assert payload["best_strategy"]["selected_symbols"] == ["000001.SZ"]
+    assert payload["best_strategy"]["return_ratio"] > payload["strategies"][-1]["return_ratio"]
+    assert "daily_momentum" in payload["ai_learning_context"]
+    assert "最大回撤" in payload["ai_learning_context"]
+
+    _reset_state()
+
+
 def test_quant_dataset_uses_most_complete_stored_trade_date(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 

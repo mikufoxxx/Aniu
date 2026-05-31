@@ -562,6 +562,31 @@ export interface BacktestPayload {
   trades: BacktestTrade[]
 }
 
+export interface QuantResearchStrategy {
+  strategy_name: string
+  display_name: string
+  selected_symbols: string[]
+  final_assets: number
+  return_ratio: number
+  max_drawdown: number
+  trade_count: number
+  score: number
+  reason: string
+  metrics: Record<string, unknown>
+  trades: BacktestTrade[]
+}
+
+export interface QuantResearchPayload {
+  symbol_count: number
+  bar_count: number
+  start_date: string
+  end_date: string
+  initial_cash: number
+  best_strategy: QuantResearchStrategy
+  strategies: QuantResearchStrategy[]
+  ai_learning_context: string
+}
+
 export interface ArenaAgentConfig {
   id: string
   name: string

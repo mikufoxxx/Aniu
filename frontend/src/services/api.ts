@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -461,6 +461,13 @@ export const api = {
   },
   runBacktest(payload: { symbols: string[]; start_date: string; end_date: string; initial_cash?: number }) {
     return request<BacktestPayload>(`${API_PREFIX}/quant/backtest`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      timeoutMs: 60000,
+    })
+  },
+  runQuantResearch(payload: { symbols: string[]; start_date: string; end_date: string; initial_cash?: number }) {
+    return request<QuantResearchPayload>(`${API_PREFIX}/quant/research`, {
       method: 'POST',
       body: JSON.stringify(payload),
       timeoutMs: 60000,

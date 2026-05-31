@@ -43,11 +43,11 @@
       <section class="panel">
         <div class="panel-head">
           <div>
-            <h2>回测实验</h2>
-            <p class="quant-muted">输入股票池，验证日线动量策略表现。</p>
+            <h2>策略研究</h2>
+            <p class="quant-muted">同一股票池对比动量、分散、低波动策略，结果可供 AI 学习。</p>
           </div>
-          <button class="button primary small" :disabled="backtesting" @click="runBacktest">
-            {{ backtesting ? '回测中...' : '运行回测' }}
+          <button class="button primary small" :disabled="researching" @click="runResearch">
+            {{ researching ? '研究中...' : '研究策略' }}
           </button>
         </div>
         <div class="quant-form">
@@ -64,23 +64,37 @@
             <input v-model="endDate" placeholder="YYYYMMDD" />
           </label>
         </div>
-        <div v-if="backtest" class="quant-backtest">
+        <div v-if="research" class="quant-summary">
           <div>
-            <span>最终资产</span>
-            <strong>{{ formatAmount(backtest.final_assets) }}</strong>
+            <span>最佳策略</span>
+            <strong>{{ research.best_strategy.display_name }}</strong>
+          </div>
+          <div>
+            <span>样本</span>
+            <strong>{{ research.symbol_count }}股 / {{ research.bar_count }}根</strong>
           </div>
           <div>
             <span>收益</span>
-            <strong :class="profitClass(backtest.return_ratio)">{{ formatPercent(backtest.return_ratio) }}</strong>
+            <strong :class="profitClass(research.best_strategy.return_ratio)">{{ formatPercent(research.best_strategy.return_ratio) }}</strong>
           </div>
           <div>
             <span>最大回撤</span>
-            <strong>{{ formatPercent(backtest.max_drawdown) }}</strong>
+            <strong>{{ formatPercent(research.best_strategy.max_drawdown) }}</strong>
           </div>
-          <div>
-            <span>交易数</span>
-            <strong>{{ backtest.trade_count }}</strong>
-          </div>
+        </div>
+        <div v-if="research" class="strategy-list">
+          <article v-for="strategy in research.strategies" :key="strategy.strategy_name">
+            <div>
+              <strong>{{ strategy.display_name }}</strong>
+              <span>{{ strategy.selected_symbols.join(', ') }}</span>
+            </div>
+            <div class="strategy-metrics">
+              <span :class="profitClass(strategy.return_ratio)">{{ formatPercent(strategy.return_ratio) }}</span>
+              <span>{{ formatPercent(strategy.max_drawdown) }}</span>
+              <span>{{ scoreText(strategy.score) }}</span>
+            </div>
+            <p>{{ strategy.reason }}</p>
+          </article>
         </div>
       </section>
     </section>
@@ -90,17 +104,17 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { api } from '@/services/api'
-import type { BacktestPayload, QuantCandidate } from '@/types'
+import type { QuantCandidate, QuantResearchPayload } from '@/types'
 
 const limit = ref(20)
 const candidates = ref<QuantCandidate[]>([])
 const loading = ref(false)
-const backtesting = ref(false)
+const researching = ref(false)
 const errorMessage = ref('')
 const symbolsText = ref('600519.SH,300750.SZ,000001.SZ')
 const startDate = ref('20240101')
 const endDate = ref('20241231')
-const backtest = ref<BacktestPayload | null>(null)
+const research = ref<QuantResearchPayload | null>(null)
 
 async function loadCandidates(): Promise<void> {
   loading.value = true
@@ -119,25 +133,25 @@ async function loadCandidates(): Promise<void> {
   }
 }
 
-async function runBacktest(): Promise<void> {
+async function runResearch(): Promise<void> {
   const symbols = parseSymbols(symbolsText.value)
   if (!symbols.length) {
     errorMessage.value = '请输入至少一支股票。'
     return
   }
-  backtesting.value = true
+  researching.value = true
   errorMessage.value = ''
   try {
-    backtest.value = await api.runBacktest({
+    research.value = await api.runQuantResearch({
       symbols,
       start_date: startDate.value,
       end_date: endDate.value,
       initial_cash: 200000,
     })
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '回测失败。'
+    errorMessage.value = error instanceof Error ? error.message : '策略研究失败。'
   } finally {
-    backtesting.value = false
+    researching.value = false
   }
 }
 
@@ -190,7 +204,9 @@ function formatAmount(value: number): string {
 .quant-muted,
 .quant-candidate-list span,
 .quant-candidate-list p,
-.quant-backtest span {
+.quant-summary span,
+.strategy-list span,
+.strategy-list p {
   margin: 0;
   color: #6b7280;
   font-size: 13px;
@@ -246,7 +262,7 @@ function formatAmount(value: number): string {
 }
 
 .quant-candidate-list div,
-.quant-backtest div {
+.quant-summary div {
   display: grid;
   gap: 4px;
 }
@@ -257,21 +273,54 @@ function formatAmount(value: number): string {
 
 .quant-candidate-list strong,
 .quant-candidate-list b,
-.quant-backtest strong {
+.quant-summary strong,
+.strategy-list strong {
   color: #111827;
 }
 
-.quant-backtest {
+.quant-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 14px;
 }
 
-.quant-backtest div {
+.quant-summary div,
+.strategy-list article {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 10px;
+}
+
+.strategy-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.strategy-list article {
+  display: grid;
+  gap: 8px;
+}
+
+.strategy-list article > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.strategy-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.strategy-metrics span {
+  border-radius: 999px;
+  background: #f3f4f6;
+  padding: 5px 8px;
+  text-align: center;
 }
 
 @media (max-width: 980px) {

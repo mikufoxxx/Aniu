@@ -1,13 +1,5 @@
 <template>
   <div class="data-lab-page">
-    <section class="panel data-hero">
-      <div>
-        <h1>数据实验室</h1>
-        <p>数据源、覆盖率、维护任务和回测统一放在这里，不再和竞技场耦合。</p>
-      </div>
-      <button class="button ghost small" :disabled="loading" @click="loadDataLab">刷新状态</button>
-    </section>
-
     <div v-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
 
     <section class="data-grid">
@@ -17,6 +9,7 @@
             <h2>数据源</h2>
             <p class="data-muted">低频实时、日线和补充数据的使用边界。</p>
           </div>
+          <button class="button ghost small" :disabled="loading" @click="loadDataLab">刷新状态</button>
         </div>
         <div class="source-list">
           <article v-for="source in sourceHealth?.sources || []" :key="source.id">

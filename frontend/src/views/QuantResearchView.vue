@@ -1,15 +1,5 @@
 <template>
   <div class="quant-page">
-    <section class="panel quant-hero">
-      <div>
-        <h1>量化研究</h1>
-        <p>独立研究候选因子和回测结果，不影响股票分析候选池，也不影响 AI 竞技场。</p>
-      </div>
-      <button class="button primary small" :disabled="loading" @click="loadCandidates">
-        {{ loading ? '计算中...' : '生成量化候选' }}
-      </button>
-    </section>
-
     <div v-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
 
     <section class="quant-grid">
@@ -19,10 +9,15 @@
             <h2>因子候选</h2>
             <p class="quant-muted">基于行情、日线、资金、估值、龙虎榜等已有数据。</p>
           </div>
-          <label class="quant-limit">
-            数量
-            <input v-model.number="limit" min="5" max="50" type="number" />
-          </label>
+          <div class="quant-head-actions">
+            <label class="quant-limit">
+              数量
+              <input v-model.number="limit" min="5" max="50" type="number" />
+            </label>
+            <button class="button primary small" :disabled="loading" @click="loadCandidates">
+              {{ loading ? '计算中...' : '生成候选' }}
+            </button>
+          </div>
         </div>
 
         <div class="quant-candidate-list">
@@ -338,6 +333,12 @@ function formatAmount(value: number): string {
   font-size: 14px;
 }
 
+.quant-head-actions {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+
 .quant-limit,
 .quant-form label {
   display: grid;
@@ -463,7 +464,12 @@ function formatAmount(value: number): string {
     flex-direction: column;
   }
 
-  .quant-hero .button {
+  .quant-head-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .quant-head-actions .button {
     min-width: 160px;
   }
 }

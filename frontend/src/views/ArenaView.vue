@@ -1,12 +1,5 @@
 <template>
   <div class="arena-home">
-    <section class="arena-hero panel">
-      <div>
-        <h1>AI 竞技场</h1>
-        <p>每个 AI 独立选股、模拟交易、复盘和学习；首页只看排名与收益。</p>
-      </div>
-    </section>
-
     <div v-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
 
     <section class="arena-layout">

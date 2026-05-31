@@ -1,21 +1,5 @@
 <template>
   <div class="stock-analysis-page">
-    <section class="panel analysis-hero">
-      <div>
-        <h1>股票分析</h1>
-        <p>需要时点击“帮我选”，也可以手动输入股票池；这里的候选池只影响本页分析。</p>
-      </div>
-      <div class="analysis-controls">
-        <label>
-          候选数量
-          <input v-model.number="candidateLimit" min="1" max="5" type="number" />
-        </label>
-        <button class="button primary small" :disabled="loadingCandidates" @click="loadCandidates">
-          {{ loadingCandidates ? '选股中...' : '帮我选' }}
-        </button>
-      </div>
-    </section>
-
     <div v-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
 
     <section class="analysis-grid">
@@ -24,6 +8,15 @@
           <div>
             <h2>候选池</h2>
             <p class="analysis-muted">不会自动运行；不影响 AI 竞技场任何 AI 的候选池。</p>
+          </div>
+          <div class="analysis-controls">
+            <label>
+              候选数量
+              <input v-model.number="candidateLimit" min="1" max="5" type="number" />
+            </label>
+            <button class="button primary small" :disabled="loadingCandidates" @click="loadCandidates">
+              {{ loadingCandidates ? '选股中...' : '帮我选' }}
+            </button>
           </div>
         </div>
 

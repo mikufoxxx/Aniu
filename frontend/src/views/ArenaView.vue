@@ -293,7 +293,7 @@ onMounted(() => {
 .arena-hero h1 {
   margin: 0 0 8px;
   color: #111827;
-  font-size: 30px;
+  font-size: 26px;
   line-height: 1.1;
 }
 
@@ -313,8 +313,8 @@ onMounted(() => {
 
 .arena-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
   align-items: start;
 }
 
@@ -333,7 +333,7 @@ onMounted(() => {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #ffffff;
-  padding: 14px 88px 14px 14px;
+  padding: 12px 82px 12px 12px;
   cursor: pointer;
 }
 
@@ -407,7 +407,7 @@ onMounted(() => {
   gap: 7px;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
-  padding: 12px;
+  padding: 10px;
   color: #6b7280;
   font-size: 12px;
 }

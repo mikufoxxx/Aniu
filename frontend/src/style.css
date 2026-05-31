@@ -61,7 +61,7 @@ textarea {
 
 .page-shell {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   gap: 0;
   min-height: 100vh;
   max-width: none;
@@ -79,8 +79,8 @@ textarea {
   height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 28px;
-  padding: 24px 18px;
+  gap: 22px;
+  padding: 20px 14px;
   border-right: 1px solid #ececf1;
   background: #ffffff;
 }
@@ -93,8 +93,8 @@ textarea {
 }
 
 .app-brand-logo {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: 9px;
   flex: 0 0 auto;
   box-shadow: none;
@@ -177,11 +177,11 @@ textarea {
 
 .tab-button {
   min-width: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: none;
   background: transparent;
   color: #4b5563;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.2;
   border-radius: 8px;
@@ -3195,17 +3195,17 @@ textarea {
 
 .stack-layout {
   display: grid;
-  gap: 18px;
+  gap: 14px;
   align-content: start;
   min-width: 0;
-  padding: 32px;
+  padding: 24px;
   margin-top: 0;
 }
 
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-  gap: 18px;
+  gap: 14px;
 }
 
 .content-grid-primary {
@@ -3217,8 +3217,8 @@ textarea {
 }
 
 .panel {
-  padding: 24px;
-  border-radius: 12px;
+  padding: 18px;
+  border-radius: 10px;
   backdrop-filter: none;
 }
 
@@ -3226,14 +3226,14 @@ textarea {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .panel-head h2,
 .editor-head h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   color: #111827;
 }
 
@@ -3291,7 +3291,7 @@ textarea {
 .button {
   border: 1px solid transparent;
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   transition: transform 0.18s ease, opacity 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -3337,7 +3337,7 @@ textarea {
 }
 
 .button.small {
-  padding: 9px 14px;
+  padding: 7px 10px;
 }
 
 .output-panel,

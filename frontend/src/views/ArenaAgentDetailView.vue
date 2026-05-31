@@ -41,115 +41,93 @@
       </div>
     </section>
 
-    <section class="content-grid content-grid-primary arena-agent-detail-grid">
-      <section class="panel">
-        <div class="panel-head">
-          <div class="head-main">
-            <h2>早盘</h2>
-            <p class="section-kicker">Morning</p>
-          </div>
-          <button
-            class="button ghost small soft-header-button overview-refresh-button"
-            :disabled="runningPhase === 'morning_recommendation'"
-            @click="runPhase('morning_recommendation')"
-          >
-            {{ runningPhase === 'morning_recommendation' ? '运行中…' : '生成推荐' }}
-          </button>
-        </div>
-        <div v-if="morningRecommendation" class="arena-agent-section-list">
-          <article>
-            <div class="arena-agent-section-head">
-              <strong>{{ morningRecommendation.playbook?.label || '早盘精选' }}</strong>
-              <span>{{ morningRecommendation.created_at || '--' }}</span>
-            </div>
-            <p>{{ morningRecommendation.reason }}</p>
-            <div class="arena-agent-picks">
-              <span v-for="pick in morningRecommendation.picks || []" :key="pick.symbol">
-                {{ pick.name }} {{ pick.symbol }} · {{ scoreText(pick.score) }}
-              </span>
-            </div>
-          </article>
-        </div>
-        <div v-else class="empty-state"><p>暂无早盘推荐。</p></div>
-      </section>
+    <section v-if="dashboard" class="arena-agent-detail-layout">
+      <aside class="panel arena-agent-detail-sidebar">
+        <button
+          v-for="tab in sectionTabs"
+          :key="tab.id"
+          class="detail-nav-button"
+          :class="{ active: activeSection === tab.id }"
+          type="button"
+          @click="activeSection = tab.id"
+        >
+          <span>{{ tab.title }}</span>
+          <small>{{ tab.count }} 条</small>
+        </button>
+      </aside>
 
-      <section class="panel">
+      <section class="panel arena-agent-detail-section">
         <div class="panel-head">
           <div class="head-main">
-            <h2>盘中</h2>
-            <p class="section-kicker">Intraday</p>
+            <h2>{{ activeTab.title }}</h2>
+            <p class="section-kicker">{{ activeTab.subtitle }}</p>
           </div>
           <button
             class="button ghost small soft-header-button overview-refresh-button"
-            :disabled="runningPhase === 'intraday_trade'"
-            @click="runPhase('intraday_trade')"
+            :disabled="runningPhase === activeTab.phase"
+            @click="runPhase(activeTab.phase)"
           >
-            {{ runningPhase === 'intraday_trade' ? '运行中…' : '模拟交易' }}
+            {{ runningPhase === activeTab.phase ? '运行中…' : activeTab.action }}
           </button>
         </div>
-        <div v-if="dashboard?.intraday.orders.length" class="arena-agent-section-list">
-          <article v-for="order in dashboard.intraday.orders" :key="order.id">
-            <div class="arena-agent-section-head">
-              <strong>{{ order.action }} {{ order.name }} {{ order.symbol }}</strong>
-              <span>{{ order.quantity }} / {{ formatPrice(order.price) }}</span>
-            </div>
-            <p>{{ order.reason }}</p>
-            <small>决策 {{ latencyText(order.decision_latency_ms) }} / 写入 {{ latencyText(order.record_latency_ms) }}</small>
-          </article>
-        </div>
-        <div v-else class="empty-state"><p>暂无盘中模拟记录。</p></div>
-      </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div class="head-main">
-            <h2>收盘</h2>
-            <p class="section-kicker">Closing</p>
+        <template v-if="activeSection === 'morning'">
+          <div v-if="morningRecommendation" class="arena-agent-section-list">
+            <article>
+              <div class="arena-agent-section-head">
+                <strong>{{ morningRecommendation.playbook?.label || '早盘精选' }}</strong>
+                <span>{{ morningRecommendation.created_at || '--' }}</span>
+              </div>
+              <p>{{ morningRecommendation.reason }}</p>
+              <div class="arena-agent-picks">
+                <span v-for="pick in morningRecommendation.picks || []" :key="pick.symbol">
+                  {{ pick.name }} {{ pick.symbol }} · {{ scoreText(pick.score) }}
+                </span>
+              </div>
+            </article>
           </div>
-          <button
-            class="button ghost small soft-header-button overview-refresh-button"
-            :disabled="runningPhase === 'closing_review'"
-            @click="runPhase('closing_review')"
-          >
-            {{ runningPhase === 'closing_review' ? '运行中…' : '生成复盘' }}
-          </button>
-        </div>
-        <div v-if="dashboard?.closing.reviews.length" class="arena-agent-section-list">
-          <article v-for="review in dashboard.closing.reviews" :key="review.id">
-            <div class="arena-agent-section-head">
-              <strong>收盘复盘</strong>
-              <span>{{ review.created_at || '--' }}</span>
-            </div>
-            <p>{{ review.summary }}</p>
-          </article>
-        </div>
-        <div v-else class="empty-state"><p>暂无收盘复盘。</p></div>
-      </section>
+          <div v-else class="empty-state"><p>暂无早盘推荐。</p></div>
+        </template>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div class="head-main">
-            <h2>学习</h2>
-            <p class="section-kicker">Learning</p>
+        <template v-else-if="activeSection === 'intraday'">
+          <div v-if="dashboard.intraday.orders.length" class="arena-agent-section-list">
+            <article v-for="order in dashboard.intraday.orders" :key="order.id">
+              <div class="arena-agent-section-head">
+                <strong>{{ order.action }} {{ order.name }} {{ order.symbol }}</strong>
+                <span>{{ order.quantity }} / {{ formatPrice(order.price) }}</span>
+              </div>
+              <p>{{ order.reason }}</p>
+              <small>决策 {{ latencyText(order.decision_latency_ms) }} / 写入 {{ latencyText(order.record_latency_ms) }}</small>
+            </article>
           </div>
-          <button
-            class="button ghost small soft-header-button overview-refresh-button"
-            :disabled="runningPhase === 'nightly_learning'"
-            @click="runPhase('nightly_learning')"
-          >
-            {{ runningPhase === 'nightly_learning' ? '运行中…' : '夜间学习' }}
-          </button>
-        </div>
-        <div v-if="dashboard?.learning.reviews.length" class="arena-agent-section-list">
-          <article v-for="review in dashboard.learning.reviews" :key="review.id">
-            <div class="arena-agent-section-head">
-              <strong>回测学习</strong>
-              <span>{{ review.created_at || '--' }}</span>
-            </div>
-            <p>{{ review.summary }}</p>
-          </article>
-        </div>
-        <div v-else class="empty-state"><p>暂无学习记录。</p></div>
+          <div v-else class="empty-state"><p>暂无盘中模拟记录。</p></div>
+        </template>
+
+        <template v-else-if="activeSection === 'closing'">
+          <div v-if="dashboard.closing.reviews.length" class="arena-agent-section-list">
+            <article v-for="review in dashboard.closing.reviews" :key="review.id">
+              <div class="arena-agent-section-head">
+                <strong>收盘复盘</strong>
+                <span>{{ review.created_at || '--' }}</span>
+              </div>
+              <p>{{ review.summary }}</p>
+            </article>
+          </div>
+          <div v-else class="empty-state"><p>暂无收盘复盘。</p></div>
+        </template>
+
+        <template v-else>
+          <div v-if="dashboard.learning.reviews.length" class="arena-agent-section-list">
+            <article v-for="review in dashboard.learning.reviews" :key="review.id">
+              <div class="arena-agent-section-head">
+                <strong>回测学习</strong>
+                <span>{{ review.created_at || '--' }}</span>
+              </div>
+              <p>{{ review.summary }}</p>
+            </article>
+          </div>
+          <div v-else class="empty-state"><p>暂无学习记录。</p></div>
+        </template>
       </section>
     </section>
   </div>
@@ -162,6 +140,16 @@ import { api } from '@/services/api'
 import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation } from '@/types'
 
 type ArenaPhase = 'morning_recommendation' | 'intraday_trade' | 'closing_review' | 'nightly_learning'
+type DetailSection = 'morning' | 'intraday' | 'closing' | 'learning'
+
+interface DetailTab {
+  id: DetailSection
+  title: string
+  subtitle: string
+  count: number
+  phase: ArenaPhase
+  action: string
+}
 
 const route = useRoute()
 const agentId = computed(() => String(route.params.agentId || ''))
@@ -169,9 +157,49 @@ const dashboard = ref<ArenaAgentDashboardPayload | null>(null)
 const loading = ref(false)
 const runningPhase = ref<ArenaPhase | null>(null)
 const errorMessage = ref('')
+const activeSection = ref<DetailSection>('morning')
 
 const morningRecommendation = computed<ArenaAgentRecommendation | null>(() => {
   return dashboard.value?.morning.recommendations[0] ?? null
+})
+
+const sectionTabs = computed<DetailTab[]>(() => [
+  {
+    id: 'morning',
+    title: '早盘',
+    subtitle: 'Morning',
+    count: dashboard.value?.morning.recommendations.length ?? 0,
+    phase: 'morning_recommendation',
+    action: '生成推荐',
+  },
+  {
+    id: 'intraday',
+    title: '盘中',
+    subtitle: 'Intraday',
+    count: dashboard.value?.intraday.orders.length ?? 0,
+    phase: 'intraday_trade',
+    action: '模拟交易',
+  },
+  {
+    id: 'closing',
+    title: '收盘',
+    subtitle: 'Closing',
+    count: dashboard.value?.closing.reviews.length ?? 0,
+    phase: 'closing_review',
+    action: '生成复盘',
+  },
+  {
+    id: 'learning',
+    title: '学习',
+    subtitle: 'Learning',
+    count: dashboard.value?.learning.reviews.length ?? 0,
+    phase: 'nightly_learning',
+    action: '夜间学习',
+  },
+])
+
+const activeTab = computed<DetailTab>(() => {
+  return sectionTabs.value.find((tab) => tab.id === activeSection.value) ?? sectionTabs.value[0]
 })
 
 async function loadDashboard(): Promise<void> {
@@ -271,8 +299,49 @@ onMounted(() => {
   color: #111827;
 }
 
-.arena-agent-detail-grid {
+.arena-agent-detail-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: 14px;
   align-items: start;
+}
+
+.arena-agent-detail-sidebar {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.detail-nav-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #374151;
+  padding: 10px 11px;
+  text-align: left;
+}
+
+.detail-nav-button:hover,
+.detail-nav-button.active {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.detail-nav-button span {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.detail-nav-button small {
+  color: #6b7280;
+  font-size: 12px;
 }
 
 .arena-agent-section-list {
@@ -311,6 +380,15 @@ onMounted(() => {
 @media (max-width: 900px) {
   .arena-agent-detail-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .arena-agent-detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .arena-agent-detail-sidebar {
+    position: static;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 </style>

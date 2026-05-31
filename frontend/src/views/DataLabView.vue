@@ -301,7 +301,7 @@ onMounted(() => {
 .data-hero h1 {
   margin: 0 0 8px;
   color: #111827;
-  font-size: 30px;
+  font-size: 26px;
   line-height: 1.1;
 }
 

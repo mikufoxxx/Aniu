@@ -1372,7 +1372,8 @@ class ArenaService:
             ordered = candidates[agent_index:] + candidates[:agent_index]
         else:
             ordered = candidates
-        return [self._pick_payload(candidate) for candidate in ordered[:3]]
+        pick_limit = min(5, max(1, len(ordered) - 1))
+        return [self._pick_payload(candidate) for candidate in ordered[:pick_limit]]
 
     def _pick_payload(self, candidate: dict[str, Any]) -> dict[str, Any]:
         return {

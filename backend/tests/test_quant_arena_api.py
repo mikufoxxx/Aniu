@@ -1049,7 +1049,8 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
         "risk_ai",
     ]
     assert payload["agent_recommendations"][0]["action"] == "WATCH"
-    assert 1 <= len(payload["agent_recommendations"][0]["picks"]) <= 3
+    assert 1 <= len(payload["agent_recommendations"][0]["picks"]) <= 5
+    assert len(payload["agent_recommendations"][0]["picks"]) < 2
     assert payload["agent_recommendations"][0]["playbook"]["mode"] in {
         "short_swing",
         "quant_rotation",
@@ -1341,6 +1342,28 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
             "source": "tencent",
             "timestamp": "2026-05-29 10:20:00",
         },
+        {
+            "symbol": "000858.SZ",
+            "name": "五粮液",
+            "price": 90.0,
+            "change_pct": 1.6,
+            "amount": 450_000_000,
+            "turnover": 0.6,
+            "volume_ratio": 1.2,
+            "source": "easy_tdx",
+            "timestamp": "2026-05-29 10:20:00",
+        },
+        {
+            "symbol": "601899.SH",
+            "name": "紫金矿业",
+            "price": 18.0,
+            "change_pct": 1.4,
+            "amount": 420_000_000,
+            "turnover": 0.7,
+            "volume_ratio": 1.1,
+            "source": "tencent",
+            "timestamp": "2026-05-29 10:20:00",
+        },
     ]
 
     def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
@@ -1349,7 +1372,7 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
 
-    symbols = ["000001.SZ", "600519.SH", "300750.SZ", "601318.SH"]
+    symbols = ["000001.SZ", "600519.SH", "300750.SZ", "601318.SH", "000858.SZ", "601899.SH"]
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
         with session_scope() as db:
@@ -1358,6 +1381,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
                 ("600519.SH", 100),
                 ("300750.SZ", 78),
                 ("601318.SH", 39),
+                ("000858.SZ", 90),
+                ("601899.SH", 18),
             ):
                 db.add(DailyBar(symbol=symbol, trade_date="20260527", close=close, amount=500))
                 db.add(DailyBar(symbol=symbol, trade_date="20260528", close=close + 1, amount=600))
@@ -1395,8 +1420,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert payload["summary"]["total_assets"] > 0
     assert len(payload["morning"]["recommendations"]) == 1
     morning = payload["morning"]["recommendations"][0]
-    assert 1 <= len(morning["picks"]) <= 3
-    assert len(morning["picks"]) < 4
+    assert len(morning["picks"]) == 5
+    assert len(morning["picks"]) < 6
     assert morning["playbook"]["mode"] == "short_swing"
     assert len(payload["intraday"]["orders"]) >= 1
     assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"

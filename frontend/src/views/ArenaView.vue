@@ -48,7 +48,13 @@
               <div class="arena-pick-chips">
                 <span v-for="pick in agent.latestPicks" :key="pick.symbol">
                   <b>{{ pick.name || pick.symbol }}</b>
-                  <small>{{ pick.symbol }} · AI {{ scoreText(pick.ai_selection_score ?? pick.score) }}</small>
+                  <small>
+                    {{ pick.symbol }} · {{ formatPrice(pick.price) }}
+                    <em :class="profitClass(percentRatio(pick.change_pct))">
+                      {{ formatChange(pick.change_pct) }}
+                    </em>
+                  </small>
+                  <small>AI {{ scoreText(pick.ai_selection_score ?? pick.score) }} · {{ riskText(pick.risk_flags) }}</small>
                 </span>
                 <span v-if="!agent.latestPicks.length">暂无早盘精选</span>
               </div>
@@ -254,6 +260,22 @@ function scoreText(value: unknown): string {
   return typeof value === 'number' ? value.toFixed(1) : '--'
 }
 
+function formatPrice(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '--'
+}
+
+function formatChange(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}%` : '--'
+}
+
+function percentRatio(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value / 100 : 0
+}
+
+function riskText(flags: string[] | undefined): string {
+  return flags?.length ? `风险 ${flags.length}` : '无风险标记'
+}
+
 function profitClass(value: number): string {
   if (value > 0) return 'profit-up'
   if (value < 0) return 'profit-down'
@@ -381,6 +403,7 @@ onMounted(() => {
   color: #374151;
   padding: 5px 7px;
   font-size: 12px;
+  min-width: 148px;
 }
 
 .arena-pick-chips b {
@@ -391,6 +414,11 @@ onMounted(() => {
 .arena-pick-chips small {
   color: #6b7280;
   font-size: 11px;
+}
+
+.arena-pick-chips em {
+  margin-left: 4px;
+  font-style: normal;
 }
 
 .arena-agent-metrics {

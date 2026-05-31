@@ -59,7 +59,9 @@ def test_skills_endpoint_lists_builtin_skills(monkeypatch, tmp_path) -> None:
     payload = response.json()
     assert any(item["id"] == "builtin_utils" for item in payload)
     assert any(item["id"] == "mx_core" for item in payload)
+    assert any(item["id"] == "uzi_deep_analysis" for item in payload)
     builtin_utils = next(item for item in payload if item["id"] == "builtin_utils")
+    uzi_deep_analysis = next(item for item in payload if item["id"] == "uzi_deep_analysis")
     assert builtin_utils["name"] == "builtin_utils"
     assert builtin_utils["source"] == "builtin"
     assert builtin_utils["role"] == "runtime"
@@ -71,6 +73,11 @@ def test_skills_endpoint_lists_builtin_skills(monkeypatch, tmp_path) -> None:
     assert isinstance(builtin_utils["tool_names"], list)
     assert builtin_utils["compatibility_level"] == "native"
     assert builtin_utils["compatibility_summary"]
+    assert uzi_deep_analysis["name"] == "UZI 深度分析"
+    assert uzi_deep_analysis["source"] == "builtin"
+    assert uzi_deep_analysis["compatibility_level"] == "prompt_only"
+    assert uzi_deep_analysis["run_types"] == ["analysis", "chat"]
+    assert uzi_deep_analysis["support_files"] == ["references/uzi-research-method.md"]
 
     database_module._engine = None
     database_module._session_local = None

@@ -20,17 +20,19 @@
 <style scoped>
 .market-map-page {
   min-width: 0;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .market-map-frame-shell {
   position: relative;
-  min-height: 720px;
-  height: calc(100vh - 44px);
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
-  border: 1px solid #ececf1;
-  border-radius: 12px;
+  border: 0;
+  border-radius: 0;
   background: #111318;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  box-shadow: none;
 }
 
 .market-map-open {
@@ -66,9 +68,13 @@
 }
 
 @media (max-width: 980px) {
-  .market-map-frame-shell {
-    height: calc(100vh - 44px);
+  .market-map-page {
+    height: calc(100vh - 148px);
     min-height: 620px;
+  }
+
+  .market-map-frame-shell {
+    height: 100%;
   }
 }
 </style>

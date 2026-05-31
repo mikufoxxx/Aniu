@@ -42,7 +42,7 @@
       </div>
     </aside>
 
-    <main class="stack-layout">
+    <main :class="['stack-layout', { 'is-market-map-route': isMarketMapPage }]">
       <div v-if="errorMessage && !isLoginPage" class="hero-error app-shell-error">
         {{ errorMessage }}
       </div>
@@ -74,6 +74,7 @@ const sidebarCollapsed = ref(false)
 
 const isLoginPage = computed(() => route.path === '/login')
 const isArenaAgentDetail = computed(() => route.name === 'arena-agent-detail')
+const isMarketMapPage = computed(() => route.name === 'market-map')
 const arenaDetailNavigation = computed(() => {
   const path = route.path
   return [

@@ -46,6 +46,14 @@
             >
               {{ loading ? '运行中…' : '收盘复盘' }}
             </button>
+            <button
+              class="button ghost small soft-header-button overview-refresh-button"
+              :class="{ 'is-loading': loading }"
+              :disabled="loading"
+              @click="runArena('nightly_learning')"
+            >
+              {{ loading ? '运行中…' : '夜间学习' }}
+            </button>
           </div>
         </div>
 
@@ -800,7 +808,7 @@ async function generateReport(reportType: 'morning' | 'closing'): Promise<void> 
   }
 }
 
-async function runArena(phase: 'morning_recommendation' | 'intraday_trade' | 'closing_review'): Promise<void> {
+async function runArena(phase: 'morning_recommendation' | 'intraday_trade' | 'closing_review' | 'nightly_learning'): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {

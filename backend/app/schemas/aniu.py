@@ -614,7 +614,12 @@ class ArenaAgentRequest(BaseModel):
     prompt: str = Field(default="", max_length=2000)
 
 
-ArenaPhase = Literal["morning_recommendation", "intraday_trade", "closing_review"]
+ArenaPhase = Literal[
+    "morning_recommendation",
+    "intraday_trade",
+    "closing_review",
+    "nightly_learning",
+]
 
 
 class ArenaRunRequest(BaseModel):

@@ -16,9 +16,11 @@ from app.db.models import (
     ArenaOrder,
     ArenaPosition,
     ArenaRun,
+    DailyBar,
 )
 from app.services.llm_service import llm_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
+from app.services.historical_data_service import historical_data_service
 from app.services.settings_service import settings_service
 
 
@@ -139,6 +141,38 @@ class ArenaService:
                 "stock_pick_snapshot": stock_pick_snapshot,
             }
 
+        if normalized_phase == "nightly_learning":
+            reviews = self._nightly_learning_reviews(
+                db=db,
+                agents=active_agents,
+                symbols=symbols,
+                candidates=candidates,
+                snapshot_id=snapshot_id,
+                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
+                data_sources=data_sources,
+                initial_cash=initial_cash,
+            )
+            leaderboard = self.leaderboard(db)["items"]
+            arena_run.candidate_payload = {
+                **candidate_payload,
+                "agent_reviews": reviews,
+            }
+            arena_run.leaderboard_payload = leaderboard
+            db.add(arena_run)
+            db.commit()
+            return {
+                "run_id": arena_run.id,
+                "phase": normalized_phase,
+                "candidate_count": candidate_payload["candidate_count"],
+                "candidates": candidates,
+                "agent_recommendations": [],
+                "agent_reviews": reviews,
+                "leaderboard": leaderboard,
+                "orders": [],
+                "data_sources": candidate_payload["data_sources"],
+                "stock_pick_snapshot": stock_pick_snapshot,
+            }
+
         leaderboard: list[dict[str, Any]] = []
         orders: list[dict[str, Any]] = []
         for index, agent in enumerate(active_agents):
@@ -232,8 +266,16 @@ class ArenaService:
 
     def _normalize_phase(self, phase: str) -> str:
         normalized = str(phase or "intraday_trade").strip().lower()
-        if normalized not in {"morning_recommendation", "intraday_trade", "closing_review"}:
-            raise ValueError("竞技场阶段必须是 morning_recommendation、intraday_trade 或 closing_review。")
+        if normalized not in {
+            "morning_recommendation",
+            "intraday_trade",
+            "closing_review",
+            "nightly_learning",
+        }:
+            raise ValueError(
+                "竞技场阶段必须是 morning_recommendation、intraday_trade、"
+                "closing_review 或 nightly_learning。"
+            )
         return normalized
 
     def _morning_recommendations(
@@ -315,6 +357,64 @@ class ArenaService:
                 agent_name=str(agent.get("name") or account.agent_name),
                 style=str(agent.get("style") or account.style),
                 memory_type="closing_review",
+                summary=summary,
+                metrics_payload=metrics_payload,
+            )
+            db.add(memory)
+            db.flush()
+            reviews.append(self._memory_payload(memory))
+        return reviews
+
+    def _nightly_learning_reviews(
+        self,
+        *,
+        db: Session,
+        agents: list[dict[str, str]],
+        symbols: list[str] | None,
+        candidates: list[dict[str, Any]],
+        snapshot_id: str,
+        stock_pick_snapshot_id: str,
+        data_sources: list[str],
+        initial_cash: float,
+    ) -> list[dict[str, Any]]:
+        backtest_symbols = symbols or [str(item["symbol"]) for item in candidates if item.get("symbol")]
+        window = self._backtest_window(db, symbols=backtest_symbols)
+        backtest: dict[str, Any]
+        if window is None:
+            backtest = {"available": False, "reason": "可用日线不足，至少需要两个交易日。"}
+        else:
+            try:
+                backtest = historical_data_service.run_daily_momentum_backtest(
+                    db,
+                    symbols=backtest_symbols,
+                    start_date=window["start_date"],
+                    end_date=window["end_date"],
+                    initial_cash=initial_cash,
+                )
+                backtest["available"] = True
+            except ValueError as exc:
+                backtest = {"available": False, "reason": str(exc)}
+
+        reviews: list[dict[str, Any]] = []
+        for index, agent in enumerate(agents):
+            agent_id = str(agent.get("id") or f"agent_{index + 1}")
+            recent_memories = self.recent_agent_memories(db, agent_id=agent_id, limit=5)
+            metrics_payload = {
+                "snapshot_id": snapshot_id,
+                "stock_pick_snapshot_id": stock_pick_snapshot_id,
+                "data_sources": data_sources,
+                "backtest": backtest,
+                "recent_memories": recent_memories,
+            }
+            summary = self._nightly_learning_summary(
+                agent_name=str(agent.get("name") or agent_id),
+                backtest=backtest,
+            )
+            memory = ArenaAgentMemory(
+                agent_id=agent_id,
+                agent_name=str(agent.get("name") or agent_id),
+                style=str(agent.get("style") or "balanced"),
+                memory_type="nightly_learning",
                 summary=summary,
                 metrics_payload=metrics_payload,
             )
@@ -1177,6 +1277,38 @@ class ArenaService:
             f"{metrics['agent_name']} 收盘复盘：总资产 {metrics['total_assets']:.2f}，"
             f"收益 {return_pct:.2f}%，现金 {metrics['cash']:.2f}，"
             f"持仓 {position_count} 只，最近成交 {trade_count} 笔。"
+        )
+
+    def _backtest_window(
+        self,
+        db: Session,
+        *,
+        symbols: list[str],
+    ) -> dict[str, str] | None:
+        trade_dates = db.scalars(
+            select(DailyBar.trade_date)
+            .where(DailyBar.symbol.in_(symbols))
+            .order_by(DailyBar.trade_date)
+        ).all()
+        unique_dates = sorted({date for date in trade_dates if date})
+        if len(unique_dates) < 2:
+            return None
+        return {"start_date": unique_dates[0], "end_date": unique_dates[-1]}
+
+    def _nightly_learning_summary(
+        self,
+        *,
+        agent_name: str,
+        backtest: dict[str, Any],
+    ) -> str:
+        if not backtest.get("available"):
+            return f"{agent_name} 夜间学习：回测未执行，{backtest.get('reason') or '数据不足'}。"
+        return_pct = float(backtest.get("return_ratio") or 0) * 100
+        drawdown_pct = float(backtest.get("max_drawdown") or 0) * 100
+        return (
+            f"{agent_name} 夜间学习：回测 {backtest.get('start_date')} 至 "
+            f"{backtest.get('end_date')}，最佳标的 {backtest.get('selected_symbol')}，"
+            f"收益 {return_pct:.2f}%，最大回撤 {drawdown_pct:.2f}%。"
         )
 
     def _memory_payload(self, memory: ArenaAgentMemory) -> dict[str, Any]:

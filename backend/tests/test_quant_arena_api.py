@@ -1161,6 +1161,85 @@ def test_arena_closing_phase_records_agent_memory_and_reuses_it_in_prompt(
     _reset_state()
 
 
+def test_arena_nightly_phase_records_backtest_learning_memory(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.db.models import ArenaAgentMemory
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.0,
+                "change_pct": 2.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.5,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 23:30:00",
+            },
+            {
+                "symbol": "600519.SH",
+                "name": "贵州茅台",
+                "price": 98.0,
+                "change_pct": -1.0,
+                "amount": 500_000_000,
+                "turnover": 0.3,
+                "volume_ratio": 0.9,
+                "source": "tencent",
+                "timestamp": "2026-05-29 23:30:00",
+            },
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="000001.SZ", trade_date="20260527", close=10, amount=500),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=12, amount=600),
+                    DailyBar(symbol="600519.SH", trade_date="20260527", close=100, amount=900),
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=98, amount=800),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "phase": "nightly_learning",
+                "symbols": ["000001.SZ", "600519.SH"],
+                "initial_cash": 200000,
+                "agents": [
+                    {
+                        "id": "night_ai",
+                        "name": "夜间学习 AI",
+                        "style": "balanced",
+                    }
+                ],
+            },
+        )
+        with session_scope() as db:
+            stored_memory = db.query(ArenaAgentMemory).filter_by(agent_id="night_ai").first()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["phase"] == "nightly_learning"
+    assert payload["orders"] == []
+    assert payload["agent_reviews"][0]["memory_type"] == "nightly_learning"
+    assert "回测" in payload["agent_reviews"][0]["summary"]
+    assert payload["agent_reviews"][0]["metrics"]["backtest"]["selected_symbol"] == "000001.SZ"
+    assert payload["agent_reviews"][0]["metrics"]["backtest"]["return_ratio"] > 0
+    assert stored_memory is not None
+    assert stored_memory.memory_type == "nightly_learning"
+
+    _reset_state()
+
+
 def test_arena_run_uses_llm_decision_for_each_agent_when_configured(
     monkeypatch,
     tmp_path,

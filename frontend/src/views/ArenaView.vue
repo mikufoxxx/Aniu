@@ -48,7 +48,7 @@
               <div class="arena-pick-chips">
                 <span v-for="pick in agent.latestPicks" :key="pick.symbol">
                   <b>{{ pick.name || pick.symbol }}</b>
-                  <small>{{ pick.symbol }} · {{ scoreText(pick.score) }}</small>
+                  <small>{{ pick.symbol }} · AI {{ scoreText(pick.ai_selection_score ?? pick.score) }}</small>
                 </span>
                 <span v-if="!agent.latestPicks.length">暂无早盘精选</span>
               </div>

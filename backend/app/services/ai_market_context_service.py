@@ -123,6 +123,8 @@ class AIMarketContextService:
         lines.append("候选信号:")
         for index, item in enumerate(items[:10], start=1):
             daily = item.get("daily_factors") or {}
+            ai_selection = item.get("ai_selection") or {}
+            temporal = ai_selection.get("temporal_profile") or {}
             profile = item.get("profile") or {}
             financial = item.get("financial_factors") or {}
             profile_parts = self._profile_parts(profile)
@@ -143,9 +145,12 @@ class AIMarketContextService:
                 (
                     f"{index}. {item.get('symbol')} {item.get('name') or ''} "
                     f"评分 {float(item.get('score') or 0):.2f}; "
+                    f"ai_selection {float(ai_selection.get('score') or 0):.2f}; "
                     f"现价 {self._format_optional_float(item.get('price'))}; "
                     f"涨幅 {float(item.get('change_pct') or 0):+.2f}%; "
                     f"日线动量 {float(daily.get('momentum_pct') or 0):+.2f}%; "
+                    f"60日线 {'上方' if temporal.get('above_ma60') else '下方'}; "
+                    f"风险 {','.join(ai_selection.get('risk_flags') or []) or '无'}; "
                     f"日线覆盖 {int(daily.get('bars_used') or 0)}日; "
                     f"{profile_parts}"
                     f"{daily_basic_parts}"

@@ -822,9 +822,20 @@ class QuantService:
         first_close = float(usable[0].close or 0)
         latest = usable[-1]
         latest_close = float(latest.close or 0)
+        closes = [float(bar.close or 0) for bar in usable if float(bar.close or 0) > 0]
+        ma20 = self._mean(closes[-20:])
+        ma60 = self._mean(closes[-60:])
+        high_60 = max(closes[-60:]) if closes else 0.0
+        low_60 = min(closes[-60:]) if closes else 0.0
         momentum_pct = (
             (latest_close - first_close) / first_close * 100
             if first_close > 0
+            else 0.0
+        )
+        recent_base = closes[-6] if len(closes) >= 6 else first_close
+        recent_momentum_pct = (
+            (latest_close - recent_base) / recent_base * 100
+            if recent_base > 0
             else 0.0
         )
         returns: list[float] = []
@@ -835,11 +846,28 @@ class QuantService:
                 returns.append((current_close - previous_close) / previous_close * 100)
         avg_amount = sum(_number(bar.amount) for bar in usable) / len(usable)
         volatility_pct = self._stddev(returns)
+        max_drawdown_pct = self._max_drawdown_pct(closes)
+        range_position_pct = (
+            (latest_close - low_60) / (high_60 - low_60) * 100
+            if high_60 > low_60
+            else 50.0
+        )
         return {
             "latest_trade_date": latest.trade_date,
             "bars_used": len(usable),
             "latest_close": round(latest_close, 4),
             "momentum_pct": round(momentum_pct, 4),
+            "recent_momentum_pct": round(recent_momentum_pct, 4),
+            "ma20": round(ma20, 4) if ma20 else None,
+            "ma60": round(ma60, 4) if ma60 else None,
+            "above_ma20": bool(ma20 and latest_close >= ma20),
+            "above_ma60": bool(ma60 and latest_close >= ma60),
+            "distance_to_ma20_pct": round((latest_close - ma20) / ma20 * 100, 4) if ma20 else 0.0,
+            "distance_to_ma60_pct": round((latest_close - ma60) / ma60 * 100, 4) if ma60 else 0.0,
+            "high_60": round(high_60, 4) if high_60 else None,
+            "low_60": round(low_60, 4) if low_60 else None,
+            "range_position_pct": round(range_position_pct, 4),
+            "max_drawdown_pct": round(max_drawdown_pct, 4),
             "avg_amount": round(avg_amount, 4),
             "volatility_pct": round(volatility_pct, 4),
             "turnover_rate": _number(latest.turnover_rate),
@@ -878,6 +906,17 @@ class QuantService:
             "bars_used": 0,
             "latest_close": None,
             "momentum_pct": 0.0,
+            "recent_momentum_pct": 0.0,
+            "ma20": None,
+            "ma60": None,
+            "above_ma20": False,
+            "above_ma60": False,
+            "distance_to_ma20_pct": 0.0,
+            "distance_to_ma60_pct": 0.0,
+            "high_60": None,
+            "low_60": None,
+            "range_position_pct": 50.0,
+            "max_drawdown_pct": 0.0,
             "avg_amount": 0.0,
             "volatility_pct": 0.0,
             "turnover_rate": 0.0,
@@ -910,6 +949,21 @@ class QuantService:
         mean = sum(values) / len(values)
         variance = sum((value - mean) ** 2 for value in values) / len(values)
         return math.sqrt(variance)
+
+    def _mean(self, values: list[float]) -> float:
+        clean = [value for value in values if value > 0]
+        return sum(clean) / len(clean) if clean else 0.0
+
+    def _max_drawdown_pct(self, closes: list[float]) -> float:
+        peak = 0.0
+        max_drawdown = 0.0
+        for close in closes:
+            if close <= 0:
+                continue
+            peak = max(peak, close)
+            if peak > 0:
+                max_drawdown = min(max_drawdown, (close - peak) / peak * 100)
+        return max_drawdown
 
     def _rationale(self, change_pct: float, amount: float, volume_ratio: float) -> str:
         parts: list[str] = []

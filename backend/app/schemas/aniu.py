@@ -368,6 +368,8 @@ class QuantCandidateRead(BaseModel):
     profile: dict[str, Any] = Field(default_factory=dict)
     financial_factors: dict[str, Any] = Field(default_factory=dict)
     daily_factors: dict[str, Any] = Field(default_factory=dict)
+    retail_analysis: dict[str, Any] = Field(default_factory=dict)
+    ai_selection: dict[str, Any] = Field(default_factory=dict)
     rationale: str
 
 

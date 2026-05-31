@@ -584,6 +584,101 @@ def test_ai_stock_picker_builds_autonomous_snapshot_from_stored_universe(
     _reset_state()
 
 
+def test_ai_stock_picker_reranks_with_temporal_retail_risk_context(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        quotes = {
+            "000001.SZ": {
+                "symbol": "000001.SZ",
+                "name": "追高风险股",
+                "price": 12.0,
+                "change_pct": 8.0,
+                "amount": 1_500_000_000,
+                "turnover": 3.0,
+                "volume_ratio": 2.4,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:30:03",
+            },
+            "600519.SH": {
+                "symbol": "600519.SH",
+                "name": "趋势稳健股",
+                "price": 38.0,
+                "change_pct": 1.6,
+                "amount": 900_000_000,
+                "turnover": 1.2,
+                "volume_ratio": 1.4,
+                "source": "tencent",
+                "timestamp": "2026-05-29 10:30:03",
+            },
+        }
+        return [quotes[symbol] for symbol in symbols]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            for index in range(60):
+                trade_date = f"202604{index + 1:02d}" if index < 30 else f"202605{index - 29:02d}"
+                db.add(
+                    DailyBar(
+                        symbol="000001.SZ",
+                        trade_date=trade_date,
+                        close=20 - index * 0.12,
+                        amount=900,
+                        turnover_rate=0.4,
+                        volume_ratio=0.8,
+                        moneyflow_net_amount=-2000,
+                    )
+                )
+                db.add(
+                    DailyBar(
+                        symbol="600519.SH",
+                        trade_date=trade_date,
+                        close=28 + index * 0.16,
+                        amount=1200,
+                        turnover_rate=1.2,
+                        volume_ratio=1.2,
+                        pe_ttm=24,
+                        pb=4,
+                        moneyflow_net_amount=3000,
+                        moneyflow_buy_lg_amount_rate=4,
+                    )
+                )
+
+        response = client.post(
+            "/api/aniu/ai/picks",
+            headers=headers,
+            json={
+                "symbols": ["000001.SZ", "600519.SH"],
+                "limit": 2,
+                "lookback_days": 60,
+                "prefer_realtime": True,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["symbol"] for item in payload["recommendations"]] == [
+        "600519.SH",
+        "000001.SZ",
+    ]
+    first = payload["recommendations"][0]
+    second = payload["recommendations"][1]
+    assert first["ai_selection"]["score"] > second["ai_selection"]["score"]
+    assert first["ai_selection"]["temporal_profile"]["above_ma60"] is True
+    assert second["ai_selection"]["temporal_profile"]["above_ma60"] is False
+    assert "below_ma60" in second["ai_selection"]["risk_flags"]
+    assert first["retail_analysis"]["decision"] in {"buy", "watch", "hold"}
+    assert "ai_selection" in payload["context"]
+
+    _reset_state()
+
+
 def test_quant_dataset_uses_most_complete_stored_trade_date(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 
@@ -1441,6 +1536,8 @@ def test_arena_order_context_includes_retail_a_share_analysis(monkeypatch, tmp_p
     assert context["retail_analysis"]["decision"] in {"buy", "watch", "hold", "avoid"}
     assert context["retail_analysis"]["sell_plan"]["rule"]
     assert context["retail_analysis"]["dimension_scores"]
+    assert context["selected_candidate"]["ai_selection"]["score"] > 0
+    assert context["selected_candidate"]["ai_selection"]["temporal_profile"]
 
     _reset_state()
 
@@ -1595,6 +1692,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert morning["playbook"]["mode"] == "short_swing"
     assert morning["name"] != morning["symbol"]
     assert all(pick["name"] != pick["symbol"] for pick in morning["picks"])
+    assert all(pick["ai_selection_score"] > 0 for pick in morning["picks"])
+    assert all("risk_flags" in pick for pick in morning["picks"])
     assert len(payload["intraday"]["orders"]) >= 1
     assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"
     assert payload["learning"]["reviews"][0]["memory_type"] == "nightly_learning"

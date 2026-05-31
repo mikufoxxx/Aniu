@@ -264,6 +264,17 @@ export interface QuantCandidate {
     bars_used?: number
     latest_close?: number | null
     momentum_pct?: number
+    recent_momentum_pct?: number
+    ma20?: number | null
+    ma60?: number | null
+    above_ma20?: boolean
+    above_ma60?: boolean
+    distance_to_ma20_pct?: number
+    distance_to_ma60_pct?: number
+    high_60?: number | null
+    low_60?: number | null
+    range_position_pct?: number
+    max_drawdown_pct?: number
     avg_amount?: number
     volatility_pct?: number
     limit_event?: {
@@ -337,6 +348,8 @@ export interface QuantCandidate {
       pledge_ratio?: number
     } | null
   }
+  retail_analysis?: Record<string, unknown>
+  ai_selection?: Record<string, unknown>
   rationale: string
 }
 
@@ -597,6 +610,8 @@ export interface ArenaAgentRecommendation {
     symbol: string
     name: string
     score?: number
+    ai_selection_score?: number
+    risk_flags?: string[]
     price?: number | null
     change_pct?: number | null
     reason?: string

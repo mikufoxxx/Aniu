@@ -1256,9 +1256,10 @@ class ArenaService:
                 "volume_ratio": candidate.get("volume_ratio"),
                 "factor_scores": candidate.get("factor_scores") or {},
                 "daily_factors": candidate.get("daily_factors") or {},
+                "ai_selection": candidate.get("ai_selection") or {},
                 "rationale": candidate.get("rationale"),
             },
-            "retail_analysis": a_share_retail_analysis_service.build(candidate),
+            "retail_analysis": candidate.get("retail_analysis") or a_share_retail_analysis_service.build(candidate),
             "llm_decision": llm_decision or {"used": False},
         }
 
@@ -1441,10 +1442,13 @@ class ArenaService:
         return [self._pick_payload(candidate) for candidate in ordered[:pick_limit]]
 
     def _pick_payload(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        ai_selection = candidate.get("ai_selection") or {}
         return {
             "symbol": candidate.get("symbol"),
             "name": candidate.get("name") or candidate.get("symbol"),
             "score": candidate.get("score"),
+            "ai_selection_score": ai_selection.get("score"),
+            "risk_flags": list(ai_selection.get("risk_flags") or []),
             "price": candidate.get("price"),
             "change_pct": candidate.get("change_pct"),
             "reason": candidate.get("rationale") or "",

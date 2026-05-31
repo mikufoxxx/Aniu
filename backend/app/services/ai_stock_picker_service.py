@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.services.ai_market_context_service import ai_market_context_service
+from app.services.ai_selection_service import ai_selection_service
 from app.services.historical_data_service import historical_data_service
 from app.services.market_data_service import normalize_symbol
 from app.services.quant_service import quant_service
@@ -34,6 +35,15 @@ class AIStockPickerService:
             prefer_realtime=prefer_realtime,
             lookback_days=normalized_lookback_days,
         )
+        enriched_items = [
+            ai_selection_service.enrich(item)
+            for item in dataset.get("items", [])
+        ]
+        enriched_items.sort(
+            key=lambda item: float((item.get("ai_selection") or {}).get("score") or 0),
+            reverse=True,
+        )
+        dataset["items"] = enriched_items
         context = ai_market_context_service.format_dataset_context(db, dataset)
         coverage = historical_data_service.summarize_daily_coverage(db)
         return {
@@ -42,7 +52,7 @@ class AIStockPickerService:
             "data_sources": dataset["data_sources"],
             "coverage": coverage,
             "dataset": dataset,
-            "recommendations": dataset["items"],
+            "recommendations": enriched_items,
             "context": context,
             "context_length": len(context),
         }

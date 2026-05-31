@@ -1,12 +1,7 @@
 <template>
   <div :class="['page-shell', { 'is-login-shell': isLoginPage, 'is-sidebar-collapsed': sidebarCollapsed }]">
     <aside v-if="!isLoginPage" class="app-sidebar">
-      <div class="app-brand">
-        <img class="app-brand-logo" src="/aniu.ico" alt="Aniu logo" />
-        <div class="app-brand-copy">
-          <strong>Aniu</strong>
-          <span>AI Trading Lab</span>
-        </div>
+      <div class="app-sidebar-top">
         <button
           class="sidebar-collapse-button"
           type="button"

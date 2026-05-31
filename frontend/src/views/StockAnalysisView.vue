@@ -3,9 +3,9 @@
     <div v-if="errorMessage" class="error-banner">{{ errorMessage }}</div>
 
     <section class="analysis-grid">
-      <section class="panel">
-        <div class="panel-head">
-          <div>
+      <section class="panel stock-candidate-panel">
+        <div class="panel-head stock-panel-head">
+          <div class="stock-panel-title">
             <h2>候选池</h2>
             <p class="analysis-muted">不会自动运行；不影响 AI 竞技场任何 AI 的候选池。</p>
           </div>
@@ -56,14 +56,14 @@
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <div>
+      <section class="panel stock-ai-panel">
+        <div class="panel-head stock-panel-head">
+          <div class="stock-panel-title">
             <h2>AI 分析</h2>
             <p class="analysis-muted">选择股票后生成交易动作、理由和数据源。</p>
           </div>
           <div class="analysis-ai-controls">
-            <label>
+            <label class="analysis-model-field">
               模型
               <select v-model="selectedModel">
                 <option value="">默认</option>
@@ -72,7 +72,7 @@
                 </option>
               </select>
             </label>
-            <label>
+            <label class="analysis-skill-field">
               Skill
               <div class="analysis-skill-picker">
                 <button
@@ -385,7 +385,43 @@ onMounted(() => {
 <style scoped>
 .stock-analysis-page {
   display: grid;
-  gap: 12px;
+  gap: 16px;
+}
+
+.stock-analysis-page .panel {
+  min-width: 0;
+  border-color: #e4e4e1;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.stock-panel-head {
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.stock-panel-title {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stock-panel-title h2 {
+  color: #202123;
+  font-size: 16px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.stock-ai-panel .stock-panel-head {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.stock-candidate-panel .stock-panel-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .analysis-hero,
@@ -410,31 +446,59 @@ onMounted(() => {
 .analysis-result span,
 .analysis-result p {
   margin: 0;
-  color: #6b7280;
-  font-size: 13px;
+  color: #6f6f6f;
+  font-size: 12px;
 }
 
 .analysis-controls {
   display: flex;
   align-items: end;
-  gap: 10px;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.analysis-controls .button {
+  min-width: 108px;
+  height: 42px;
+  white-space: nowrap;
 }
 
 .analysis-ai-controls {
   display: grid;
-  grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1.3fr) auto;
-  gap: 8px;
+  grid-template-columns: minmax(150px, 190px) minmax(160px, 1fr);
+  grid-template-areas:
+    "model action"
+    "skills skills";
+  gap: 12px 14px;
   align-items: end;
-  min-width: min(100%, 650px);
+  width: 100%;
+  min-width: 0;
+}
+
+.analysis-model-field {
+  grid-area: model;
+}
+
+.analysis-skill-field {
+  grid-area: skills;
+}
+
+.analysis-ai-controls .button {
+  grid-area: action;
+  justify-self: end;
+  min-width: 142px;
+  height: 40px;
+  white-space: nowrap;
 }
 
 .analysis-controls label,
 .analysis-ai-controls label,
 .analysis-field {
   display: grid;
-  gap: 8px;
-  color: #6b7280;
+  gap: 7px;
+  color: #6f6f6f;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .analysis-controls input,
@@ -442,35 +506,54 @@ onMounted(() => {
 .analysis-field textarea {
   width: 100%;
   border: 1px solid #dededb;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #ffffff;
   color: #111827;
   padding: 9px 10px;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.analysis-controls input:focus,
+.analysis-ai-controls select:focus,
+.analysis-field textarea:focus {
+  border-color: #a8a8a2;
+  box-shadow: 0 0 0 3px rgba(32, 33, 35, 0.06);
 }
 
 .analysis-skill-picker {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  max-width: 360px;
+  gap: 7px;
+  max-width: 100%;
 }
 
 .analysis-skill-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  border: 1px solid #e5e7eb;
+  gap: 5px;
+  min-height: 32px;
+  border: 1px solid #e4e4e1;
   border-radius: 999px;
   background: #ffffff;
-  color: #374151;
-  padding: 6px 8px;
+  color: #4b5563;
+  padding: 6px 10px;
   font-size: 12px;
-  line-height: 1;
+  font-weight: 520;
+  line-height: 1.1;
+  white-space: nowrap;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.analysis-skill-chip:hover {
+  border-color: #cfcfca;
+  background: #f7f7f5;
+  color: #202123;
 }
 
 .analysis-skill-chip.selected {
-  border-color: #111827;
-  background: #111827;
+  border-color: #202123;
+  background: #202123;
   color: #ffffff;
 }
 
@@ -484,20 +567,32 @@ onMounted(() => {
 }
 
 .analysis-controls input {
-  width: 88px;
+  width: 86px;
+}
+
+.analysis-field textarea {
+  min-height: 64px;
+}
+
+.stock-analysis-page .empty-state {
+  display: grid;
+  min-height: 92px;
+  place-items: center;
+  padding: 20px;
+  color: #8a8a85;
 }
 
 .analysis-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-  gap: 12px;
+  grid-template-columns: minmax(420px, 0.95fr) minmax(460px, 1.05fr);
+  gap: 14px;
   align-items: start;
 }
 
 .candidate-list {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 .candidate-row {
@@ -505,8 +600,8 @@ onMounted(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 112px;
   gap: 10px;
-  border: 1px solid #ececf1;
-  border-radius: 12px;
+  border: 1px solid #e4e4e1;
+  border-radius: 10px;
   background: #ffffff;
   padding: 12px;
   text-align: left;
@@ -515,9 +610,9 @@ onMounted(() => {
 
 .candidate-row.selected,
 .candidate-row:hover {
-  border-color: #b7b7b2;
-  background: #fcfcfb;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  border-color: #c7c7c2;
+  background: #fafaf9;
+  box-shadow: none;
 }
 
 .candidate-main,
@@ -541,6 +636,8 @@ onMounted(() => {
 .analysis-result {
   display: grid;
   gap: 12px;
+  border-top: 1px solid #ececea;
+  padding-top: 16px;
 }
 
 .analysis-result-head b {
@@ -638,8 +735,8 @@ onMounted(() => {
 }
 
 .analysis-metrics div {
-  border: 1px solid #ececf1;
-  border-radius: 12px;
+  border: 1px solid #e4e4e1;
+  border-radius: 10px;
   padding: 12px;
 }
 

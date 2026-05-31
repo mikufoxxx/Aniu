@@ -1049,6 +1049,12 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
         "risk_ai",
     ]
     assert payload["agent_recommendations"][0]["action"] == "WATCH"
+    assert 1 <= len(payload["agent_recommendations"][0]["picks"]) <= 3
+    assert payload["agent_recommendations"][0]["playbook"]["mode"] in {
+        "short_swing",
+        "quant_rotation",
+        "long_defensive",
+    }
     assert payload["agent_recommendations"][0]["decision_context"]["action"] == "WATCH"
     assert stored_run.phase == "morning_recommendation"
     assert stored_run.candidate_payload["agent_recommendations"][0]["agent_id"] == "momentum_ai"
@@ -1283,6 +1289,118 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["decision"]["target_allocation_ratio"] >= 0
     assert payload["llm_decision"]["used"] is False
     assert "easy_tdx" in payload["data_sources"]
+
+    _reset_state()
+
+
+def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+
+    quotes = [
+        {
+            "symbol": "000001.SZ",
+            "name": "平安银行",
+            "price": 12.0,
+            "change_pct": 4.0,
+            "amount": 1_000_000_000,
+            "turnover": 1.0,
+            "volume_ratio": 1.8,
+            "source": "easy_tdx",
+            "timestamp": "2026-05-29 10:20:00",
+        },
+        {
+            "symbol": "600519.SH",
+            "name": "贵州茅台",
+            "price": 100.0,
+            "change_pct": 1.0,
+            "amount": 800_000_000,
+            "turnover": 0.4,
+            "volume_ratio": 1.1,
+            "source": "tencent",
+            "timestamp": "2026-05-29 10:20:00",
+        },
+        {
+            "symbol": "300750.SZ",
+            "name": "宁德时代",
+            "price": 80.0,
+            "change_pct": 2.2,
+            "amount": 600_000_000,
+            "turnover": 0.8,
+            "volume_ratio": 1.3,
+            "source": "easy_tdx",
+            "timestamp": "2026-05-29 10:20:00",
+        },
+        {
+            "symbol": "601318.SH",
+            "name": "中国平安",
+            "price": 40.0,
+            "change_pct": 0.8,
+            "amount": 500_000_000,
+            "turnover": 0.5,
+            "volume_ratio": 1.0,
+            "source": "tencent",
+            "timestamp": "2026-05-29 10:20:00",
+        },
+    ]
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        requested = set(symbols)
+        return [item for item in quotes if item["symbol"] in requested]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    symbols = ["000001.SZ", "600519.SH", "300750.SZ", "601318.SH"]
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            for symbol, close in (
+                ("000001.SZ", 10),
+                ("600519.SH", 100),
+                ("300750.SZ", 78),
+                ("601318.SH", 39),
+            ):
+                db.add(DailyBar(symbol=symbol, trade_date="20260527", close=close, amount=500))
+                db.add(DailyBar(symbol=symbol, trade_date="20260528", close=close + 1, amount=600))
+        agent = {
+            "id": "detail_ai",
+            "name": "详情 AI",
+            "style": "momentum",
+            "provider": "openai-compatible",
+            "model": "",
+            "enabled": True,
+            "prompt": "偏短线动量。",
+        }
+        assert client.post("/api/aniu/arena/agents", headers=headers, json=agent).status_code == 200
+        for phase in (
+            "morning_recommendation",
+            "intraday_trade",
+            "closing_review",
+            "nightly_learning",
+        ):
+            response = client.post(
+                "/api/aniu/arena/run",
+                headers=headers,
+                json={"phase": phase, "symbols": symbols, "initial_cash": 200000},
+            )
+            assert response.status_code == 200
+        dashboard_response = client.get(
+            "/api/aniu/arena/agents/detail_ai/dashboard",
+            headers=headers,
+        )
+
+    assert dashboard_response.status_code == 200
+    payload = dashboard_response.json()
+    assert payload["agent"]["id"] == "detail_ai"
+    assert payload["summary"]["playbook"]["mode"] == "short_swing"
+    assert payload["summary"]["total_assets"] > 0
+    assert len(payload["morning"]["recommendations"]) == 1
+    morning = payload["morning"]["recommendations"][0]
+    assert 1 <= len(morning["picks"]) <= 3
+    assert len(morning["picks"]) < 4
+    assert morning["playbook"]["mode"] == "short_swing"
+    assert len(payload["intraday"]["orders"]) >= 1
+    assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"
+    assert payload["learning"]["reviews"][0]["memory_type"] == "nightly_learning"
 
     _reset_state()
 

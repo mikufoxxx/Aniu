@@ -25,6 +25,11 @@ const router = createRouter({
       component: () => import('@/views/ArenaView.vue')
     },
     {
+      path: '/arena/agents/:agentId',
+      name: 'arena-agent-detail',
+      component: () => import('@/views/ArenaAgentDetailView.vue')
+    },
+    {
       path: '/tasks',
       name: 'tasks',
       component: () => import('@/views/TasksView.vue')

@@ -700,6 +700,15 @@ class ArenaAgentMemoriesResponse(BaseModel):
     memories: list[ArenaAgentMemoryRead] = Field(default_factory=list)
 
 
+class ArenaAgentDashboardResponse(BaseModel):
+    agent: ArenaAgentRequest
+    summary: dict[str, Any] = Field(default_factory=dict)
+    morning: dict[str, Any] = Field(default_factory=dict)
+    intraday: dict[str, Any] = Field(default_factory=dict)
+    closing: dict[str, Any] = Field(default_factory=dict)
+    learning: dict[str, Any] = Field(default_factory=dict)
+
+
 class ArenaRunResponse(BaseModel):
     run_id: int
     phase: str = "intraday_trade"

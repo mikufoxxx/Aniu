@@ -588,11 +588,26 @@ export interface ArenaAgentRecommendation {
   agent_name: string
   style: string
   action: string
+  playbook?: {
+    mode: string
+    label: string
+    holding_period: string
+  }
+  picks?: Array<{
+    symbol: string
+    name: string
+    score?: number
+    price?: number | null
+    change_pct?: number | null
+    reason?: string
+  }>
   symbol: string
   name: string
   score?: number
   price?: number | null
   reason: string
+  run_id?: number
+  created_at?: string | null
   decision_context?: Record<string, unknown>
 }
 
@@ -643,6 +658,21 @@ export interface ArenaRunPayload {
   orders: ArenaOrder[]
   data_sources: string[]
   stock_pick_snapshot?: AIStockPicksPayload | null
+}
+
+export interface ArenaAgentDashboardPayload {
+  agent: ArenaAgentConfig
+  summary: Record<string, unknown> & {
+    playbook?: {
+      mode: string
+      label: string
+      holding_period: string
+    }
+  }
+  morning: { recommendations: ArenaAgentRecommendation[] }
+  intraday: { orders: ArenaOrder[] }
+  closing: { reviews: ArenaAgentMemory[] }
+  learning: { reviews: ArenaAgentMemory[] }
 }
 
 export interface StockAnalysisPayload {

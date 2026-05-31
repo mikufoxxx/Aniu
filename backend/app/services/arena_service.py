@@ -290,23 +290,31 @@ class ArenaService:
         recommendations: list[dict[str, Any]] = []
         for index, agent in enumerate(agents):
             style = str(agent.get("style") or "balanced")
-            preferred_index = 0 if style == "momentum" else min(index, len(candidates) - 1)
-            candidate = candidates[preferred_index] if candidates else None
+            picks = self._morning_picks(
+                candidates=candidates,
+                style=style,
+                agent_index=index,
+            )
+            candidate = picks[0] if picks else None
             if candidate is None:
                 continue
+            playbook = self._playbook_for_style(style)
             recommendations.append(
                 {
                     "agent_id": str(agent.get("id") or f"agent_{index + 1}"),
                     "agent_name": str(agent.get("name") or f"AI {index + 1}"),
                     "style": style,
                     "action": "WATCH",
+                    "playbook": playbook,
+                    "picks": picks,
                     "symbol": candidate.get("symbol"),
                     "name": candidate.get("name") or candidate.get("symbol"),
                     "score": candidate.get("score"),
                     "price": candidate.get("price"),
                     "reason": (
-                        f"{style} 早盘关注 {candidate.get('symbol')}，"
-                        f"候选评分 {float(candidate.get('score') or 0):.2f}。"
+                        f"{playbook['label']} 早盘精选 {len(picks)} 只，"
+                        f"首选 {candidate.get('symbol')}，评分 "
+                        f"{float(candidate.get('score') or 0):.2f}。"
                     ),
                     "decision_context": self._decision_context(
                         snapshot_id=snapshot_id,
@@ -320,6 +328,55 @@ class ArenaService:
                 }
             )
         return recommendations
+
+    def agent_dashboard(
+        self,
+        db: Session,
+        *,
+        agent_id: str,
+    ) -> dict[str, Any] | None:
+        agent = self.get_agent(db, agent_id=agent_id)
+        if agent is None:
+            agent = self._default_agent(agent_id)
+        if agent is None:
+            return None
+
+        account = db.scalar(
+            select(ArenaAccount)
+            .options(selectinload(ArenaAccount.positions))
+            .where(ArenaAccount.agent_id == agent_id)
+        )
+        summary = self._account_summary(agent=agent, account=account)
+        return {
+            "agent": agent,
+            "summary": summary,
+            "morning": {
+                "recommendations": self._recent_agent_recommendations(
+                    db,
+                    agent_id=agent_id,
+                    limit=10,
+                )
+            },
+            "intraday": {
+                "orders": self._recent_orders(db, agent_id=agent_id, limit=20)
+            },
+            "closing": {
+                "reviews": self.recent_agent_memories_by_type(
+                    db,
+                    agent_id=agent_id,
+                    memory_type="closing_review",
+                    limit=10,
+                )
+            },
+            "learning": {
+                "reviews": self.recent_agent_memories_by_type(
+                    db,
+                    agent_id=agent_id,
+                    memory_type="nightly_learning",
+                    limit=10,
+                )
+            },
+        }
 
     def _closing_reviews(
         self,
@@ -443,6 +500,25 @@ class ArenaService:
         memories = db.scalars(
             select(ArenaAgentMemory)
             .where(ArenaAgentMemory.agent_id == agent_id)
+            .order_by(ArenaAgentMemory.id.desc())
+            .limit(max(1, min(limit, 100)))
+        ).all()
+        return [self._memory_payload(memory) for memory in memories]
+
+    def recent_agent_memories_by_type(
+        self,
+        db: Session,
+        *,
+        agent_id: str,
+        memory_type: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        memories = db.scalars(
+            select(ArenaAgentMemory)
+            .where(
+                ArenaAgentMemory.agent_id == agent_id,
+                ArenaAgentMemory.memory_type == memory_type,
+            )
             .order_by(ArenaAgentMemory.id.desc())
             .limit(max(1, min(limit, 100)))
         ).all()
@@ -583,6 +659,44 @@ class ArenaService:
             "enabled": item.enabled,
             "prompt": item.prompt,
         }
+
+    def _default_agent(self, agent_id: str) -> dict[str, Any] | None:
+        match = next((item for item in DEFAULT_AGENTS if item["id"] == agent_id), None)
+        if match is None:
+            return None
+        return {
+            "id": match["id"],
+            "name": match["name"],
+            "style": match["style"],
+            "provider": "openai-compatible",
+            "model": "",
+            "enabled": True,
+            "prompt": "",
+        }
+
+    def _account_summary(
+        self,
+        *,
+        agent: dict[str, Any],
+        account: ArenaAccount | None,
+    ) -> dict[str, Any]:
+        if account is None:
+            return {
+                "agent_id": agent["id"],
+                "agent_name": agent["name"],
+                "style": agent["style"],
+                "cash": 0,
+                "position_value": 0,
+                "total_assets": 0,
+                "return_ratio": 0,
+                "order_count": 0,
+                "realized_pnl": 0,
+                "positions": [],
+                "playbook": self._playbook_for_style(str(agent.get("style") or "balanced")),
+            }
+        payload = self._leaderboard_item(account, include_positions=True)
+        payload["playbook"] = self._playbook_for_style(account.style)
+        return payload
 
     def _decide_for_agent(
         self,
@@ -1235,6 +1349,86 @@ class ArenaService:
         if include_positions:
             payload["positions"] = position_payloads
         return payload
+
+    def _morning_picks(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        style: str,
+        agent_index: int,
+    ) -> list[dict[str, Any]]:
+        if not candidates:
+            return []
+        if style == "risk_control":
+            ordered = sorted(
+                candidates,
+                key=lambda item: (
+                    float(item.get("change_pct") or 0),
+                    float(item.get("score") or 0),
+                ),
+                reverse=True,
+            )
+        elif style == "balanced":
+            ordered = candidates[agent_index:] + candidates[:agent_index]
+        else:
+            ordered = candidates
+        return [self._pick_payload(candidate) for candidate in ordered[:3]]
+
+    def _pick_payload(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "symbol": candidate.get("symbol"),
+            "name": candidate.get("name") or candidate.get("symbol"),
+            "score": candidate.get("score"),
+            "price": candidate.get("price"),
+            "change_pct": candidate.get("change_pct"),
+            "reason": candidate.get("rationale") or "",
+        }
+
+    def _playbook_for_style(self, style: str) -> dict[str, str]:
+        if style == "momentum":
+            return {
+                "mode": "short_swing",
+                "label": "短线动量",
+                "holding_period": "1-5个交易日",
+            }
+        if style == "risk_control":
+            return {
+                "mode": "long_defensive",
+                "label": "长线稳健",
+                "holding_period": "2周以上",
+            }
+        return {
+            "mode": "quant_rotation",
+            "label": "量化轮动",
+            "holding_period": "3-10个交易日",
+        }
+
+    def _recent_agent_recommendations(
+        self,
+        db: Session,
+        *,
+        agent_id: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        runs = db.scalars(
+            select(ArenaRun)
+            .where(ArenaRun.phase == "morning_recommendation")
+            .order_by(ArenaRun.id.desc())
+            .limit(max(1, min(limit * 5, 100)))
+        ).all()
+        recommendations: list[dict[str, Any]] = []
+        for run in runs:
+            payload = run.candidate_payload or {}
+            for item in payload.get("agent_recommendations") or []:
+                if item.get("agent_id") != agent_id:
+                    continue
+                enriched = dict(item)
+                enriched["run_id"] = run.id
+                enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
+                recommendations.append(enriched)
+                if len(recommendations) >= limit:
+                    return recommendations
+        return recommendations
 
     def _recent_orders(
         self,

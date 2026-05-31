@@ -71,26 +71,51 @@
         </div>
 
         <div class="arena-agent-grid">
-          <div v-for="agent in agents" :key="agent.id" class="arena-agent-card">
+          <div
+            v-for="agent in agents"
+            :key="agent.id"
+            class="arena-agent-card arena-agent-card-link"
+            role="button"
+            tabindex="0"
+            @click="openAgent(agent.id)"
+            @keydown.enter="openAgent(agent.id)"
+          >
             <div class="arena-agent-card-head">
               <strong>{{ agent.name || agent.id || '新AI' }}</strong>
+              <span>{{ agent.enabled ? '启用' : '停用' }}</span>
+            </div>
+            <div class="arena-agent-summary">
+              <b>{{ styleText(agent.style) }}</b>
+              <span>{{ agent.model || '默认模型' }}</span>
+              <span>资产 {{ formatAmount(agentSummary(agent.id).total_assets) }}</span>
+              <span>收益 {{ formatPercent(agentSummary(agent.id).return_ratio) }}</span>
+            </div>
+            <div class="arena-agent-actions">
               <button
                 class="button ghost small soft-header-button overview-refresh-button"
+                type="button"
+                @click.stop="openAgent(agent.id)"
+              >
+                详情
+              </button>
+              <button
+                class="button ghost small soft-header-button overview-refresh-button"
+                type="button"
                 :disabled="agentSaving"
-                @click="removeAgent(agent.id)"
+                @click.stop="removeAgent(agent.id)"
               >
                 删除
               </button>
             </div>
-            <label>
+            <label @click.stop>
               <span>ID</span>
               <input v-model="agent.id" type="text" />
             </label>
-            <label>
+            <label @click.stop>
               <span>名称</span>
               <input v-model="agent.name" type="text" />
             </label>
-            <label>
+            <label @click.stop>
               <span>风格</span>
               <select v-model="agent.style">
                 <option value="momentum">动量型</option>
@@ -98,11 +123,11 @@
                 <option value="risk_control">风控型</option>
               </select>
             </label>
-            <label>
+            <label @click.stop>
               <span>模型</span>
               <input v-model="agent.model" type="text" placeholder="deepseek-chat" />
             </label>
-            <label class="arena-inline-check">
+            <label class="arena-inline-check" @click.stop>
               <input v-model="agent.enabled" type="checkbox" />
               <b>启用</b>
             </label>
@@ -603,6 +628,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { AIMarketContextPayload, ArenaAgentConfig, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, DailyRangeRefreshPayload, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunRecord, MarketReport, MarketReportPerformancePayload, MarketSourceHealthPayload, QuantCandidate, QuantDatasetPayload, StockAnalysisPayload } from '@/types'
 
@@ -616,6 +642,7 @@ const defaultAgents: ArenaAgentConfig[] = [
   { id: 'risk_ai', name: '风控 AI', style: 'risk_control', provider: 'openai-compatible', model: '', enabled: true, prompt: '' },
 ]
 
+const router = useRouter()
 const symbolsText = ref(defaultSymbols.join('\n'))
 const initialCash = ref(200000)
 const loading = ref(false)
@@ -652,6 +679,19 @@ const displayLeaderboard = computed(() => {
   if (arenaLeaderboard.value?.items.length) return arenaLeaderboard.value.items
   return arenaResult.value?.leaderboard ?? []
 })
+
+function agentSummary(agentId: string): Record<string, number> {
+  const item = displayLeaderboard.value.find((rank) => rank.agent_id === agentId)
+  return {
+    total_assets: item?.total_assets ?? 0,
+    return_ratio: item?.return_ratio ?? 0,
+  }
+}
+
+function openAgent(agentId: string): void {
+  if (!agentId) return
+  router.push({ name: 'arena-agent-detail', params: { agentId } })
+}
 
 function parseSymbols(): string[] {
   return symbolsText.value
@@ -1537,11 +1577,34 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.arena-agent-card-link {
+  cursor: pointer;
+}
+
 .arena-agent-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.arena-agent-summary,
+.arena-agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.arena-agent-summary b,
+.arena-agent-summary span {
+  border: 1px solid rgba(145, 170, 214, 0.14);
+  border-radius: 8px;
+  background: rgba(7, 14, 27, 0.48);
+  padding: 5px 8px;
+  color: #bfd0ea;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .arena-agent-card label {

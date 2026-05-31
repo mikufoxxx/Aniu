@@ -10,6 +10,7 @@ from app.schemas.aniu import (
     AIMarketContextResponse,
     AIStockPicksRequest,
     AIStockPicksResponse,
+    ArenaAgentDashboardResponse,
     ArenaAgentMemoriesResponse,
     ArenaAgentRequest,
     ArenaRunRequest,
@@ -401,6 +402,18 @@ def get_arena_agent(
     if agent is None:
         raise HTTPException(status_code=404, detail="AI 选手不存在。")
     return agent
+
+
+@router.get("/arena/agents/{agent_id}/dashboard", response_model=ArenaAgentDashboardResponse)
+def get_arena_agent_dashboard(
+    agent_id: str,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaAgentDashboardResponse:
+    dashboard = arena_service.agent_dashboard(db, agent_id=agent_id)
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="AI 选手不存在。")
+    return dashboard
 
 
 @router.put("/arena/agents/{agent_id}", response_model=ArenaAgentRequest)

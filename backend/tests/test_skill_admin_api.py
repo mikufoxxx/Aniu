@@ -67,9 +67,10 @@ def test_skills_endpoint_lists_builtin_skills(monkeypatch, tmp_path) -> None:
     assert builtin_utils["can_delete"] is False
     assert builtin_utils["always_enabled"] is True
     assert "location" not in builtin_utils
-    assert "support_files" not in builtin_utils
-    assert "tool_names" not in builtin_utils
-    assert "compatibility_level" not in builtin_utils
+    assert isinstance(builtin_utils["support_files"], list)
+    assert isinstance(builtin_utils["tool_names"], list)
+    assert builtin_utils["compatibility_level"] == "native"
+    assert builtin_utils["compatibility_summary"]
 
     database_module._engine = None
     database_module._session_local = None

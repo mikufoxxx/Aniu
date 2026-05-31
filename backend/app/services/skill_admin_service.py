@@ -239,17 +239,9 @@ class SkillAdminService:
         }
 
     def _build_skill_list_item(self, pkg: Any, *, enabled: bool) -> dict[str, Any]:
-        return {
-            "id": pkg.id,
-            "name": pkg.name,
-            "description": pkg.description,
-            "source": pkg.source,
-            "role": getattr(pkg, "role", "standard"),
-            "enabled": enabled,
-            "can_disable": bool(getattr(pkg, "can_disable", False)),
-            "can_delete": bool(getattr(pkg, "can_delete", False)),
-            "always_enabled": bool(getattr(pkg, "always_enabled", False)),
-        }
+        item = self._build_skill_info(pkg, enabled=enabled)
+        item.pop("location", None)
+        return item
 
     def _sorted_packages(self) -> list[Any]:
         return sorted(

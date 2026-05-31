@@ -76,10 +76,6 @@ class SkillListItemRead(BaseModel):
     can_disable: bool
     can_delete: bool
     always_enabled: bool
-
-
-class SkillInfoRead(SkillListItemRead):
-    location: str
     has_handler: bool
     tool_names: list[str] = Field(default_factory=list)
     run_types: list[str] = Field(default_factory=list)
@@ -92,6 +88,10 @@ class SkillInfoRead(SkillListItemRead):
     clawhub_version: str | None = None
     clawhub_url: str | None = None
     published_at: datetime | None = None
+
+
+class SkillInfoRead(SkillListItemRead):
+    location: str
 
 
 class SkillImportClawHubRequest(BaseModel):

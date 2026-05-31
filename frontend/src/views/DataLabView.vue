@@ -323,7 +323,7 @@ onMounted(() => {
 .source-list,
 .run-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .source-list article,
@@ -337,10 +337,20 @@ onMounted(() => {
   padding: 14px;
 }
 
+.source-list article {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
 .source-list article > div {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
 }
 
 .source-list strong,
@@ -349,13 +359,28 @@ onMounted(() => {
   color: #111827;
 }
 
+.source-list strong {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
 .source-list b {
-  justify-self: start;
+  justify-self: end;
   border-radius: 999px;
   background: #f3f4f6;
   color: #374151;
-  padding: 5px 9px;
+  padding: 4px 8px;
   font-size: 12px;
+  line-height: 1;
+}
+
+.source-list p {
+  grid-column: 1 / -1;
+  display: -webkit-box;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
 }
 
 .coverage-metrics,

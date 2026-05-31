@@ -976,19 +976,6 @@ export interface SkillListItem {
   can_disable: boolean
   can_delete: boolean
   always_enabled: boolean
-}
-
-export interface SkillInfo {
-  id: string
-  name: string
-  description: string
-  location: string
-  source: 'builtin' | 'workspace'
-  role: SkillRole
-  enabled: boolean
-  can_disable: boolean
-  can_delete: boolean
-  always_enabled: boolean
   has_handler: boolean
   tool_names: string[]
   run_types: string[]
@@ -1001,4 +988,8 @@ export interface SkillInfo {
   clawhub_version: string | null
   clawhub_url: string | null
   published_at: string | null
+}
+
+export interface SkillInfo extends SkillListItem {
+  location: string
 }

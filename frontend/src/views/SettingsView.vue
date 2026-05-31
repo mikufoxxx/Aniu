@@ -91,29 +91,42 @@
             :disabled="skillsBusy"
             @click="reloadSkills"
           >
+            <span class="material-symbols-rounded" aria-hidden="true">sync</span>
             重新扫描
           </button>
         </div>
 
         <div class="skills-toolbar">
           <div class="skills-overview-card">
-            <span class="meta-label">已安装技能</span>
-            <strong>总数 {{ installedOverview.total }}</strong>
+            <span class="material-symbols-rounded skills-overview-icon" aria-hidden="true">inventory_2</span>
+            <div>
+              <span class="meta-label">已安装技能</span>
+              <strong>{{ installedOverview.total }}</strong>
+            </div>
             <div class="skills-overview-breakdown">
               <span>运行时技能 {{ installedOverview.runtime }}</span>
               <span>标准技能 {{ installedOverview.standard }}</span>
             </div>
           </div>
           <div class="skills-overview-card">
-            <span class="meta-label">已启用技能</span>
-            <strong>总数 {{ enabledOverview.total }}</strong>
+            <span class="material-symbols-rounded skills-overview-icon" aria-hidden="true">toggle_on</span>
+            <div>
+              <span class="meta-label">已启用技能</span>
+              <strong>{{ enabledOverview.total }}</strong>
+            </div>
             <div class="skills-overview-breakdown">
               <span>运行时技能 {{ enabledOverview.runtime }}</span>
               <span>标准技能 {{ enabledOverview.standard }}</span>
             </div>
           </div>
           <div class="skills-import-cluster">
-            <span class="meta-label skill-import-hint">输入 SkillHub 链接或添加本地 zip 技能包</span>
+            <div class="skills-import-head">
+              <span class="material-symbols-rounded" aria-hidden="true">add_link</span>
+              <div>
+                <span class="meta-label skill-import-hint">导入技能</span>
+                <p>SkillHub 链接或 zip 技能包</p>
+              </div>
+            </div>
             <div class="skills-import-inline">
               <label class="field skill-import-field">
                 <div class="skill-import-control" :class="{ 'is-disabled': skillsBusy }">
@@ -129,6 +142,7 @@
                     :disabled="skillsBusy"
                     @click="openImportFileDialog"
                   >
+                    <span class="material-symbols-rounded" aria-hidden="true">upload_file</span>
                     {{ selectedArchive ? '更换文件' : '添加文件' }}
                   </button>
                 </div>
@@ -147,7 +161,8 @@
                 :disabled="skillsBusy"
                 @click="importSkill"
               >
-                导入技能
+                <span class="material-symbols-rounded" aria-hidden="true">move_to_inbox</span>
+                导入
               </button>
             </div>
             <p v-if="selectedArchive" class="skill-import-selected">
@@ -159,29 +174,57 @@
         <div v-if="skillsErrorMessage" class="error-banner">{{ skillsErrorMessage }}</div>
 
         <div v-if="skills.length" class="skill-card-list">
-          <article v-for="skill in skills" :key="skill.id" class="skill-card">
-            <div class="skill-card-copy">
-              <div class="skill-title-row">
-                <strong>{{ skill.name }}</strong>
-                <span
-                  class="skill-source-badge"
-                  :class="skill.role === 'runtime' ? 'is-system' : 'is-user'"
-                >
-                  {{ skill.role === 'runtime' ? '运行时技能' : skill.source === 'builtin' ? '内置技能' : '用户技能' }}
+          <article v-for="skill in skills" :key="skill.id" class="skill-card" :class="{ 'is-disabled': !skill.enabled }">
+            <div class="skill-card-main">
+              <div class="skill-card-head">
+                <span class="skill-icon-tile" :class="skillSourceClass(skill)" aria-hidden="true">
+                  <span class="material-symbols-rounded">{{ skillIcon(skill) }}</span>
                 </span>
+                <div class="skill-title-block">
+                  <div class="skill-title-row">
+                    <strong>{{ skill.name }}</strong>
+                    <span class="skill-source-badge" :class="skillSourceClass(skill)">
+                      {{ skillSourceLabel(skill) }}
+                    </span>
+                    <span class="skill-source-badge" :class="skillCompatibilityClass(skill)">
+                      {{ skillCompatibilityLabel(skill.compatibility_level) }}
+                    </span>
+                  </div>
+                  <p class="skill-card-subtitle">{{ skillSubtitle(skill) }}</p>
+                </div>
               </div>
 
-              <div class="skill-info-stack">
-                <div class="skill-info-block skill-info-description-block">
-                  <span class="meta-label">技能介绍</span>
-                  <p class="skill-card-description">
-                    {{ skill.description || '暂无技能描述。' }}
-                  </p>
+              <p class="skill-card-description">
+                {{ skill.description || '暂无技能描述。' }}
+              </p>
+
+              <div class="skill-card-meta-grid">
+                <div>
+                  <span>工具</span>
+                  <strong>{{ skillToolCount(skill) }}</strong>
                 </div>
+                <div>
+                  <span>运行域</span>
+                  <strong>{{ skillRunTypeLabel(skill) }}</strong>
+                </div>
+                <div>
+                  <span>执行</span>
+                  <strong>{{ skillExecutionLabel(skill) }}</strong>
+                </div>
+                <div>
+                  <span>文件</span>
+                  <strong>{{ skillSupportFileCount(skill) }}</strong>
+                </div>
+              </div>
+
+              <div v-if="skillPreviewTools(skill).length" class="skill-chip-row">
+                <span v-for="tool in skillPreviewTools(skill)" :key="tool" class="skill-chip">
+                  {{ tool }}
+                </span>
               </div>
             </div>
 
-            <div class="skill-card-footer">
+            <div class="skill-card-actions">
               <button
                 v-if="skill.can_delete"
                 type="button"
@@ -189,16 +232,16 @@
                 :disabled="skillsBusy"
                 @click="deleteSkill(skill)"
               >
+                <span class="material-symbols-rounded" aria-hidden="true">delete</span>
                 删除
               </button>
-              <button
+              <span
                 v-else
-                type="button"
-                class="button ghost small soft-header-button skill-delete-action is-placeholder"
-                disabled
+                class="skill-lock-chip"
               >
+                <span class="material-symbols-rounded" aria-hidden="true">lock</span>
                 不可删除
-              </button>
+              </span>
               <button
                 type="button"
                 class="skill-toggle"
@@ -209,7 +252,7 @@
                 @click="toggleSkill(skill)"
               >
                 <span class="skill-toggle-thumb" aria-hidden="true"></span>
-                {{ skill.enabled ? '启用' : '停用' }}
+                {{ skill.enabled ? '已启用' : '已停用' }}
               </button>
             </div>
           </article>
@@ -229,7 +272,7 @@ import { storeToRefs } from 'pinia'
 
 import { useSkillManager } from '@/composables/useSkillManager'
 import { useAppStore } from '@/stores/legacy'
-import type { SkillListItem } from '@/types'
+import type { SkillCompatibilityLevel, SkillListItem } from '@/types'
 
 const store = useAppStore()
 const { settings, busy, errorMessage } = storeToRefs(store)
@@ -324,6 +367,63 @@ async function deleteSkill(skill: SkillListItem) {
 
 function canToggleSkill(skill: SkillListItem) {
   return skill.can_disable
+}
+
+function skillSourceLabel(skill: SkillListItem) {
+  if (skill.role === 'runtime') return '运行时'
+  return skill.source === 'builtin' ? '内置' : '用户'
+}
+
+function skillSourceClass(skill: SkillListItem) {
+  if (skill.role === 'runtime') return 'is-runtime'
+  return skill.source === 'builtin' ? 'is-builtin' : 'is-workspace'
+}
+
+function skillCompatibilityLabel(level: SkillCompatibilityLevel) {
+  if (level === 'native') return '原生兼容'
+  if (level === 'needs_attention') return '需校验'
+  return '提示词'
+}
+
+function skillCompatibilityClass(skill: SkillListItem) {
+  return `is-compat-${skill.compatibility_level}`
+}
+
+function skillIcon(skill: SkillListItem) {
+  if (skill.role === 'runtime') return 'memory'
+  if (skill.id.includes('chat')) return 'forum'
+  if (skill.id.includes('mx')) return 'monitoring'
+  if (skill.source === 'workspace') return 'extension'
+  return 'deployed_code'
+}
+
+function skillSubtitle(skill: SkillListItem) {
+  const segments = [skill.id]
+  if (skill.category) segments.push(skill.category)
+  if (skill.clawhub_version) segments.push(`v${skill.clawhub_version}`)
+  return segments.join(' · ')
+}
+
+function skillToolCount(skill: SkillListItem) {
+  return skill.tool_names.length
+}
+
+function skillRunTypeLabel(skill: SkillListItem) {
+  if (!skill.run_types.length) return '全局'
+  return skill.run_types.slice(0, 2).join(' / ')
+}
+
+function skillExecutionLabel(skill: SkillListItem) {
+  if (skill.role === 'runtime') return '底座'
+  return skill.has_handler ? '原生' : '运行时'
+}
+
+function skillSupportFileCount(skill: SkillListItem) {
+  return skill.support_files.length
+}
+
+function skillPreviewTools(skill: SkillListItem) {
+  return skill.tool_names.slice(0, 4)
 }
 
 onMounted(async () => {

@@ -74,6 +74,7 @@
             :disabled="busy"
             @click="saveSettingsWithProviderConfigs"
           >
+            <span class="material-symbols-rounded" aria-hidden="true">save</span>
             保存设置
           </button>
         </div>

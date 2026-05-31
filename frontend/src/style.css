@@ -258,8 +258,21 @@ textarea {
 }
 
 .page-shell.is-sidebar-collapsed .app-brand {
-  justify-content: center;
-  flex-wrap: wrap;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+}
+
+.page-shell.is-sidebar-collapsed .app-brand-logo {
+  width: 32px;
+  height: 32px;
+}
+
+.page-shell.is-sidebar-collapsed .sidebar-collapse-button {
+  margin-left: 0;
+  margin-inline: auto;
+  width: 32px;
+  height: 32px;
 }
 
 .page-shell.is-sidebar-collapsed .app-brand-copy,
@@ -3485,10 +3498,18 @@ textarea {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   border: 1px solid transparent;
   border-radius: 10px;
   padding: 8px 12px;
   transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.button .material-symbols-rounded {
+  font-size: 18px;
 }
 
 .button:hover:not(:disabled) {

@@ -10,8 +10,14 @@
             <p class="arena-muted">按总资产排序；点击卡片进入 AI 的早盘、盘中、收盘、学习详情。</p>
           </div>
           <div class="arena-panel-actions">
-            <button class="button ghost small" :disabled="saving" @click="addAgent">新增 AI</button>
-            <button class="button ghost small" :disabled="loading" @click="loadArenaState">刷新</button>
+            <button class="button ghost small" :disabled="saving" @click="addAgent">
+              <span class="material-symbols-rounded" aria-hidden="true">person_add</span>
+              新增 AI
+            </button>
+            <button class="button ghost small" :disabled="loading" @click="loadArenaState">
+              <span class="material-symbols-rounded" aria-hidden="true">sync</span>
+              刷新
+            </button>
           </div>
         </div>
 
@@ -30,6 +36,7 @@
               type="button"
               @click.stop="openAgentConfig(agent.id)"
             >
+              <span class="material-symbols-rounded" aria-hidden="true">settings</span>
               配置
             </button>
             <div class="arena-rank">#{{ index + 1 }}</div>
@@ -79,7 +86,10 @@
             <h2>配置 AI</h2>
             <p class="arena-muted">只修改当前 AI 的竞技场参数。</p>
           </div>
-          <button class="button ghost small" type="button" @click="closeAgentConfig">关闭</button>
+          <button class="button ghost small" type="button" @click="closeAgentConfig">
+            <span class="material-symbols-rounded" aria-hidden="true">close</span>
+            关闭
+          </button>
         </div>
 
         <div class="arena-agent-editor">
@@ -109,8 +119,12 @@
         </div>
 
         <div class="arena-modal-actions">
-          <button class="button ghost small" type="button" @click="removeConfigAgent">删除</button>
+          <button class="button ghost small" type="button" @click="removeConfigAgent">
+            <span class="material-symbols-rounded" aria-hidden="true">delete</span>
+            删除
+          </button>
           <button class="button primary small" :disabled="saving" type="button" @click="saveConfigAgent">
+            <span class="material-symbols-rounded" aria-hidden="true">save</span>
             {{ saving ? '保存中...' : '保存配置' }}
           </button>
         </div>

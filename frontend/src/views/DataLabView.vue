@@ -9,7 +9,10 @@
             <h2>数据源</h2>
             <p class="data-muted">低频实时、日线和补充数据的使用边界。</p>
           </div>
-          <button class="button ghost small" :disabled="loading" @click="loadDataLab">刷新状态</button>
+          <button class="button ghost small" :disabled="loading" @click="loadDataLab">
+            <span class="material-symbols-rounded" aria-hidden="true">sync</span>
+            刷新状态
+          </button>
         </div>
         <div class="source-list">
           <article v-for="source in sourceHealth?.sources || []" :key="source.id">
@@ -60,6 +63,7 @@
             <p class="data-muted">异步刷新历史数据、候选集和日报。</p>
           </div>
           <button class="button primary small" :disabled="maintenanceRunning" @click="startMaintenance">
+            <span class="material-symbols-rounded" aria-hidden="true">database_upload</span>
             {{ maintenanceRunning ? '维护中...' : '启动维护' }}
           </button>
         </div>
@@ -90,6 +94,7 @@
             <p class="data-muted">用 Tushare 历史数据验证量化规则。</p>
           </div>
           <button class="button primary small" :disabled="backtesting" @click="runBacktest">
+            <span class="material-symbols-rounded" aria-hidden="true">ssid_chart</span>
             {{ backtesting ? '回测中...' : '运行回测' }}
           </button>
         </div>

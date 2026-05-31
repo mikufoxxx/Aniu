@@ -15,6 +15,7 @@
               <input v-model.number="limit" min="5" max="50" type="number" />
             </label>
             <button class="button primary small" :disabled="loading" @click="loadCandidates">
+              <span class="material-symbols-rounded" aria-hidden="true">filter_alt</span>
               {{ loading ? '计算中...' : '生成候选' }}
             </button>
           </div>
@@ -42,6 +43,7 @@
             <p class="quant-muted">同一股票池对比动量、分散、低波动策略，结果可供 AI 学习。</p>
           </div>
           <button class="button primary small" :disabled="researching" @click="runResearch">
+            <span class="material-symbols-rounded" aria-hidden="true">model_training</span>
             {{ researching ? '研究中...' : '研究策略' }}
           </button>
         </div>

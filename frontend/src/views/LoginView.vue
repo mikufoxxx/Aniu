@@ -23,7 +23,10 @@
 
         <p v-if="errorMessage" class="login-error">{{ errorMessage }}</p>
 
-        <button class="button primary login-submit" :disabled="submitting" type="submit">登录</button>
+        <button class="button primary login-submit" :disabled="submitting" type="submit">
+          <span class="material-symbols-rounded" aria-hidden="true">login</span>
+          登录
+        </button>
       </form>
     </section>
   </div>

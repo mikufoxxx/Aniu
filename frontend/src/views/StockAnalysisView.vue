@@ -15,6 +15,7 @@
               <input v-model.number="candidateLimit" min="1" max="5" type="number" />
             </label>
             <button class="button primary small" :disabled="loadingCandidates" @click="loadCandidates">
+              <span class="material-symbols-rounded" aria-hidden="true">auto_awesome</span>
               {{ loadingCandidates ? '选股中...' : '帮我选' }}
             </button>
           </div>
@@ -62,6 +63,7 @@
             <p class="analysis-muted">选择股票后生成交易动作、理由和数据源。</p>
           </div>
           <button class="button primary small" :disabled="!selectedSymbol || analyzing" @click="analyzeSelected">
+            <span class="material-symbols-rounded" aria-hidden="true">analytics</span>
             {{ analyzing ? '分析中...' : '分析选中股票' }}
           </button>
         </div>

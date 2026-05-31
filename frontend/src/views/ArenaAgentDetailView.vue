@@ -8,6 +8,7 @@
         </div>
         <div class="panel-head-actions">
           <RouterLink class="button ghost small soft-header-button overview-refresh-button" to="/arena">
+            <span class="material-symbols-rounded" aria-hidden="true">arrow_back</span>
             返回竞技场
           </RouterLink>
           <button
@@ -16,6 +17,7 @@
             :disabled="loading"
             @click="loadDashboard"
           >
+            <span class="material-symbols-rounded" aria-hidden="true">sync</span>
             刷新
           </button>
         </div>
@@ -67,6 +69,7 @@
             :disabled="runningPhase === activeTab.phase"
             @click="runPhase(activeTab.phase)"
           >
+            <span class="material-symbols-rounded" aria-hidden="true">play_arrow</span>
             {{ runningPhase === activeTab.phase ? '运行中…' : activeTab.action }}
           </button>
         </div>

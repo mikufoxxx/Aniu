@@ -40,6 +40,15 @@ class Settings(BaseSettings):
     openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
+    forecast_ai_base_url: str | None = Field(default=None, alias="FORECAST_AI_BASE_URL")
+    forecast_ai_api_key: str | None = Field(default=None, alias="FORECAST_AI_API_KEY")
+    forecast_ai_models: str = Field(
+        default=(
+            "gpt-5.5,deepseek-v4-flash,grok-4.20-0309-non-reasoning,"
+            "minimax-m2.7,deepseek-v4-pro"
+        ),
+        alias="FORECAST_AI_MODELS",
+    )
 
     account_overview_cache_ttl_seconds: int = Field(
         default=30, alias="ACCOUNT_OVERVIEW_CACHE_TTL_SECONDS"
@@ -82,6 +91,8 @@ class Settings(BaseSettings):
         "tushare_api_url",
         "openai_base_url",
         "openai_api_key",
+        "forecast_ai_base_url",
+        "forecast_ai_api_key",
         "app_login_password",
         mode="before",
     )

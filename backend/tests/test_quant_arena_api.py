@@ -16,6 +16,7 @@ from app.db.models import (
     AppSettings,
     ArenaAccount,
     ArenaAgentMemory,
+    ArenaOrder,
     ArenaRun,
     ArenaPosition,
     DailyBar,
@@ -30,6 +31,7 @@ from app.services.trading_calendar_service import trading_calendar_service
 
 def create_test_client(monkeypatch, tmp_path) -> TestClient:
     from app.services.aniu_service import aniu_service
+    from app.services.arena_service import arena_service
 
     monkeypatch.setenv("APP_LOGIN_PASSWORD", "release-pass")
     monkeypatch.setenv("SQLITE_DB_PATH", str(tmp_path / "quant_arena.db"))
@@ -42,6 +44,7 @@ def create_test_client(monkeypatch, tmp_path) -> TestClient:
     rate_limit_module._limiter.reset()
     aniu_service._account_overview_cache = None
     aniu_service._account_overview_cache_expires_at = None
+    arena_service._order_forecast_cache.clear()
     app = create_app()
     return TestClient(app)
 
@@ -1874,6 +1877,8 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["charts"]["interval_series"]["hourly"]
     assert len(payload["charts"]["forecast_series"]) >= 5
     assert payload["charts"]["forecast_series"][0]["trade_date"] > payload["charts"]["price_series"][-1]["trade_date"]
+    assert payload["charts"]["forecast_series"][0]["source"] == "quant_regime_projection"
+    assert "confidence" in payload["charts"]["forecast_series"][0]
     assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(payload["charts"]["price_series"][-1])
 
     _reset_state()
@@ -2320,6 +2325,96 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert payload["summary"]["charts"]["symbol_exposure"]
     assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"
     assert payload["learning"]["reviews"][0]["memory_type"] == "nightly_learning"
+
+    _reset_state()
+
+
+def test_arena_order_forecast_returns_multi_model_analysis(monkeypatch, tmp_path) -> None:
+    from app.services.llm_service import llm_service
+
+    monkeypatch.setenv("FORECAST_AI_BASE_URL", "https://ai.example/v1")
+    monkeypatch.setenv("FORECAST_AI_API_KEY", "forecast-key")
+    monkeypatch.setenv("FORECAST_AI_MODELS", "model-a,model-b")
+    calls: list[str] = []
+
+    def fake_call_llm(*, base_url: str, api_key: str, payload: dict, timeout_seconds: int):
+        calls.append(str(payload["model"]))
+        assert base_url == "https://ai.example/v1"
+        assert api_key == "forecast-key"
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "direction": "bullish",
+                                "confidence": 82,
+                                "target_price": 12.8,
+                                "stop_loss": 10.6,
+                                "support": 10.8,
+                                "resistance": 12.2,
+                                "buy_zone": [10.9, 11.2],
+                                "sell_zone": [12.5, 12.9],
+                                "key_points": ["MA5上穿MA20", "成交额放大", "MACD柱改善"],
+                                "risk_points": ["跌破10.6失效", "压力位需放量突破"],
+                                "analysis": "短线趋势向上，价格站回短均线后量能改善，若能突破前高压力，风险收益比尚可。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(symbol="000001.SZ", trade_date="20260524", open=10.0, high=10.4, low=9.9, close=10.2, amount=500),
+                    DailyBar(symbol="000001.SZ", trade_date="20260525", open=10.2, high=10.7, low=10.1, close=10.6, amount=650),
+                    DailyBar(symbol="000001.SZ", trade_date="20260526", open=10.6, high=11.0, low=10.5, close=10.9, amount=800),
+                    DailyBar(symbol="000001.SZ", trade_date="20260527", open=10.9, high=11.4, low=10.8, close=11.2, amount=1100),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", open=11.2, high=11.8, low=11.0, close=11.6, amount=1500),
+                ]
+            )
+            run = ArenaRun(status="completed", phase="intraday_trade", initial_cash=200000)
+            db.add(run)
+            db.flush()
+            order = ArenaOrder(
+                arena_run_id=run.id,
+                agent_id="forecast_ai",
+                agent_name="预测AI",
+                style="momentum",
+                action="BUY",
+                symbol="000001.SZ",
+                name="平安银行",
+                quantity=1000,
+                price=11.6,
+                amount=11600,
+                remaining_cash=188400,
+                reason="测试预测",
+            )
+            db.add(order)
+            db.flush()
+            order_id = order.id
+
+        response = client.get(
+            f"/api/aniu/arena/orders/{order_id}/forecast",
+            headers=headers,
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "000001.SZ"
+    assert payload["technical_context"]["direction"] in {"bullish", "neutral", "bearish"}
+    assert payload["methodology"]
+    assert [item["model"] for item in payload["model_forecasts"]] == ["model-a", "model-b"]
+    assert {item["status"] for item in payload["model_forecasts"]} == {"live_ai"}
+    assert payload["model_forecasts"][0]["analysis"]
+    assert sorted(calls) == ["model-a", "model-b"]
 
     _reset_state()
 

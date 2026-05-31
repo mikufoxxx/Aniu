@@ -232,23 +232,55 @@ class ChartDataService:
             if closes[index - 1] > 0
         ]
         recent_returns = returns[-20:]
+        short_returns = returns[-5:]
         drift = mean(recent_returns) if recent_returns else 0.0
-        last_return = recent_returns[-1] if recent_returns else 0.0
-        volatility = pstdev(recent_returns) if len(recent_returns) > 1 else abs(last_return) / 2
-        expected_return = max(-0.08, min(0.08, drift * 0.55 + last_return * 0.45))
+        short_momentum = mean(short_returns) if short_returns else drift
+        volatility = pstdev(recent_returns) if len(recent_returns) > 1 else abs(short_momentum) / 2
+        support_resistance = self.support_resistance(price_series[-60:])
+        support = float(support_resistance.get("support") or min(closes[-20:]))
+        resistance = float(support_resistance.get("resistance") or max(closes[-20:]))
+        ma5 = price_series[-1].get("ma5")
+        ma20 = price_series[-1].get("ma20")
+        ma_spread = (
+            (float(ma5) - float(ma20)) / closes[-1]
+            if isinstance(ma5, (int, float)) and isinstance(ma20, (int, float)) and closes[-1] > 0
+            else 0.0
+        )
+        rsi14 = price_series[-1].get("rsi14")
+        rsi_bias = 0.0
+        if isinstance(rsi14, (int, float)):
+            if rsi14 >= 72:
+                rsi_bias = -0.006
+            elif rsi14 <= 32:
+                rsi_bias = 0.006
+        regression_slope = self._linear_regression_slope(closes[-20:])
+        trend_signal = drift * 0.35 + short_momentum * 0.30 + regression_slope * 0.25 + ma_spread * 0.10
+        expected_return = max(-0.045, min(0.045, trend_signal + rsi_bias))
         current = closes[-1]
         trade_date = self._parse_trade_date(str(price_series[-1].get("trade_date") or ""))
         points: list[dict[str, Any]] = []
         for step in range(1, horizon + 1):
-            current = max(0.01, current * (1 + expected_return))
-            confidence = volatility * math.sqrt(step)
+            resistance_gap = (resistance - current) / current if current > 0 else 0.0
+            support_gap = (current - support) / current if current > 0 else 0.0
+            pressure = 0.0
+            if resistance_gap < 0.025:
+                pressure -= 0.006
+            if support_gap < 0.025:
+                pressure += 0.006
+            mean_reversion = ((mean(closes[-20:]) - current) / current) * 0.04 if len(closes) >= 20 else 0.0
+            step_return = max(-0.05, min(0.05, expected_return * (0.94 ** (step - 1)) + pressure + mean_reversion))
+            current = max(0.01, current * (1 + step_return))
+            confidence = min(0.18, max(0.012, volatility * math.sqrt(step) * 1.35))
+            trend_score = max(-100.0, min(100.0, step_return / max(volatility, 0.0025) * 20))
             points.append(
                 {
                     "trade_date": (trade_date + timedelta(days=step)).strftime("%Y%m%d"),
                     "price": round(current, 4),
                     "upper": round(current * (1 + confidence), 4),
                     "lower": round(max(0.01, current * (1 - confidence)), 4),
-                    "source": "ai_simulation",
+                    "confidence": round(max(0.35, 0.82 - confidence * 2.2), 4),
+                    "trend_score": round(trend_score, 4),
+                    "source": "quant_regime_projection",
                 }
             )
         return points
@@ -518,6 +550,18 @@ class ChartDataService:
         for value in values[window:]:
             ema = value * alpha + ema * (1 - alpha)
         return round(ema, 6)
+
+    def _linear_regression_slope(self, values: list[float]) -> float:
+        if len(values) < 3:
+            return 0.0
+        y_mean = mean(values)
+        x_values = list(range(len(values)))
+        x_mean = mean(x_values)
+        denominator = sum((x - x_mean) ** 2 for x in x_values)
+        if denominator <= 0 or values[-1] <= 0:
+            return 0.0
+        slope = sum((x - x_mean) * (y - y_mean) for x, y in zip(x_values, values)) / denominator
+        return slope / values[-1]
 
     def _histogram(
         self,

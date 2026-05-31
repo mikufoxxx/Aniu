@@ -638,6 +638,35 @@ export interface OrderCharts {
   trade_markers: TradeMarker[]
 }
 
+export interface AIForecastCard {
+  model: string
+  status: 'live_ai' | 'quant_fallback' | 'model_error_fallback' | string
+  direction: 'bullish' | 'neutral' | 'bearish' | string
+  direction_label: string
+  confidence: number
+  target_price: number
+  stop_loss: number
+  support: number
+  resistance: number
+  buy_zone: number[]
+  sell_zone: number[]
+  key_points: string[]
+  risk_points: string[]
+  analysis: string
+}
+
+export interface ArenaOrderForecastPayload {
+  order_id: number
+  symbol: string
+  name: string
+  action: string
+  technical_context: Record<string, unknown>
+  quantitative_summary: string
+  methodology: string[]
+  model_forecasts: AIForecastCard[]
+  generated_at: string
+}
+
 export interface DistributionBucket {
   low: number
   high: number

@@ -15,6 +15,7 @@ from app.schemas.aniu import (
     ArenaAgentDashboardResponse,
     ArenaAgentMemoriesResponse,
     ArenaAgentRequest,
+    ArenaOrderForecastResponse,
     ArenaRunRequest,
     ArenaRunResponse,
     ArenaLeaderboardResponse,
@@ -460,6 +461,23 @@ def get_arena_agent_dashboard(
     if dashboard is None:
         raise HTTPException(status_code=404, detail="AI 选手不存在。")
     return dashboard
+
+
+@router.get("/arena/orders/{order_id}/forecast", response_model=ArenaOrderForecastResponse)
+def get_arena_order_forecast(
+    order_id: int,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaOrderForecastResponse:
+    try:
+        return arena_service.order_forecast(
+            db,
+            order_id=order_id,
+            refresh=refresh,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.put("/arena/agents/{agent_id}", response_model=ArenaAgentRequest)

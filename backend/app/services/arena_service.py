@@ -21,6 +21,7 @@ from app.db.models import (
 )
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.services.ai_data_request_service import ai_data_request_service
+from app.services.ai_forecast_service import ai_forecast_service
 from app.services.chart_data_service import chart_data_service
 from app.services.llm_service import llm_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
@@ -42,6 +43,8 @@ STOP_LOSS_BY_STYLE = {
 
 
 class ArenaService:
+    _order_forecast_cache: dict[int, dict[str, Any]] = {}
+
     def _utcnow(self) -> datetime:
         return datetime.now(UTC).replace(tzinfo=None)
 
@@ -583,6 +586,39 @@ class ArenaService:
                 )
             },
         }
+
+    def order_forecast(
+        self,
+        db: Session,
+        *,
+        order_id: int,
+        refresh: bool = False,
+    ) -> dict[str, Any]:
+        if not refresh and order_id in self._order_forecast_cache:
+            return self._order_forecast_cache[order_id]
+
+        order = db.get(ArenaOrder, order_id)
+        if order is None:
+            raise LookupError("竞技场订单不存在。")
+        charts = chart_data_service.order_charts(
+            db,
+            symbol=order.symbol,
+            action=order.action,
+            trade_date=order.created_at.strftime("%Y%m%d") if order.created_at else None,
+            price=order.price,
+            quantity=order.quantity,
+        )
+        forecast = ai_forecast_service.analyze_order(
+            order_id=order.id,
+            symbol=order.symbol,
+            name=order.name or order.symbol,
+            action=order.action,
+            price=order.price,
+            quantity=order.quantity,
+            price_series=charts["price_series"],
+        )
+        self._order_forecast_cache[order_id] = forecast
+        return forecast
 
     def _closing_reviews(
         self,

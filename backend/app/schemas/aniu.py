@@ -685,6 +685,18 @@ class OrderChartsRead(BaseModel):
     trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
 
 
+class ArenaOrderForecastResponse(BaseModel):
+    order_id: int
+    symbol: str
+    name: str
+    action: str
+    technical_context: dict[str, Any] = Field(default_factory=dict)
+    quantitative_summary: str
+    methodology: list[str] = Field(default_factory=list)
+    model_forecasts: list[dict[str, Any]] = Field(default_factory=list)
+    generated_at: str
+
+
 class BacktestResponse(BaseModel):
     run_id: int
     strategy_name: str

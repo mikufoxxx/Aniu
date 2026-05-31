@@ -67,7 +67,7 @@
   border: 0;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 720px) {
   .market-map-page {
     height: calc(100vh - 148px);
     min-height: 620px;

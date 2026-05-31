@@ -17,6 +17,7 @@ from app.db.models import (
     ArenaPosition,
     ArenaRun,
     DailyBar,
+    StockProfile,
 )
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.services.llm_service import llm_service
@@ -1488,12 +1489,39 @@ class ArenaService:
                 if item.get("agent_id") != agent_id:
                     continue
                 enriched = dict(item)
+                self._enrich_recommendation_names(db, enriched)
                 enriched["run_id"] = run.id
                 enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
                 recommendations.append(enriched)
                 if len(recommendations) >= limit:
                     return recommendations
         return recommendations
+
+    def _enrich_recommendation_names(
+        self,
+        db: Session,
+        recommendation: dict[str, Any],
+    ) -> None:
+        picks = [dict(pick) for pick in recommendation.get("picks") or [] if isinstance(pick, dict)]
+        recommendation["picks"] = picks
+        symbols = {
+            str(symbol).strip().upper()
+            for symbol in [recommendation.get("symbol"), *(pick.get("symbol") for pick in picks)]
+            if symbol
+        }
+        if not symbols:
+            return
+        profiles = db.scalars(select(StockProfile).where(StockProfile.symbol.in_(symbols))).all()
+        names = {profile.symbol.upper(): profile.name for profile in profiles if profile.name}
+        for pick in picks:
+            symbol = str(pick.get("symbol") or "").strip().upper()
+            name = str(pick.get("name") or "").strip()
+            if symbol and (not name or name == symbol):
+                pick["name"] = names.get(symbol) or symbol
+        symbol = str(recommendation.get("symbol") or "").strip().upper()
+        name = str(recommendation.get("name") or "").strip()
+        if symbol and (not name or name == symbol):
+            recommendation["name"] = names.get(symbol) or symbol
 
     def _recent_orders(
         self,

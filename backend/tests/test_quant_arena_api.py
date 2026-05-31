@@ -3,6 +3,8 @@ import json
 import sys
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -14,6 +16,7 @@ from app.db.models import (
     AppSettings,
     ArenaAccount,
     ArenaAgentMemory,
+    ArenaRun,
     ArenaPosition,
     DailyBar,
     SectorBar,
@@ -1534,6 +1537,15 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
             ):
                 db.add(DailyBar(symbol=symbol, trade_date="20260527", close=close, amount=500))
                 db.add(DailyBar(symbol=symbol, trade_date="20260528", close=close + 1, amount=600))
+            for symbol, name in (
+                ("000001.SZ", "平安银行"),
+                ("600519.SH", "贵州茅台"),
+                ("300750.SZ", "宁德时代"),
+                ("601318.SH", "中国平安"),
+                ("000858.SZ", "五粮液"),
+                ("601899.SH", "紫金矿业"),
+            ):
+                db.add(StockProfile(symbol=symbol, name=name, industry="A股"))
         agent = {
             "id": "detail_ai",
             "name": "详情 AI",
@@ -1556,6 +1568,16 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
                 json={"phase": phase, "symbols": symbols, "initial_cash": 200000},
             )
             assert response.status_code == 200
+        with session_scope() as db:
+            stored_run = db.scalar(select(ArenaRun).where(ArenaRun.phase == "morning_recommendation"))
+            assert stored_run is not None
+            payload = dict(stored_run.candidate_payload or {})
+            for item in payload.get("agent_recommendations") or []:
+                for pick in item.get("picks") or []:
+                    pick["name"] = pick["symbol"]
+                item["name"] = item["symbol"]
+            stored_run.candidate_payload = payload
+            flag_modified(stored_run, "candidate_payload")
         dashboard_response = client.get(
             "/api/aniu/arena/agents/detail_ai/dashboard",
             headers=headers,
@@ -1571,6 +1593,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert len(morning["picks"]) == 5
     assert len(morning["picks"]) < 6
     assert morning["playbook"]["mode"] == "short_swing"
+    assert morning["name"] != morning["symbol"]
+    assert all(pick["name"] != pick["symbol"] for pick in morning["picks"])
     assert len(payload["intraday"]["orders"]) >= 1
     assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"
     assert payload["learning"]["reviews"][0]["memory_type"] == "nightly_learning"

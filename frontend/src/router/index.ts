@@ -39,6 +39,11 @@ const router = createRouter({
       component: () => import('@/views/DataLabView.vue')
     },
     {
+      path: '/quant-research',
+      name: 'quant-research',
+      component: () => import('@/views/QuantResearchView.vue')
+    },
+    {
       path: '/tasks',
       redirect: '/arena'
     },

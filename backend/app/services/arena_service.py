@@ -18,6 +18,7 @@ from app.db.models import (
     ArenaRun,
     DailyBar,
 )
+from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.services.llm_service import llm_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.historical_data_service import historical_data_service
@@ -1256,6 +1257,7 @@ class ArenaService:
                 "daily_factors": candidate.get("daily_factors") or {},
                 "rationale": candidate.get("rationale"),
             },
+            "retail_analysis": a_share_retail_analysis_service.build(candidate),
             "llm_decision": llm_decision or {"used": False},
         }
 

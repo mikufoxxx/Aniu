@@ -735,6 +735,7 @@ class StockAnalysisResponse(BaseModel):
     rating: str
     reason: str
     decision: dict[str, Any] = Field(default_factory=dict)
+    retail_analysis: dict[str, Any] = Field(default_factory=dict)
     llm_decision: dict[str, Any] = Field(default_factory=dict)
     data_sources: list[str]
     context: str

@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.core.config import get_settings
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.llm_service import llm_service
@@ -44,11 +45,13 @@ class StockAnalysisService:
             candidate=candidate,
             initial_cash=initial_cash,
         )
+        retail_analysis = a_share_retail_analysis_service.build(candidate)
         llm_decision = self._llm_decision(
             db=db,
             candidate=candidate,
             context=snapshot["context"],
             decision=decision,
+            retail_analysis=retail_analysis,
         )
         if llm_decision.get("used"):
             decision = self._merge_llm_decision(decision, llm_decision)
@@ -62,6 +65,7 @@ class StockAnalysisService:
             "rating": decision["rating"],
             "reason": decision["reason"],
             "decision": decision,
+            "retail_analysis": retail_analysis,
             "llm_decision": llm_decision,
             "data_sources": snapshot["data_sources"],
             "context": snapshot["context"],
@@ -117,6 +121,7 @@ class StockAnalysisService:
         candidate: dict[str, Any],
         context: str,
         decision: dict[str, Any],
+        retail_analysis: dict[str, Any],
     ) -> dict[str, Any]:
         app_settings = settings_service.get_or_create_settings(db)
         base_url = str(getattr(app_settings, "llm_base_url", None) or "").strip()
@@ -138,6 +143,7 @@ class StockAnalysisService:
                     "content": json.dumps(
                         {
                             "candidate": candidate,
+                            "retail_analysis": retail_analysis,
                             "market_context": context,
                             "fallback_decision": decision,
                             "output_schema": {

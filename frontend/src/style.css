@@ -61,7 +61,7 @@ textarea {
 
 .page-shell {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 208px minmax(0, 1fr);
   gap: 0;
   min-height: 100vh;
   max-width: none;
@@ -79,8 +79,8 @@ textarea {
   height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 22px;
-  padding: 20px 14px;
+  gap: 18px;
+  padding: 18px 12px;
   border-right: 1px solid #ececf1;
   background: #ffffff;
 }
@@ -142,8 +142,8 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 40px;
-  padding: 0 14px;
+  height: 36px;
+  padding: 0 12px;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
   background: #ffffff;
@@ -177,7 +177,7 @@ textarea {
 
 .tab-button {
   min-width: 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
   border: none;
   background: transparent;
   color: #4b5563;
@@ -3195,10 +3195,10 @@ textarea {
 
 .stack-layout {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   align-content: start;
   min-width: 0;
-  padding: 24px;
+  padding: 20px;
   margin-top: 0;
 }
 
@@ -3217,8 +3217,8 @@ textarea {
 }
 
 .panel {
-  padding: 18px;
-  border-radius: 10px;
+  padding: 16px;
+  border-radius: 8px;
   backdrop-filter: none;
 }
 
@@ -3227,7 +3227,7 @@ textarea {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .panel-head h2,
@@ -4245,14 +4245,14 @@ textarea {
   }
 
   .stack-layout {
-    padding: 18px;
+    padding: 14px;
   }
 
   .app-header,
   .panel,
   .editor-page {
-    padding: 18px;
-    border-radius: 22px;
+    padding: 14px;
+    border-radius: 8px;
   }
 
   .app-header {

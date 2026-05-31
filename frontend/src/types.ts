@@ -684,6 +684,7 @@ export interface StockAnalysisPayload {
   rating: string
   reason: string
   decision: Record<string, unknown>
+  retail_analysis: Record<string, unknown>
   llm_decision: Record<string, unknown>
   data_sources: string[]
   context: string

@@ -3,7 +3,7 @@
     <section class="panel analysis-hero">
       <div>
         <h1>股票分析</h1>
-        <p>先让系统自动选出 1-5 支候选，再选择其中一支生成 AI 分析。</p>
+        <p>需要时点击“帮我选”，也可以手动输入股票池；这里的候选池只影响本页分析。</p>
       </div>
       <div class="analysis-controls">
         <label>
@@ -11,7 +11,7 @@
           <input v-model.number="candidateLimit" min="1" max="5" type="number" />
         </label>
         <button class="button primary small" :disabled="loadingCandidates" @click="loadCandidates">
-          {{ loadingCandidates ? '选股中...' : 'AI 选股' }}
+          {{ loadingCandidates ? '选股中...' : '帮我选' }}
         </button>
       </div>
     </section>
@@ -23,7 +23,7 @@
         <div class="panel-head">
           <div>
             <h2>候选池</h2>
-            <p class="analysis-muted">默认自动从数据集里挑选，也可以手动限定代码范围。</p>
+            <p class="analysis-muted">不会自动运行；不影响 AI 竞技场任何 AI 的候选池。</p>
           </div>
         </div>
 
@@ -45,15 +45,20 @@
             type="button"
             @click="selectCandidate(candidate.symbol)"
           >
-            <div>
+            <div class="candidate-main">
               <strong>{{ candidate.name || candidate.symbol }}</strong>
-              <span>{{ candidate.symbol }} · {{ candidate.source || 'mixed' }}</span>
+              <span>{{ candidate.symbol }} · {{ candidate.profile?.industry || candidate.profile?.market || 'A股' }}</span>
+              <small>{{ candidate.rationale || '暂无候选理由' }}</small>
             </div>
-            <div>
+            <div class="candidate-side">
               <strong>{{ scoreText(candidate.score) }}</strong>
+              <span>{{ formatPrice(candidate.price) }}</span>
               <span :class="profitClass(candidate.change_pct)">{{ formatPercent(candidate.change_pct / 100) }}</span>
             </div>
           </button>
+          <div v-if="!candidates.length" class="empty-state">
+            <p>点击“帮我选”后才会生成候选池。</p>
+          </div>
         </div>
       </section>
 
@@ -90,6 +95,21 @@
               <strong>{{ analysis.data_sources.length }}</strong>
             </div>
           </div>
+          <div v-if="retailAnalysis" class="retail-analysis">
+            <div class="retail-analysis-head">
+              <strong>散户 A 股分析</strong>
+              <span>{{ retailText('action_signal') }} · 风险 {{ retailText('risk_level') }}</span>
+            </div>
+            <div class="retail-dimensions">
+              <span v-for="item in retailDimensions" :key="item.key">
+                {{ item.label }} {{ scoreText(item.score) }}
+              </span>
+            </div>
+            <ul>
+              <li v-for="reason in retailList('key_reasons')" :key="reason">{{ reason }}</li>
+              <li v-for="warning in retailList('warnings')" :key="warning">{{ warning }}</li>
+            </ul>
+          </div>
           <p>{{ analysis.reason }}</p>
           <div class="source-chips">
             <span v-for="source in analysis.data_sources" :key="source">{{ source }}</span>
@@ -105,7 +125,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '@/services/api'
 import type { QuantCandidate, StockAnalysisPayload } from '@/types'
 
@@ -117,6 +137,18 @@ const analysis = ref<StockAnalysisPayload | null>(null)
 const loadingCandidates = ref(false)
 const analyzing = ref(false)
 const errorMessage = ref('')
+
+interface RetailDimension {
+  key: string
+  label: string
+  score?: number
+}
+
+const retailAnalysis = computed<Record<string, unknown> | null>(() => analysis.value?.retail_analysis ?? null)
+const retailDimensions = computed<RetailDimension[]>(() => {
+  const items = retailAnalysis.value?.dimension_scores
+  return Array.isArray(items) ? items as RetailDimension[] : []
+})
 
 function parseSymbols(): string[] {
   return symbolText.value
@@ -190,15 +222,21 @@ function formatPrice(value: number | null | undefined): string {
   return value.toFixed(value >= 100 ? 2 : 3)
 }
 
-onMounted(() => {
-  loadCandidates()
-})
+function retailText(key: string): string {
+  const value = retailAnalysis.value?.[key]
+  return typeof value === 'string' && value.trim() ? value : '--'
+}
+
+function retailList(key: string): string[] {
+  const value = retailAnalysis.value?.[key]
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean).slice(0, 4) : []
+}
 </script>
 
 <style scoped>
 .stock-analysis-page {
   display: grid;
-  gap: 18px;
+  gap: 12px;
 }
 
 .analysis-hero,
@@ -212,13 +250,14 @@ onMounted(() => {
 .analysis-hero h1 {
   margin: 0 0 8px;
   color: #111827;
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.1;
 }
 
 .analysis-hero p,
 .analysis-muted,
 .candidate-row span,
+.candidate-row small,
 .analysis-result span,
 .analysis-result p {
   margin: 0;
@@ -257,25 +296,25 @@ onMounted(() => {
 .analysis-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
-  gap: 18px;
+  gap: 12px;
   align-items: start;
 }
 
 .candidate-list {
   display: grid;
-  gap: 10px;
-  margin-top: 14px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .candidate-row {
   width: 100%;
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 10px;
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #ffffff;
-  padding: 14px;
+  padding: 10px;
   text-align: left;
 }
 
@@ -285,11 +324,17 @@ onMounted(() => {
   background: #f9fafb;
 }
 
-.candidate-row div,
+.candidate-main,
+.candidate-side,
 .analysis-result-head div,
 .analysis-metrics div {
   display: grid;
   gap: 4px;
+}
+
+.candidate-side {
+  justify-items: end;
+  align-content: start;
 }
 
 .candidate-row strong,
@@ -299,7 +344,7 @@ onMounted(() => {
 
 .analysis-result {
   display: grid;
-  gap: 16px;
+  gap: 12px;
 }
 
 .analysis-result-head b {
@@ -316,8 +361,8 @@ onMounted(() => {
 
 .analysis-metrics div {
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 8px;
+  padding: 10px;
 }
 
 .source-chips {
@@ -333,6 +378,41 @@ onMounted(() => {
   color: #374151;
   padding: 5px 9px;
   font-size: 12px;
+}
+
+.retail-analysis {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fbfbfc;
+  padding: 10px;
+}
+
+.retail-analysis-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.retail-dimensions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.retail-dimensions span {
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  padding: 4px 8px;
+}
+
+.retail-analysis ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #374151;
+  font-size: 13px;
 }
 
 .action-buy {

@@ -47,7 +47,8 @@
               </div>
               <div class="arena-pick-chips">
                 <span v-for="pick in agent.latestPicks" :key="pick.symbol">
-                  {{ pick.symbol }} {{ scoreText(pick.score) }}
+                  <b>{{ pick.name || pick.symbol }}</b>
+                  <small>{{ pick.symbol }} · {{ scoreText(pick.score) }}</small>
                 </span>
                 <span v-if="!agent.latestPicks.length">暂无早盘精选</span>
               </div>
@@ -277,20 +278,20 @@ onMounted(() => {
 <style scoped>
 .arena-home {
   display: grid;
-  gap: 18px;
+  gap: 12px;
 }
 
 .arena-hero {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 20px;
+  gap: 14px;
 }
 
 .arena-hero h1 {
   margin: 0 0 8px;
   color: #111827;
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.1;
 }
 
@@ -321,20 +322,20 @@ onMounted(() => {
 .arena-agent-row {
   position: relative;
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) minmax(280px, 0.8fr);
-  gap: 16px;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(260px, 0.75fr);
+  gap: 12px;
   align-items: center;
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #ffffff;
-  padding: 12px 82px 12px 12px;
+  padding: 10px 78px 10px 10px;
   cursor: pointer;
 }
 
 .arena-card-config {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
   z-index: 1;
 }
 
@@ -368,16 +369,28 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .arena-pick-chips span {
+  display: grid;
+  gap: 2px;
   border: 1px solid #e5e7eb;
-  border-radius: 999px;
+  border-radius: 8px;
   background: #f9fafb;
   color: #374151;
-  padding: 4px 8px;
+  padding: 5px 7px;
   font-size: 12px;
+}
+
+.arena-pick-chips b {
+  color: #111827;
+  font-size: 12px;
+}
+
+.arena-pick-chips small {
+  color: #6b7280;
+  font-size: 11px;
 }
 
 .arena-agent-metrics {
@@ -404,7 +417,7 @@ onMounted(() => {
 
 .arena-agent-editor {
   border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 10px;
   color: #6b7280;
   font-size: 12px;

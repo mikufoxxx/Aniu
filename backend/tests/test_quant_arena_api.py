@@ -1386,7 +1386,58 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["score"] > 0
     assert payload["decision"]["target_allocation_ratio"] >= 0
     assert payload["llm_decision"]["used"] is False
+    assert payload["retail_analysis"]["decision"] in {"buy", "watch", "hold", "avoid"}
+    assert payload["retail_analysis"]["sell_plan"]["rule"]
+    assert {item["key"] for item in payload["retail_analysis"]["dimension_scores"]} >= {
+        "technical",
+        "liquidity",
+    }
     assert "easy_tdx" in payload["data_sources"]
+
+    _reset_state()
+
+
+def test_arena_order_context_includes_retail_a_share_analysis(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.0,
+                "change_pct": 4.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.8,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 10:20:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500))
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "initial_cash": 200000,
+                "agents": [
+                    {"id": "retail_ai", "name": "散户分析 AI", "style": "balanced"},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    context = payload["orders"][0]["decision_context"]
+    assert context["retail_analysis"]["decision"] in {"buy", "watch", "hold", "avoid"}
+    assert context["retail_analysis"]["sell_plan"]["rule"]
+    assert context["retail_analysis"]["dimension_scores"]
 
     _reset_state()
 

@@ -988,6 +988,12 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
         "calmar",
     }
     assert charts["return_distribution"]
+    assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(charts["price_series"][-1])
+    assert len(payload["benchmark_curve"]) == 3
+    assert payload["benchmark_curve"][0]["return_ratio"] == 0.0
+    assert payload["benchmark_curve"][-1]["return_ratio"] > 0
+    assert len(payload["alpha_curve"]) == 3
+    assert payload["alpha_curve"][-1]["alpha"] > 0
     assert len(payload["strategy_equity_curves"]) == 3
     assert payload["strategy_equity_curves"][0]["strategy_name"] == "daily_momentum"
     assert "daily_momentum" in payload["ai_learning_context"]
@@ -1852,6 +1858,7 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["charts"]["support_resistance"]["resistance"] == 12.2
     assert payload["charts"]["return_distribution"]
     assert payload["charts"]["volume_profile"]
+    assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(payload["charts"]["price_series"][-1])
 
     _reset_state()
 

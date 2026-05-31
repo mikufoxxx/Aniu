@@ -33,13 +33,22 @@ class ChartDataService:
             ).all()
         )
         rows.reverse()
+        return self.price_series_from_bars(rows)
+
+    def price_series_from_bars(self, rows: list[DailyBar]) -> list[dict[str, Any]]:
         closes: list[float] = []
+        macd_values: list[float] = []
         points: list[dict[str, Any]] = []
         for bar in rows:
             close = float(bar.close or 0)
             if close <= 0:
                 continue
             closes.append(close)
+            macd = self._macd(closes)
+            if macd is not None:
+                macd_values.append(macd)
+            macd_signal = self._ema(macd_values, 9) if macd_values else None
+            macd_hist = macd - macd_signal if macd is not None and macd_signal is not None else None
             open_price = float(bar.open or close)
             high_price = float(bar.high or max(open_price, close))
             low_price = float(bar.low or min(open_price, close))
@@ -54,6 +63,10 @@ class ChartDataService:
                     "amount": float(bar.amount or 0),
                     "ma5": self._moving_average(closes, 5),
                     "ma20": self._moving_average(closes, 20),
+                    "rsi14": self._rsi(closes, 14),
+                    "macd": round(macd, 6) if macd is not None else None,
+                    "macd_signal": round(macd_signal, 6) if macd_signal is not None else None,
+                    "macd_hist": round(macd_hist, 6) if macd_hist is not None else None,
                 }
             )
         return points
@@ -301,6 +314,38 @@ class ChartDataService:
         if len(closes) < window:
             return None
         return round(sum(closes[-window:]) / window, 4)
+
+    def _rsi(self, closes: list[float], window: int) -> float | None:
+        if len(closes) <= window:
+            return None
+        changes = [
+            closes[index] - closes[index - 1]
+            for index in range(len(closes) - window, len(closes))
+        ]
+        gains = [max(change, 0.0) for change in changes]
+        losses = [abs(min(change, 0.0)) for change in changes]
+        avg_gain = sum(gains) / window
+        avg_loss = sum(losses) / window
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return round(100 - 100 / (1 + rs), 4)
+
+    def _macd(self, closes: list[float]) -> float | None:
+        ema12 = self._ema(closes, 12)
+        ema26 = self._ema(closes, 26)
+        if ema12 is None or ema26 is None:
+            return None
+        return ema12 - ema26
+
+    def _ema(self, values: list[float], window: int) -> float | None:
+        if len(values) < window:
+            return None
+        alpha = 2 / (window + 1)
+        ema = sum(values[:window]) / window
+        for value in values[window:]:
+            ema = value * alpha + ema * (1 - alpha)
+        return round(ema, 6)
 
     def _histogram(
         self,

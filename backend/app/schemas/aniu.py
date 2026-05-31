@@ -622,6 +622,10 @@ class PriceSeriesPointRead(BaseModel):
     amount: float = 0.0
     ma5: float | None = None
     ma20: float | None = None
+    rsi14: float | None = None
+    macd: float | None = None
+    macd_signal: float | None = None
+    macd_hist: float | None = None
 
 
 class TradeMarkerRead(BaseModel):
@@ -719,6 +723,8 @@ class QuantResearchResponse(BaseModel):
     strategies: list[QuantResearchStrategyRead]
     comparison_chart: list[dict[str, Any]] = Field(default_factory=list)
     strategy_equity_curves: list[dict[str, Any]] = Field(default_factory=list)
+    benchmark_curve: list[dict[str, Any]] = Field(default_factory=list)
+    alpha_curve: list[dict[str, Any]] = Field(default_factory=list)
     ai_learning_context: str
 
 

@@ -56,6 +56,7 @@ class QuantResearchService:
         ]
         strategies.sort(key=lambda item: item["score"], reverse=True)
         best_strategy = strategies[0]
+        benchmark_curve = self._benchmark_curve(profiles, initial_cash)
         return {
             "symbol_count": len(set(normalized_symbols)),
             "bar_count": len(bars),
@@ -66,6 +67,8 @@ class QuantResearchService:
             "strategies": strategies,
             "comparison_chart": self._comparison_chart(strategies),
             "strategy_equity_curves": self._strategy_equity_curves(strategies),
+            "benchmark_curve": benchmark_curve,
+            "alpha_curve": self._alpha_curve(best_strategy, benchmark_curve),
             "ai_learning_context": self._learning_context(best_strategy, strategies),
         }
 
@@ -84,20 +87,7 @@ class QuantResearchService:
         return {
             "symbol": first.symbol,
             "bars": bars,
-            "price_series": [
-                {
-                    "trade_date": bar.trade_date,
-                    "open": round(float(bar.open or bar.close or 0), 4),
-                    "high": round(float(bar.high or bar.close or 0), 4),
-                    "low": round(float(bar.low or bar.close or 0), 4),
-                    "close": round(float(bar.close or 0), 4),
-                    "volume": float(bar.vol or 0),
-                    "amount": float(bar.amount or 0),
-                    "ma5": None,
-                    "ma20": None,
-                }
-                for bar in bars
-            ],
+            "price_series": chart_data_service.price_series_from_bars(bars),
             "first_close": first_close,
             "last_close": last_close,
             "period_return": (last_close - first_close) / first_close,
@@ -318,6 +308,51 @@ class QuantResearchService:
             }
             for item in strategies
         ]
+
+    def _benchmark_curve(
+        self,
+        profiles: list[dict[str, Any]],
+        initial_cash: float,
+    ) -> list[dict[str, Any]]:
+        trade_dates = [bar.trade_date for bar in profiles[0]["bars"]]
+        points: list[dict[str, Any]] = []
+        for index, trade_date in enumerate(trade_dates):
+            returns: list[float] = []
+            for profile in profiles:
+                bars = profile["bars"]
+                bar = bars[min(index, len(bars) - 1)]
+                first_close = float(profile["first_close"] or 0)
+                if first_close > 0:
+                    returns.append(float(bar.close or 0) / first_close - 1)
+            return_ratio = mean(returns) if returns else 0.0
+            points.append(
+                {
+                    "trade_date": trade_date,
+                    "value": round(initial_cash * (1 + return_ratio), 2),
+                    "return_ratio": round(return_ratio, 6),
+                }
+            )
+        return points
+
+    def _alpha_curve(
+        self,
+        strategy: dict[str, Any],
+        benchmark_curve: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        strategy_curve = strategy.get("charts", {}).get("equity_curve", [])
+        points: list[dict[str, Any]] = []
+        for strategy_point, benchmark_point in zip(strategy_curve, benchmark_curve):
+            strategy_return = float(strategy_point.get("return_ratio") or 0)
+            benchmark_return = float(benchmark_point.get("return_ratio") or 0)
+            points.append(
+                {
+                    "trade_date": strategy_point.get("trade_date"),
+                    "strategy_return": round(strategy_return, 6),
+                    "benchmark_return": round(benchmark_return, 6),
+                    "alpha": round(strategy_return - benchmark_return, 6),
+                }
+            )
+        return points
 
 
 quant_research_service = QuantResearchService()

@@ -122,6 +122,18 @@
         subtitle="用于观察策略稳定性和分化"
         :curves="research.strategy_equity_curves"
       />
+      <BenchmarkAlphaChart
+        title="基准对比与 Alpha"
+        subtitle="策略相对等权买入基准的超额收益"
+        :strategy-curve="research.best_strategy.charts.equity_curve"
+        :benchmark-curve="research.benchmark_curve"
+        :alpha-curve="research.alpha_curve"
+      />
+      <TechnicalIndicatorChart
+        title="MACD / RSI 技术指标"
+        subtitle="用于确认趋势强弱和超买超卖区间"
+        :price-series="research.best_strategy.charts.price_series"
+      />
       <DistributionChart
         title="单日收益分布"
         subtitle="检查收益是否集中在少数日期"
@@ -149,11 +161,13 @@
 import { computed, ref } from 'vue'
 import { api } from '@/services/api'
 import type { QuantCandidate, QuantResearchPayload } from '@/types'
+import BenchmarkAlphaChart from '@/components/charts/BenchmarkAlphaChart.vue'
 import DistributionChart from '@/components/charts/DistributionChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 import MultiEquityCurveChart from '@/components/charts/MultiEquityCurveChart.vue'
 import PerformanceDashboard from '@/components/charts/PerformanceDashboard.vue'
 import StrategyComparisonChart from '@/components/charts/StrategyComparisonChart.vue'
+import TechnicalIndicatorChart from '@/components/charts/TechnicalIndicatorChart.vue'
 
 const limit = ref(20)
 const candidates = ref<QuantCandidate[]>([])

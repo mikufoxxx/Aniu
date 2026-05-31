@@ -123,6 +123,11 @@
               subtitle="用于解释 AI 评分结构"
               :items="analysis.charts.factor_radar"
             />
+            <TechnicalIndicatorChart
+              title="MACD / RSI 技术指标"
+              subtitle="趋势强弱与超买超卖"
+              :price-series="analysis.charts.price_series"
+            />
             <DistributionChart
               title="收益分布"
               subtitle="观察波动是否偏态"
@@ -168,6 +173,7 @@ import type { QuantCandidate, StockAnalysisPayload } from '@/types'
 import DistributionChart from '@/components/charts/DistributionChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
+import TechnicalIndicatorChart from '@/components/charts/TechnicalIndicatorChart.vue'
 import VolumeProfileChart from '@/components/charts/VolumeProfileChart.vue'
 
 const candidateLimit = ref(5)

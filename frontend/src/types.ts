@@ -557,6 +557,10 @@ export interface PriceSeriesPoint {
   amount: number
   ma5?: number | null
   ma20?: number | null
+  rsi14?: number | null
+  macd?: number | null
+  macd_signal?: number | null
+  macd_hist?: number | null
 }
 
 export interface TradeMarker {
@@ -591,6 +595,13 @@ export interface StrategyCharts {
   drawdown_curve: DrawdownCurvePoint[]
   risk_metrics: Record<string, number>
   return_distribution: DistributionBucket[]
+}
+
+export interface AlphaCurvePoint {
+  trade_date: string
+  strategy_return: number
+  benchmark_return: number
+  alpha: number
 }
 
 export interface StockAnalysisCharts {
@@ -674,6 +685,8 @@ export interface QuantResearchPayload {
     display_name: string
     points: EquityCurvePoint[]
   }>
+  benchmark_curve: EquityCurvePoint[]
+  alpha_curve: AlphaCurvePoint[]
   ai_learning_context: string
 }
 

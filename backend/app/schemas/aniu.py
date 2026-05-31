@@ -624,7 +624,6 @@ ArenaPhase = Literal[
 
 class ArenaRunRequest(BaseModel):
     phase: ArenaPhase = "intraday_trade"
-    symbols: list[str] | None = None
     agents: list[ArenaAgentRequest] | None = None
     initial_cash: float = Field(default=200000.0, ge=10000, le=100000000)
 

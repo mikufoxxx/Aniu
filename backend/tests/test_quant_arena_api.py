@@ -694,10 +694,10 @@ def test_arena_run_reuses_autonomous_stock_pick_snapshot(
 ) -> None:
     from app.services.market_data_service import market_data_service
 
-    captured: dict[str, list[str]] = {}
+    captured_calls: list[list[str]] = []
 
     def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
-        captured["symbols"] = symbols
+        captured_calls.append(symbols)
         return [
             {
                 "symbol": symbol,
@@ -739,19 +739,17 @@ def test_arena_run_reuses_autonomous_stock_pick_snapshot(
 
     assert response.status_code == 200
     payload = response.json()
-    snapshot = payload["stock_pick_snapshot"]
-    assert snapshot["snapshot_id"].startswith("ai-picks-")
-    assert snapshot["selection_mode"] == "auto_universe"
-    assert captured["symbols"] == ["600519.SH", "000001.SZ", "300750.SZ"]
-    assert payload["candidate_count"] == snapshot["dataset"]["item_count"]
-    assert [item["symbol"] for item in payload["candidates"]] == [
-        item["symbol"] for item in snapshot["recommendations"]
+    assert payload["stock_pick_snapshot"] is None
+    assert captured_calls == [
+        ["600519.SH", "000001.SZ", "300750.SZ"],
+        ["600519.SH", "000001.SZ", "300750.SZ"],
     ]
+    assert payload["candidate_count"] == 3
     for order in payload["orders"]:
         context = order["decision_context"]
-        assert context["stock_pick_snapshot_id"] == snapshot["snapshot_id"]
+        assert context["stock_pick_snapshot_id"].startswith("ai-picks-")
         assert context["selected_candidate"]["symbol"] in {
-            item["symbol"] for item in snapshot["recommendations"]
+            item["symbol"] for item in payload["candidates"]
         }
 
     _reset_state()
@@ -760,7 +758,7 @@ def test_arena_run_reuses_autonomous_stock_pick_snapshot(
 def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path) -> None:
     from app.services.ai_stock_picker_service import ai_stock_picker_service
 
-    captured: dict[str, object] = {}
+    captured_requests: list[tuple[object, object, object, object]] = []
 
     def candidate(symbol: str, score: float) -> dict[str, object]:
         return {
@@ -787,10 +785,11 @@ def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path)
         prefer_realtime=True,
         lookback_days=120,
     ):
-        captured["request"] = (symbols, limit, prefer_realtime, lookback_days)
+        captured_requests.append((symbols, limit, prefer_realtime, lookback_days))
+        call_index = len(captured_requests)
         items = [candidate("600519.SH", 80), candidate("000001.SZ", 70)]
         return {
-            "snapshot_id": "ai-picks-test",
+            "snapshot_id": f"ai-picks-test-{call_index}",
             "selection_mode": "auto_universe",
             "data_sources": ["tencent", "tushare_daily"],
             "coverage": {},
@@ -824,9 +823,107 @@ def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path)
         )
 
     assert response.status_code == 200
-    assert captured["request"] == (None, 1000, True, 1825)
+    assert captured_requests == [
+        (None, 1000, True, 1825),
+        (None, 1000, True, 1825),
+    ]
     payload = response.json()
-    assert payload["stock_pick_snapshot"]["dataset"]["lookback_days"] == 1825
+    assert payload["stock_pick_snapshot"] is None
+    assert {order["decision_context"]["stock_pick_snapshot_id"] for order in payload["orders"]} == {
+        "ai-picks-test-1",
+        "ai-picks-test-2",
+    }
+
+    _reset_state()
+
+
+def test_arena_run_ignores_user_symbols_and_builds_independent_snapshot_per_agent(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_stock_picker_service import ai_stock_picker_service
+
+    captured_requests: list[tuple[object, object, object, object]] = []
+
+    def candidate(symbol: str, score: float) -> dict[str, object]:
+        return {
+            "symbol": symbol,
+            "name": symbol,
+            "price": 10.0,
+            "change_pct": 1.5,
+            "amount": 10_000_000,
+            "turnover": 0.8,
+            "volume_ratio": 1.2,
+            "source": "tencent",
+            "timestamp": "2026-05-29 15:00:03",
+            "score": score,
+            "factor_scores": {},
+            "daily_factors": {"bars_used": 120},
+            "rationale": "独立候选",
+        }
+
+    def fake_build_snapshot(
+        *,
+        db,
+        symbols=None,
+        limit=50,
+        prefer_realtime=True,
+        lookback_days=120,
+    ):
+        captured_requests.append((symbols, limit, prefer_realtime, lookback_days))
+        call_index = len(captured_requests)
+        items = [candidate(f"60000{call_index}.SH", 80 - call_index)]
+        return {
+            "snapshot_id": f"ai-picks-agent-{call_index}",
+            "selection_mode": "auto_universe" if symbols is None else "custom_symbols",
+            "data_sources": ["tencent", "tushare_daily"],
+            "coverage": {},
+            "dataset": {
+                "universe_size": 1000,
+                "item_count": len(items),
+                "lookback_days": lookback_days,
+                "data_sources": ["tencent", "tushare_daily"],
+                "coverage": {"daily_history_symbols": len(items)},
+                "items": items,
+            },
+            "recommendations": items,
+            "context": "context",
+            "context_length": 7,
+        }
+
+    monkeypatch.setattr(ai_stock_picker_service, "build_snapshot", fake_build_snapshot)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "initial_cash": 200000,
+                "symbols": ["用户自选.SZ"],
+                "agents": [
+                    {"id": "deepseek", "name": "DeepSeek", "style": "momentum"},
+                    {"id": "gpt", "name": "GPT", "style": "balanced"},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    assert captured_requests == [
+        (None, 1000, True, 1825),
+        (None, 1000, True, 1825),
+    ]
+    payload = response.json()
+    order_contexts = [order["decision_context"] for order in payload["orders"]]
+    assert {context["stock_pick_snapshot_id"] for context in order_contexts} == {
+        "ai-picks-agent-1",
+        "ai-picks-agent-2",
+    }
+    assert {context["selected_candidate"]["symbol"] for context in order_contexts} == {
+        "600001.SH",
+        "600002.SH",
+    }
+    assert payload["stock_pick_snapshot"] is None
 
     _reset_state()
 
@@ -1887,8 +1984,9 @@ def test_arena_stop_loss_sells_position_and_records_realized_pnl(monkeypatch, tm
     assert first["orders"][0]["action"] == "BUY"
     assert second["orders"][0]["action"] == "SELL"
     assert (
-        second["orders"][0]["decision_context"]["stock_pick_snapshot_id"]
-        == second["stock_pick_snapshot"]["snapshot_id"]
+        second["orders"][0]["decision_context"]["stock_pick_snapshot_id"].startswith(
+            "ai-picks-"
+        )
     )
     item = [row for row in leaderboard["items"] if row["agent_id"] == "risk_agent"][0]
     assert item["order_count"] == 2

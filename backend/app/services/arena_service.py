@@ -46,7 +46,6 @@ class ArenaService:
         db: Session,
         *,
         phase: str = "intraday_trade",
-        symbols: list[str] | None = None,
         agents: list[dict[str, str]] | None = None,
         initial_cash: float = 200000.0,
     ) -> dict[str, Any]:
@@ -54,42 +53,42 @@ class ArenaService:
         active_agents = agents or self.enabled_agents(db)
         settings = get_settings()
         app_settings = settings_service.get_or_create_settings(db)
-        stock_pick_snapshot = ai_stock_picker_service.build_snapshot(
+        agent_candidate_contexts = self._build_agent_candidate_contexts(
             db=db,
-            symbols=symbols,
+            agents=active_agents,
             limit=settings.market_data_maintenance_dataset_limit,
-            prefer_realtime=True,
             lookback_days=settings.market_data_maintenance_lookback_days,
         )
-        dataset = stock_pick_snapshot["dataset"]
+        candidates = self._combined_candidates(agent_candidate_contexts)
+        data_sources = self._combined_data_sources(agent_candidate_contexts)
         candidate_payload = {
-            "universe_size": dataset["universe_size"],
-            "candidate_count": dataset["item_count"],
-            "data_sources": stock_pick_snapshot["data_sources"],
-            "candidates": stock_pick_snapshot["recommendations"],
-            "stock_pick_snapshot": stock_pick_snapshot,
+            "universe_size": len(candidates),
+            "candidate_count": len(candidates),
+            "data_sources": data_sources,
+            "candidates": candidates,
+            "stock_pick_snapshot": None,
+            "agent_stock_pick_snapshots": {
+                agent_id: context["stock_pick_snapshot"]
+                for agent_id, context in agent_candidate_contexts.items()
+            },
             "agent_recommendations": [],
         }
-        candidates = candidate_payload["candidates"]
         arena_run = ArenaRun(
             phase=normalized_phase,
             initial_cash=initial_cash,
-            universe_json=symbols,
+            universe_json=None,
             candidate_payload=candidate_payload,
             leaderboard_payload=[],
         )
         db.add(arena_run)
         db.flush()
         snapshot_id = f"arena-{arena_run.id}"
-        data_sources = list(candidate_payload.get("data_sources") or [])
 
         if normalized_phase == "morning_recommendation":
             recommendations = self._morning_recommendations(
                 agents=active_agents,
-                candidates=candidates,
+                agent_candidate_contexts=agent_candidate_contexts,
                 snapshot_id=snapshot_id,
-                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
-                data_sources=data_sources,
             )
             candidate_payload = {
                 **candidate_payload,
@@ -108,17 +107,15 @@ class ArenaService:
                 "leaderboard": [],
                 "orders": [],
                 "data_sources": candidate_payload["data_sources"],
-                "stock_pick_snapshot": stock_pick_snapshot,
+                "stock_pick_snapshot": None,
             }
 
         if normalized_phase == "closing_review":
             reviews = self._closing_reviews(
                 db=db,
                 agents=active_agents,
-                candidates=candidates,
+                agent_candidate_contexts=agent_candidate_contexts,
                 snapshot_id=snapshot_id,
-                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
-                data_sources=data_sources,
             )
             leaderboard = self.leaderboard(db)["items"]
             arena_run.candidate_payload = {
@@ -138,18 +135,15 @@ class ArenaService:
                 "leaderboard": leaderboard,
                 "orders": [],
                 "data_sources": candidate_payload["data_sources"],
-                "stock_pick_snapshot": stock_pick_snapshot,
+                "stock_pick_snapshot": None,
             }
 
         if normalized_phase == "nightly_learning":
             reviews = self._nightly_learning_reviews(
                 db=db,
                 agents=active_agents,
-                symbols=symbols,
-                candidates=candidates,
+                agent_candidate_contexts=agent_candidate_contexts,
                 snapshot_id=snapshot_id,
-                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
-                data_sources=data_sources,
                 initial_cash=initial_cash,
             )
             leaderboard = self.leaderboard(db)["items"]
@@ -170,38 +164,43 @@ class ArenaService:
                 "leaderboard": leaderboard,
                 "orders": [],
                 "data_sources": candidate_payload["data_sources"],
-                "stock_pick_snapshot": stock_pick_snapshot,
+                "stock_pick_snapshot": None,
             }
 
         leaderboard: list[dict[str, Any]] = []
         orders: list[dict[str, Any]] = []
         for index, agent in enumerate(active_agents):
+            agent_id = str(agent.get("id") or f"agent_{index + 1}")
+            candidate_context = agent_candidate_contexts[agent_id]
+            agent_candidates = candidate_context["candidates"]
+            agent_data_sources = candidate_context["data_sources"]
+            stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
             decision_started_at = self._utcnow()
             account = self._get_or_create_account(
                 db,
                 agent=agent,
                 initial_cash=initial_cash,
             )
-            self._mark_positions(account, candidates)
+            self._mark_positions(account, agent_candidates)
             sell_decision = self._stop_loss_decision(
                 account,
                 snapshot_id=snapshot_id,
-                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
-                data_sources=data_sources,
+                stock_pick_snapshot_id=stock_pick_snapshot_id,
+                data_sources=agent_data_sources,
             )
             decision = sell_decision or self._decide_for_agent(
                 account=account,
                 agent=agent,
-                candidates=candidates,
+                candidates=agent_candidates,
                 agent_index=index,
                 available_cash=account.cash,
                 snapshot_id=snapshot_id,
-                stock_pick_snapshot_id=stock_pick_snapshot["snapshot_id"],
-                data_sources=data_sources,
+                stock_pick_snapshot_id=stock_pick_snapshot_id,
+                data_sources=agent_data_sources,
                 app_settings=app_settings,
                 recent_memories=self.recent_agent_memories(
                     db,
-                    agent_id=str(agent.get("id") or f"agent_{index + 1}"),
+                    agent_id=agent_id,
                     limit=5,
                 ),
             )
@@ -261,7 +260,7 @@ class ArenaService:
             "leaderboard": leaderboard,
             "orders": orders,
             "data_sources": candidate_payload["data_sources"],
-            "stock_pick_snapshot": stock_pick_snapshot,
+            "stock_pick_snapshot": None,
         }
 
     def _normalize_phase(self, phase: str) -> str:
@@ -278,17 +277,76 @@ class ArenaService:
             )
         return normalized
 
+    def _build_agent_candidate_contexts(
+        self,
+        *,
+        db: Session,
+        agents: list[dict[str, str]],
+        limit: int,
+        lookback_days: int,
+    ) -> dict[str, dict[str, Any]]:
+        contexts: dict[str, dict[str, Any]] = {}
+        for index, agent in enumerate(agents):
+            agent_id = str(agent.get("id") or f"agent_{index + 1}")
+            stock_pick_snapshot = ai_stock_picker_service.build_snapshot(
+                db=db,
+                symbols=None,
+                limit=limit,
+                prefer_realtime=True,
+                lookback_days=lookback_days,
+            )
+            contexts[agent_id] = {
+                "stock_pick_snapshot": stock_pick_snapshot,
+                "stock_pick_snapshot_id": stock_pick_snapshot["snapshot_id"],
+                "candidates": stock_pick_snapshot["recommendations"],
+                "data_sources": list(stock_pick_snapshot.get("data_sources") or []),
+            }
+        return contexts
+
+    def _combined_candidates(
+        self,
+        agent_candidate_contexts: dict[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        candidates: list[dict[str, Any]] = []
+        for context in agent_candidate_contexts.values():
+            for candidate in context["candidates"]:
+                symbol = str(candidate.get("symbol") or "")
+                if symbol and symbol in seen:
+                    continue
+                if symbol:
+                    seen.add(symbol)
+                candidates.append(candidate)
+        return candidates
+
+    def _combined_data_sources(
+        self,
+        agent_candidate_contexts: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        sources: list[str] = []
+        seen: set[str] = set()
+        for context in agent_candidate_contexts.values():
+            for source in context["data_sources"]:
+                if source in seen:
+                    continue
+                seen.add(source)
+                sources.append(source)
+        return sources
+
     def _morning_recommendations(
         self,
         *,
         agents: list[dict[str, str]],
-        candidates: list[dict[str, Any]],
+        agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
-        stock_pick_snapshot_id: str,
-        data_sources: list[str],
     ) -> list[dict[str, Any]]:
         recommendations: list[dict[str, Any]] = []
         for index, agent in enumerate(agents):
+            agent_id = str(agent.get("id") or f"agent_{index + 1}")
+            candidate_context = agent_candidate_contexts[agent_id]
+            candidates = candidate_context["candidates"]
+            stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
+            data_sources = candidate_context["data_sources"]
             style = str(agent.get("style") or "balanced")
             picks = self._morning_picks(
                 candidates=candidates,
@@ -301,7 +359,7 @@ class ArenaService:
             playbook = self._playbook_for_style(style)
             recommendations.append(
                 {
-                    "agent_id": str(agent.get("id") or f"agent_{index + 1}"),
+                    "agent_id": agent_id,
                     "agent_name": str(agent.get("name") or f"AI {index + 1}"),
                     "style": style,
                     "action": "WATCH",
@@ -383,14 +441,16 @@ class ArenaService:
         *,
         db: Session,
         agents: list[dict[str, str]],
-        candidates: list[dict[str, Any]],
+        agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
-        stock_pick_snapshot_id: str,
-        data_sources: list[str],
     ) -> list[dict[str, Any]]:
         reviews: list[dict[str, Any]] = []
         for index, agent in enumerate(agents):
             agent_id = str(agent.get("id") or f"agent_{index + 1}")
+            candidate_context = agent_candidate_contexts[agent_id]
+            candidates = candidate_context["candidates"]
+            stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
+            data_sources = candidate_context["data_sources"]
             account = db.scalar(
                 select(ArenaAccount)
                 .options(selectinload(ArenaAccount.positions))
@@ -427,34 +487,36 @@ class ArenaService:
         *,
         db: Session,
         agents: list[dict[str, str]],
-        symbols: list[str] | None,
-        candidates: list[dict[str, Any]],
+        agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
-        stock_pick_snapshot_id: str,
-        data_sources: list[str],
         initial_cash: float,
     ) -> list[dict[str, Any]]:
-        backtest_symbols = symbols or [str(item["symbol"]) for item in candidates if item.get("symbol")]
-        window = self._backtest_window(db, symbols=backtest_symbols)
-        backtest: dict[str, Any]
-        if window is None:
-            backtest = {"available": False, "reason": "可用日线不足，至少需要两个交易日。"}
-        else:
-            try:
-                backtest = historical_data_service.run_daily_momentum_backtest(
-                    db,
-                    symbols=backtest_symbols,
-                    start_date=window["start_date"],
-                    end_date=window["end_date"],
-                    initial_cash=initial_cash,
-                )
-                backtest["available"] = True
-            except ValueError as exc:
-                backtest = {"available": False, "reason": str(exc)}
-
         reviews: list[dict[str, Any]] = []
         for index, agent in enumerate(agents):
             agent_id = str(agent.get("id") or f"agent_{index + 1}")
+            candidate_context = agent_candidate_contexts[agent_id]
+            candidates = candidate_context["candidates"]
+            stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
+            data_sources = candidate_context["data_sources"]
+            backtest_symbols = [
+                str(item["symbol"]) for item in candidates if item.get("symbol")
+            ]
+            window = self._backtest_window(db, symbols=backtest_symbols)
+            backtest: dict[str, Any]
+            if window is None:
+                backtest = {"available": False, "reason": "可用日线不足，至少需要两个交易日。"}
+            else:
+                try:
+                    backtest = historical_data_service.run_daily_momentum_backtest(
+                        db,
+                        symbols=backtest_symbols,
+                        start_date=window["start_date"],
+                        end_date=window["end_date"],
+                        initial_cash=initial_cash,
+                    )
+                    backtest["available"] = True
+                except ValueError as exc:
+                    backtest = {"available": False, "reason": str(exc)}
             recent_memories = self.recent_agent_memories(db, agent_id=agent_id, limit=5)
             metrics_payload = {
                 "snapshot_id": snapshot_id,

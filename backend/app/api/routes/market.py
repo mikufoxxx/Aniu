@@ -337,7 +337,6 @@ def run_arena_once(
         return arena_service.run_once(
             db,
             phase=payload.phase,
-            symbols=payload.symbols,
             agents=agents,
             initial_cash=payload.initial_cash,
         )

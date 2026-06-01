@@ -23,6 +23,7 @@ class AIDataRequestService:
         prefer_realtime: bool = True,
         refresh: bool = False,
         end_date: str | None = None,
+        news_query: str | None = None,
     ) -> dict[str, Any]:
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols]
         requested_dimensions = self._normalize_dimensions(dimensions)
@@ -50,7 +51,11 @@ class AIDataRequestService:
         if end_date:
             dataset_kwargs["end_date"] = end_date
         dataset = quant_service.build_dataset(db, **dataset_kwargs)
-        context = ai_market_context_service.format_dataset_context(db, dataset)
+        context = ai_market_context_service.format_dataset_context(
+            db,
+            dataset,
+            news_query=news_query if self._needs_news(requested_dimensions) else None,
+        )
         return {
             "requested_symbols": normalized_symbols,
             "requested_dimensions": requested_dimensions,
@@ -74,6 +79,9 @@ class AIDataRequestService:
 
     def _needs_maintenance(self, dimensions: list[str]) -> bool:
         return any(dimension != "quote" for dimension in dimensions)
+
+    def _needs_news(self, dimensions: list[str]) -> bool:
+        return any(dimension in {"news", "announcement"} for dimension in dimensions)
 
 
 ai_data_request_service = AIDataRequestService()

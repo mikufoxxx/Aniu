@@ -188,14 +188,20 @@ class AIMarketContextService:
                 )
         return "\n".join(lines).strip()
 
-    def format_dataset_context(self, db: Session, dataset: dict[str, Any]) -> str:
+    def format_dataset_context(
+        self,
+        db: Session,
+        dataset: dict[str, Any],
+        *,
+        news_query: str | None = None,
+    ) -> str:
         return self._format_dataset(
             dataset,
             self._latest_index_snapshot(db),
             self._latest_sector_heat(db),
             self._recent_report_performance(db),
             self._latest_data_quality(db),
-            self._mx_supplemental_context(db),
+            self._mx_supplemental_context(db, news_query=news_query),
         )
 
     def _latest_index_snapshot(self, db: Session) -> list[dict[str, Any]]:
@@ -250,16 +256,22 @@ class AIMarketContextService:
             if row.pct_chg is not None
         ]
 
-    def _mx_supplemental_context(self, db: Session) -> dict[str, Any] | None:
+    def _mx_supplemental_context(
+        self,
+        db: Session,
+        *,
+        news_query: str | None = None,
+    ) -> dict[str, Any] | None:
         app_settings = settings_service.get_or_create_settings(db)
         api_key = str(app_settings.mx_api_key or "").strip()
         if not api_key:
             return None
+        normalized_news_query = str(news_query or app_settings.news_query or "").strip()
         env_settings = get_settings()
         try:
             with MXClient(api_key=api_key, base_url=env_settings.mx_api_url) as client:
                 screen = client.screen_stocks(app_settings.screener_query)
-                news = client.search_news(app_settings.news_query)
+                news = client.search_news(normalized_news_query)
             return {"screen": screen, "news": news}
         except Exception as exc:
             return {"error": str(exc)[:240]}

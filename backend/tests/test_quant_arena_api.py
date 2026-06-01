@@ -1928,13 +1928,25 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
             },
         ]
 
-    def fake_execute(db, *, symbols, dimensions, limit, lookback_days, prefer_realtime, refresh, end_date=None):
+    def fake_execute(
+        db,
+        *,
+        symbols,
+        dimensions,
+        limit,
+        lookback_days,
+        prefer_realtime,
+        refresh,
+        end_date=None,
+        news_query=None,
+    ):
         requests.append(
             {
                 "symbols": symbols,
                 "dimensions": dimensions,
                 "prefer_realtime": prefer_realtime,
                 "end_date": end_date,
+                "news_query": news_query,
             }
         )
         return {
@@ -2003,6 +2015,7 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     assert requests[0]["dimensions"][:3] == ["daily_history", "news", "announcement"]
     assert requests[0]["prefer_realtime"] is False
     assert requests[0]["end_date"] == "20260528"
+    assert requests[0]["news_query"] == "今日A股盘前要闻 重要公告 政策行业消息"
     request_context = payload["agent_recommendations"][0]["decision_context"]["ai_data_request"]
     assert request_context["phase_context"]["phase"] == "morning_recommendation"
     assert request_context["phase_context"]["history_end_date"] == "20260528"
@@ -2803,7 +2816,18 @@ def test_arena_decision_uses_agent_on_demand_data_request(monkeypatch, tmp_path)
             }
         ]
 
-    def fake_execute(db, *, symbols, dimensions, limit, lookback_days, prefer_realtime, refresh, end_date=None):
+    def fake_execute(
+        db,
+        *,
+        symbols,
+        dimensions,
+        limit,
+        lookback_days,
+        prefer_realtime,
+        refresh,
+        end_date=None,
+        news_query=None,
+    ):
         requests.append(
             {
                 "symbols": symbols,
@@ -2813,6 +2837,7 @@ def test_arena_decision_uses_agent_on_demand_data_request(monkeypatch, tmp_path)
                 "prefer_realtime": prefer_realtime,
                 "refresh": refresh,
                 "end_date": end_date,
+                "news_query": news_query,
             }
         )
         return {
@@ -2863,6 +2888,7 @@ def test_arena_decision_uses_agent_on_demand_data_request(monkeypatch, tmp_path)
     ]
     assert requests[0]["prefer_realtime"] is True
     assert requests[0]["refresh"] is False
+    assert requests[0]["news_query"] == "今日A股盘中实时新闻 板块异动 个股公告"
     context = response.json()["orders"][0]["decision_context"]
     assert context["ai_data_request"]["phase_context"]["phase"] == "intraday_trade"
     assert "realtime_quote" in context["ai_data_request"]["phase_context"]["required_inputs"]
@@ -2900,7 +2926,18 @@ def test_arena_llm_can_request_extra_data_dimensions_before_decision(
             }
         ]
 
-    def fake_data_request(db, *, symbols, dimensions, limit, lookback_days, prefer_realtime, refresh, end_date=None):
+    def fake_data_request(
+        db,
+        *,
+        symbols,
+        dimensions,
+        limit,
+        lookback_days,
+        prefer_realtime,
+        refresh,
+        end_date=None,
+        news_query=None,
+    ):
         data_requests.append(
             {
                 "symbols": symbols,
@@ -2910,6 +2947,7 @@ def test_arena_llm_can_request_extra_data_dimensions_before_decision(
                 "prefer_realtime": prefer_realtime,
                 "refresh": refresh,
                 "end_date": end_date,
+                "news_query": news_query,
             }
         )
         return {
@@ -3014,6 +3052,7 @@ def test_arena_llm_can_request_extra_data_dimensions_before_decision(
         "valuation",
         "pledge_stat",
     ]
+    assert data_requests[-1]["news_query"] == "今日A股盘中实时新闻 板块异动 个股公告"
     context = response.json()["orders"][0]["decision_context"]
     assert context["llm_decision"]["data_dimension_request"]["dimensions"] == [
         "financial_indicator",

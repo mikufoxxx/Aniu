@@ -713,6 +713,7 @@ class ArenaService:
                 prefer_realtime=prefer_realtime,
                 refresh=False,
                 end_date=str(history_end_date) if history_end_date else None,
+                news_query=str((phase_context or {}).get("news_query") or "") or None,
             )
         except Exception as exc:
             return {

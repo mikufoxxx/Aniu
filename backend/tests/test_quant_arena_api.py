@@ -17,6 +17,7 @@ from app.db.database import session_scope
 from app.db.models import (
     AppSettings,
     ArenaAccount,
+    ArenaAgentConfig,
     ArenaAgentMemory,
     ArenaOrder,
     ArenaRun,
@@ -1101,6 +1102,16 @@ def test_arena_leaderboard_revalues_positions_and_exposes_latest_morning(
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
         with session_scope() as db:
+            db.add(
+                ArenaAgentConfig(
+                    agent_id="live_ai",
+                    agent_name="实时 AI",
+                    style="auto",
+                    provider="forecast-ai",
+                    model="gpt-5.5",
+                    enabled=True,
+                )
+            )
             account = ArenaAccount(
                 agent_id="live_ai",
                 agent_name="实时 AI",
@@ -1166,6 +1177,50 @@ def test_arena_leaderboard_revalues_positions_and_exposes_latest_morning(
     assert item["positions"][0]["last_price"] == 12
     assert item["positions"][0]["unrealized_pnl"] == 3000
     assert item["latest_recommendation"]["picks"][0]["symbol"] == "000001.SZ"
+
+    _reset_state()
+
+
+def test_arena_leaderboard_ignores_unconfigured_legacy_accounts(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(
+                ArenaAgentConfig(
+                    agent_id="active_ai",
+                    agent_name="当前 AI",
+                    style="auto",
+                    provider="forecast-ai",
+                    model="gpt-5.5",
+                    enabled=True,
+                )
+            )
+            db.add(
+                ArenaAccount(
+                    agent_id="active_ai",
+                    agent_name="当前 AI",
+                    style="auto",
+                    initial_cash=200000,
+                    cash=200000,
+                )
+            )
+            db.add(
+                ArenaAccount(
+                    agent_id="legacy_ai",
+                    agent_name="历史 AI",
+                    style="auto",
+                    initial_cash=200000,
+                    cash=260000,
+                )
+            )
+        response = client.get("/api/aniu/arena/leaderboard", headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["agent_id"] for item in items] == ["active_ai"]
 
     _reset_state()
 

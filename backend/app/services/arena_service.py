@@ -1229,8 +1229,11 @@ class ArenaService:
         agents = self.list_agents(db)["agents"]
         agent_by_id = {str(agent.get("id")): agent for agent in agents}
         ordered_agent_ids = [str(agent.get("id")) for agent in agents if agent.get("id")]
-        for account in accounts:
-            if account.agent_id not in agent_by_id:
+        has_stored_configs = db.scalar(select(ArenaAgentConfig.id).limit(1)) is not None
+        if not has_stored_configs:
+            for account in accounts:
+                if account.agent_id in agent_by_id:
+                    continue
                 agent_by_id[account.agent_id] = {
                     "id": account.agent_id,
                     "name": account.agent_name,
@@ -1243,6 +1246,15 @@ class ArenaService:
         initial_cash = float(settings.arena_initial_cash or ARENA_DEFAULT_INITIAL_CASH)
         quote_by_symbol = (
             self._realtime_quotes_for_positions(accounts) if refresh_quotes else {}
+        )
+        recent_by_agent_id = (
+            self._recent_agent_recommendation_map(
+                db,
+                agent_ids=ordered_agent_ids,
+                limit=1,
+            )
+            if include_latest_recommendation
+            else {}
         )
         items: list[dict[str, Any]] = []
         for agent_id in ordered_agent_ids:
@@ -1257,7 +1269,7 @@ class ArenaService:
                     quote_by_symbol=quote_by_symbol,
                 )
             if include_latest_recommendation:
-                recent = self._recent_agent_recommendations(db, agent_id=agent_id, limit=1)
+                recent = recent_by_agent_id.get(agent_id) or []
                 item["latest_recommendation"] = recent[0] if recent else None
             items.append(item)
         return items
@@ -2569,6 +2581,48 @@ class ArenaService:
                 recommendations.append(enriched)
                 if len(recommendations) >= limit:
                     return recommendations
+        return recommendations
+
+    def _recent_agent_recommendation_map(
+        self,
+        db: Session,
+        *,
+        agent_ids: list[str],
+        limit: int,
+    ) -> dict[str, list[dict[str, Any]]]:
+        normalized_ids = [str(agent_id) for agent_id in agent_ids if agent_id]
+        if not normalized_ids:
+            return {}
+
+        requested_ids = set(normalized_ids)
+        per_agent_limit = max(1, min(limit, 10))
+        recommendations = {agent_id: [] for agent_id in normalized_ids}
+        runs = db.scalars(
+            select(ArenaRun)
+            .where(ArenaRun.phase == "morning_recommendation")
+            .order_by(ArenaRun.id.desc())
+            .limit(max(10, min(len(normalized_ids) * per_agent_limit * 5, 100)))
+        ).all()
+        for run in runs:
+            if all(len(items) >= per_agent_limit for items in recommendations.values()):
+                break
+            if not self._is_current_phase_output(
+                phase="morning_recommendation",
+                created_at=run.created_at,
+            ):
+                continue
+            payload = run.candidate_payload or {}
+            for item in payload.get("agent_recommendations") or []:
+                agent_id = str(item.get("agent_id") or "")
+                if agent_id not in requested_ids:
+                    continue
+                if len(recommendations[agent_id]) >= per_agent_limit:
+                    continue
+                enriched = dict(item)
+                self._enrich_recommendation_names(db, enriched)
+                enriched["run_id"] = run.id
+                enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
+                recommendations[agent_id].append(enriched)
         return recommendations
 
     def _enrich_recommendation_names(

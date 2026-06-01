@@ -166,6 +166,7 @@ def test_intraday_bars_fall_back_to_tencent_minutes_when_eastmoney_fails(monkeyp
         return FakeTencentResponse()
 
     monkeypatch.setattr(module.httpx, "get", fake_get)
+    monkeypatch.setattr(module.shutil, "which", lambda name: None)
     monkeypatch.setattr(
         module,
         "_market_now",
@@ -190,6 +191,80 @@ def test_intraday_bars_fall_back_to_tencent_minutes_when_eastmoney_fails(monkeyp
             "is_realtime": False,
         }
     ]
+
+
+def test_intraday_bars_use_easy_tdx_when_primary_is_stale(monkeypatch) -> None:
+    from app.services import market_data_service as module
+    from app.services.market_data_service import market_data_service
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": {
+                    "klines": [
+                        "2026-05-29 15:00,10.90,10.91,10.93,10.80,1000,1091000.00",
+                    ]
+                }
+            }
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = json.dumps(
+            [
+                {
+                    "datetime": "2026-06-01T10:30:00.000",
+                    "open": 10.9,
+                    "high": 10.95,
+                    "low": 10.81,
+                    "close": 10.93,
+                    "vol": 428850,
+                    "amount": 466594440,
+                },
+                {
+                    "datetime": "2026-06-01T11:30:00.000",
+                    "open": 10.93,
+                    "high": 10.96,
+                    "low": 10.91,
+                    "close": 10.91,
+                    "vol": 163695,
+                    "amount": 179043839,
+                },
+            ]
+        )
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return FakeCompleted()
+
+    monkeypatch.setattr(module.httpx, "get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/local/bin/easy-tdx")
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        module,
+        "_market_now",
+        lambda: datetime(2026, 6, 1, 13, 6, tzinfo=module.MARKET_TIMEZONE),
+    )
+    market_data_service._intraday_cache = {}
+    market_data_service._intraday_cache_expires_at = {}
+
+    bars = market_data_service.get_intraday_bars("000001.SZ", interval="hourly", limit=2)
+
+    assert captured["command"][:7] == [
+        "easy-tdx",
+        "kline",
+        "SZ",
+        "000001",
+        "--period",
+        "60MIN",
+        "--count",
+    ]
+    assert bars[-1]["trade_date"] == "2026-06-01 11:30"
+    assert {item["source"] for item in bars} == {"easy_tdx_kline"}
 
 
 def test_tencent_quotes_are_requested_in_batches(monkeypatch) -> None:

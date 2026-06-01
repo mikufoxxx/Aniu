@@ -2240,6 +2240,10 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     assert payload["agent_recommendations"][0]["action"] == "WATCH"
     assert 1 <= len(payload["agent_recommendations"][0]["picks"]) <= 5
     assert len(payload["agent_recommendations"][0]["picks"]) < 2
+    first_pick = payload["agent_recommendations"][0]["picks"][0]
+    assert first_pick["prediction"]["frozen"] is True
+    assert first_pick["prediction"]["history_end_date"] == "20260528"
+    assert first_pick["prediction"]["forecast_series"]
     assert payload["agent_recommendations"][0]["playbook"]["mode"] in {
         "short_swing",
         "quant_rotation",
@@ -3711,10 +3715,13 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert all(pick["name"] != pick["symbol"] for pick in morning["picks"])
     assert all(pick["ai_selection_score"] > 0 for pick in morning["picks"])
     assert all("risk_flags" in pick for pick in morning["picks"])
+    assert all("prediction" in pick for pick in morning["picks"])
     assert len(payload["intraday"]["orders"]) >= 1
     order_chart = payload["intraday"]["orders"][0]["charts"]
     assert order_chart["trade_markers"][0]["action"] in {"BUY", "SELL"}
     assert order_chart["price_series"]
+    assert order_chart["data_summary"]["daily_points"] > 0
+    assert "forecast_actual_comparison" in order_chart
     assert payload["summary"]["charts"]["action_distribution"]
     assert payload["summary"]["charts"]["symbol_exposure"]
     assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"

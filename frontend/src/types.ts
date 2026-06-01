@@ -645,6 +645,8 @@ export interface StockAnalysisCharts {
   }
   return_distribution: DistributionBucket[]
   volume_profile: VolumeProfileBucket[]
+  data_summary?: Record<string, unknown>
+  forecast_actual_comparison?: Record<string, unknown>
 }
 
 export interface OrderCharts {
@@ -652,6 +654,10 @@ export interface OrderCharts {
   interval_series: Record<'daily' | 'weekly' | 'monthly' | 'hourly', PriceSeriesPoint[]>
   forecast_series: ForecastPoint[]
   trade_markers: TradeMarker[]
+  forecast_snapshot?: Record<string, unknown>
+  forecast_actual_comparison?: Record<string, unknown>
+  data_summary?: Record<string, unknown>
+  explanation_notes?: string[]
 }
 
 export interface AIForecastCard {
@@ -851,6 +857,9 @@ export interface ArenaAgentRecommendation {
     price?: number | null
     change_pct?: number | null
     reason?: string
+    reasons?: string[]
+    data_sources?: string[]
+    prediction?: Record<string, unknown>
   }>
   symbol: string
   name: string

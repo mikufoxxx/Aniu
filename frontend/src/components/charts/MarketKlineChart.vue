@@ -26,6 +26,12 @@
         {{ option.label }}
       </button>
     </div>
+    <div v-if="metaItems.length || explanationNotes?.length" class="chart-data-strip">
+      <span v-for="item in metaItems" :key="item.label">
+        <b>{{ item.label }}</b>{{ item.value }}
+      </span>
+      <span v-for="note in explanationNotes || []" :key="note" class="chart-note">{{ note }}</span>
+    </div>
     <div ref="chartEl" class="chart-canvas"></div>
   </section>
 </template>
@@ -45,6 +51,10 @@ const props = defineProps<{
   intervalSeries?: Record<ChartInterval, PriceSeriesPoint[]>
   forecastSeries?: ForecastPoint[]
   markers?: TradeMarker[]
+  dataSummary?: Record<string, unknown>
+  forecastSnapshot?: Record<string, unknown>
+  forecastActualComparison?: Record<string, unknown>
+  explanationNotes?: string[]
 }>()
 
 const chartEl = ref<HTMLDivElement | null>(null)
@@ -77,6 +87,32 @@ const latestRealtimePoint = computed(() => {
 const activeForecastSeries = computed(() => (
   activeInterval.value === 'daily' ? (props.forecastSeries || []) : []
 ))
+const metaItems = computed(() => {
+  const summary = props.dataSummary ?? {}
+  const comparison = props.forecastActualComparison ?? {}
+  const items: Array<{ label: string; value: string }> = []
+  if (typeof summary.daily_points === 'number') {
+    items.push({ label: '日线', value: `${summary.daily_points} 根` })
+  }
+  if (typeof summary.hourly_points === 'number' && summary.hourly_points > 0) {
+    items.push({
+      label: '分时',
+      value: `${summary.hourly_points} 根 · ${String(summary.latest_hourly_source || '--')}`,
+    })
+  }
+  if (summary.forecast_frozen) {
+    items.push({
+      label: '预测',
+      value: `已冻结 · ${String(summary.forecast_history_end_date || '--')}`,
+    })
+  } else if (activeForecastSeries.value.length) {
+    items.push({ label: '预测', value: `${activeForecastSeries.value.length} 点` })
+  }
+  if (comparison.summary) {
+    items.push({ label: '对照', value: String(comparison.summary) })
+  }
+  return items
+})
 
 function resize(): void {
   chart?.resize()

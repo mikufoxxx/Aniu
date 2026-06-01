@@ -248,6 +248,7 @@ class ArenaService:
 
         if normalized_phase == "morning_recommendation":
             recommendations = self._morning_recommendations(
+                db=db,
                 agents=active_agents,
                 agent_candidate_contexts=agent_candidate_contexts,
                 snapshot_id=snapshot_id,
@@ -861,6 +862,7 @@ class ArenaService:
     def _morning_recommendations(
         self,
         *,
+        db: Session,
         agents: list[dict[str, Any]],
         agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
@@ -891,6 +893,12 @@ class ArenaService:
                 style=style,
                 agent=agent,
                 agent_index=index,
+            )
+            picks = self._attach_morning_predictions(
+                db,
+                picks=picks,
+                generated_at=self._now_shanghai(),
+                history_end_date=str(phase_context.get("history_end_date") or ""),
             )
             candidate = picks[0] if picks else None
             if candidate is None:
@@ -1036,6 +1044,40 @@ class ArenaService:
                 break
         return picks
 
+    def _attach_morning_predictions(
+        self,
+        db: Session,
+        *,
+        picks: list[dict[str, Any]],
+        generated_at: datetime,
+        history_end_date: str,
+    ) -> list[dict[str, Any]]:
+        enriched: list[dict[str, Any]] = []
+        cutoff = history_end_date or None
+        for pick in picks:
+            item = dict(pick)
+            symbol = str(item.get("symbol") or "").strip()
+            if symbol:
+                try:
+                    item["prediction"] = chart_data_service.frozen_prediction_snapshot(
+                        db,
+                        symbol=symbol,
+                        generated_at=generated_at,
+                        end_date=cutoff,
+                    )
+                except Exception as exc:
+                    item["prediction"] = {
+                        "frozen": True,
+                        "symbol": symbol,
+                        "generated_at": generated_at.isoformat(),
+                        "history_end_date": cutoff,
+                        "source": "morning_frozen_quant_regime_projection",
+                        "forecast_series": [],
+                        "error": str(exc),
+                    }
+            enriched.append(item)
+        return enriched
+
     def agent_dashboard(
         self,
         db: Session,
@@ -1054,7 +1096,17 @@ class ArenaService:
             .where(ArenaAccount.agent_id == agent_id)
         )
         summary = self._account_summary(agent=agent, account=account)
-        recent_orders = self._recent_orders(db, agent_id=agent_id, limit=20)
+        morning_recommendations = self._recent_agent_recommendations(
+            db,
+            agent_id=agent_id,
+            limit=10,
+        )
+        recent_orders = self._recent_orders(
+            db,
+            agent_id=agent_id,
+            limit=20,
+            prediction_by_symbol=self._prediction_by_symbol(morning_recommendations),
+        )
         summary["charts"] = chart_data_service.arena_summary_charts(
             orders=recent_orders,
             positions=list(summary.get("positions") or []),
@@ -1063,11 +1115,7 @@ class ArenaService:
             "agent": agent,
             "summary": summary,
             "morning": {
-                "recommendations": self._recent_agent_recommendations(
-                    db,
-                    agent_id=agent_id,
-                    limit=10,
-                )
+                "recommendations": morning_recommendations
             },
             "intraday": {
                 "orders": recent_orders
@@ -2715,6 +2763,16 @@ class ArenaService:
             "price": candidate.get("price"),
             "change_pct": candidate.get("change_pct"),
             "reason": candidate.get("rationale") or "",
+            "reasons": list(ai_selection.get("selection_reasons") or []),
+            "data_sources": [
+                source
+                for source in [
+                    candidate.get("source"),
+                    *list(candidate.get("source_candidates") or []),
+                    "tushare_daily" if (candidate.get("daily_factors") or {}).get("bars_used") else None,
+                ]
+                if source
+            ],
         }
 
     def _playbook_for_style(self, style: str) -> dict[str, str]:
@@ -2777,6 +2835,7 @@ class ArenaService:
                     continue
                 enriched = dict(item)
                 self._enrich_recommendation_names(db, enriched)
+                self._attach_recommendation_prediction_actuals(db, enriched)
                 enriched["run_id"] = run.id
                 enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
                 recommendations.append(enriched)
@@ -2822,6 +2881,7 @@ class ArenaService:
                     continue
                 enriched = dict(item)
                 self._enrich_recommendation_names(db, enriched)
+                self._attach_recommendation_prediction_actuals(db, enriched)
                 enriched["run_id"] = run.id
                 enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
                 recommendations[agent_id].append(enriched)
@@ -2853,12 +2913,40 @@ class ArenaService:
         if symbol and (not name or name == symbol):
             recommendation["name"] = names.get(symbol) or symbol
 
+    def _attach_recommendation_prediction_actuals(
+        self,
+        db: Session,
+        recommendation: dict[str, Any],
+    ) -> None:
+        for pick in recommendation.get("picks") or []:
+            if not isinstance(pick, dict):
+                continue
+            prediction = pick.get("prediction")
+            if not isinstance(prediction, dict):
+                continue
+            symbol = str(pick.get("symbol") or "").strip()
+            if not symbol:
+                continue
+            try:
+                series = chart_data_service.price_series(db, symbol=symbol, limit=120)
+                prediction["actual_comparison"] = chart_data_service.forecast_actual_comparison(
+                    price_series=series,
+                    forecast_series=list(prediction.get("forecast_series") or []),
+                )
+            except Exception as exc:
+                prediction["actual_comparison"] = {
+                    "matched_points": [],
+                    "latest_error_pct": None,
+                    "summary": f"实际走势对照暂不可用：{exc}",
+                }
+
     def _recent_orders(
         self,
         db: Session,
         *,
         agent_id: str,
         limit: int,
+        prediction_by_symbol: dict[str, dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         orders = db.scalars(
             select(ArenaOrder)
@@ -2874,6 +2962,7 @@ class ArenaService:
             )
         ]
         quote_by_symbol = self._realtime_quotes_for_orders(orders)
+        prediction_by_symbol = prediction_by_symbol or {}
         return [
             {
                 "id": order.id,
@@ -2893,10 +2982,32 @@ class ArenaService:
                     price=order.price,
                     quantity=order.quantity,
                     realtime_quote=quote_by_symbol.get(normalize_symbol(order.symbol)),
+                    frozen_prediction=prediction_by_symbol.get(normalize_symbol(order.symbol)),
                 ),
             }
             for order in orders
         ]
+
+    def _prediction_by_symbol(
+        self,
+        recommendations: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        result: dict[str, dict[str, Any]] = {}
+        for recommendation in recommendations:
+            for pick in recommendation.get("picks") or []:
+                if not isinstance(pick, dict):
+                    continue
+                prediction = pick.get("prediction")
+                if not isinstance(prediction, dict):
+                    continue
+                symbol = str(pick.get("symbol") or "").strip()
+                if not symbol:
+                    continue
+                try:
+                    result.setdefault(normalize_symbol(symbol), prediction)
+                except ValueError:
+                    continue
+        return result
 
     def _realtime_quotes_for_orders(self, orders: list[ArenaOrder]) -> dict[str, dict[str, Any]]:
         return self._realtime_quotes_for_symbols([order.symbol for order in orders if order.symbol])

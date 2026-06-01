@@ -152,10 +152,11 @@ class ChartDataService:
         )
         trade_date = series[-1]["trade_date"] if series else None
         marker_price = float(price or (series[-1]["close"] if series else 0))
+        forecast = self.forecast_series(series)
         return {
             "price_series": series,
             "interval_series": self.interval_series(series, hourly_series=hourly),
-            "forecast_series": self.forecast_series(series),
+            "forecast_series": forecast,
             "signal_markers": [
                 {
                     "action": action,
@@ -173,6 +174,24 @@ class ChartDataService:
             "support_resistance": self.support_resistance(series),
             "return_distribution": self.return_distribution_from_prices(series),
             "volume_profile": self.volume_profile(series),
+            "data_summary": self.chart_data_summary(
+                price_series=series,
+                hourly_series=hourly,
+                forecast_series=forecast,
+                markers=[
+                    {
+                        "action": action,
+                        "symbol": normalize_symbol(symbol),
+                        "trade_date": trade_date,
+                        "price": round(marker_price, 4),
+                        "quantity": int(quantity or 0),
+                    }
+                ],
+            ),
+            "forecast_actual_comparison": self.forecast_actual_comparison(
+                price_series=series,
+                forecast_series=forecast,
+            ),
         }
 
     def order_charts(
@@ -186,6 +205,7 @@ class ChartDataService:
         quantity: int,
         realtime_quote: dict[str, Any] | None = None,
         hourly_series: list[dict[str, Any]] | None = None,
+        frozen_prediction: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         series = self.price_series_with_realtime(
@@ -195,19 +215,154 @@ class ChartDataService:
             realtime_quote=realtime_quote,
             intraday_series=hourly,
         )
+        forecast = (
+            list(frozen_prediction.get("forecast_series") or [])
+            if frozen_prediction
+            else self.forecast_series(series)
+        )
+        markers = [
+            {
+                "action": action,
+                "symbol": normalize_symbol(symbol),
+                "trade_date": trade_date or (series[-1]["trade_date"] if series else None),
+                "price": round(float(price or 0), 4),
+                "quantity": int(quantity or 0),
+            }
+        ]
         return {
             "price_series": series,
             "interval_series": self.interval_series(series, hourly_series=hourly),
-            "forecast_series": self.forecast_series(series),
-            "trade_markers": [
-                {
-                    "action": action,
-                    "symbol": normalize_symbol(symbol),
-                    "trade_date": trade_date or (series[-1]["trade_date"] if series else None),
-                    "price": round(float(price or 0), 4),
-                    "quantity": int(quantity or 0),
-                }
+            "forecast_series": forecast,
+            "trade_markers": markers,
+            "forecast_snapshot": dict(frozen_prediction or {}),
+            "forecast_actual_comparison": self.forecast_actual_comparison(
+                price_series=series,
+                forecast_series=forecast,
+            ),
+            "data_summary": self.chart_data_summary(
+                price_series=series,
+                hourly_series=hourly,
+                forecast_series=forecast,
+                markers=markers,
+                frozen_prediction=frozen_prediction,
+            ),
+            "explanation_notes": [
+                "日/周/月线来自本地 Tushare 日线库存，盘中小时线来自东方财富分钟 K 线，失败时用腾讯分钟线聚合。",
+                "最新日线会合并后端统一缓存的腾讯/easy-tdx 实时快照；同一批请求会复用缓存和进行中的请求。",
+                "买卖点按订单成交时间映射到同日可见 K 线；分时页按真实分钟 K 线聚合后的 OHLC 展示。",
+                "预测线优先使用早盘冻结快照，后续刷新只追加实际走势对照，不改写预测本身。",
             ],
+        }
+
+    def frozen_prediction_snapshot(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        generated_at: datetime,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        series = self.price_series(
+            db,
+            symbol=symbol,
+            end_date=end_date,
+            limit=90,
+        )
+        forecast = self.forecast_series(series)
+        support_resistance = self.support_resistance(series)
+        return {
+            "frozen": True,
+            "symbol": normalize_symbol(symbol),
+            "generated_at": generated_at.astimezone(MARKET_TIMEZONE).isoformat()
+            if generated_at.tzinfo
+            else generated_at.replace(tzinfo=MARKET_TIMEZONE).isoformat(),
+            "history_end_date": end_date or (series[-1]["trade_date"] if series else None),
+            "source": "morning_frozen_quant_regime_projection",
+            "history_points": len(series),
+            "base_close": series[-1]["close"] if series else None,
+            "support_resistance": support_resistance,
+            "forecast_series": forecast,
+            "methodology": [
+                "冻结时只使用早盘可见历史日线，不使用未来行情。",
+                "预测由近20日收益、5日短动量、均线差、回归斜率、RSI 和支撑压力共同生成。",
+                "刷新页面时不会重算这条预测线，只会用最新实际走势计算偏差。",
+            ],
+        }
+
+    def forecast_actual_comparison(
+        self,
+        *,
+        price_series: list[dict[str, Any]],
+        forecast_series: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not price_series or not forecast_series:
+            return {"matched_points": [], "latest_error_pct": None, "summary": "暂无可对照数据。"}
+        actual_by_day = {
+            self._compact_trade_date(str(point.get("trade_date") or "")): point
+            for point in price_series
+            if point.get("trade_date")
+        }
+        matched: list[dict[str, Any]] = []
+        for forecast in forecast_series:
+            day = self._compact_trade_date(str(forecast.get("trade_date") or ""))
+            actual = actual_by_day.get(day)
+            if actual is None:
+                continue
+            forecast_price = self._safe_float(forecast.get("price"))
+            actual_close = self._safe_float(actual.get("close"))
+            if forecast_price in (None, 0) or actual_close is None:
+                continue
+            error_pct = (actual_close - forecast_price) / forecast_price * 100
+            matched.append(
+                {
+                    "trade_date": day,
+                    "forecast_price": round(forecast_price, 4),
+                    "actual_close": round(actual_close, 4),
+                    "error_pct": round(error_pct, 4),
+                }
+            )
+        latest = matched[-1] if matched else None
+        if latest is None:
+            latest_actual = price_series[-1]
+            summary = (
+                f"预测已冻结，当前最新实际点为 {latest_actual.get('trade_date')} "
+                f"{latest_actual.get('close')}，尚未命中预测日期。"
+            )
+        else:
+            summary = (
+                f"已对照 {len(matched)} 个实际收盘点，最新偏差 "
+                f"{latest['error_pct']:.2f}%。"
+            )
+        return {
+            "matched_points": matched,
+            "latest_error_pct": latest.get("error_pct") if latest else None,
+            "summary": summary,
+        }
+
+    def chart_data_summary(
+        self,
+        *,
+        price_series: list[dict[str, Any]],
+        hourly_series: list[dict[str, Any]],
+        forecast_series: list[dict[str, Any]],
+        markers: list[dict[str, Any]],
+        frozen_prediction: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        latest_daily = price_series[-1] if price_series else {}
+        latest_hourly = hourly_series[-1] if hourly_series else {}
+        return {
+            "daily_points": len(price_series),
+            "hourly_points": len(hourly_series),
+            "forecast_points": len(forecast_series),
+            "marker_count": len(markers),
+            "latest_daily_trade_date": latest_daily.get("trade_date"),
+            "latest_daily_source": latest_daily.get("source") or "tushare_daily",
+            "latest_daily_is_realtime": bool(latest_daily.get("is_realtime")),
+            "latest_hourly_trade_time": latest_hourly.get("trade_date"),
+            "latest_hourly_source": latest_hourly.get("source"),
+            "forecast_frozen": bool((frozen_prediction or {}).get("frozen")),
+            "forecast_generated_at": (frozen_prediction or {}).get("generated_at"),
+            "forecast_history_end_date": (frozen_prediction or {}).get("history_end_date"),
         }
 
     def risk_metrics(

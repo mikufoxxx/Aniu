@@ -126,9 +126,14 @@
               </div>
               <p>{{ morningRecommendation.reason }}</p>
               <div class="arena-agent-picks">
-                <span v-for="pick in morningRecommendation.picks || []" :key="pick.symbol">
-                  {{ pick.name }} {{ pick.symbol }} · {{ scoreText(pick.score) }}
-                </span>
+                <article v-for="pick in morningRecommendation.picks || []" :key="pick.symbol" class="arena-pick-card">
+                  <strong>{{ pick.name }} {{ pick.symbol }}</strong>
+                  <span>{{ formatPrice(pick.price) }} · {{ scoreText(pick.score) }} · {{ formatChange(pick.change_pct) }}</span>
+                  <p>{{ pick.reason || firstText(pick.reasons) || '由量价、趋势、资金与风险项综合入选。' }}</p>
+                  <small v-if="pick.prediction">
+                    预测冻结 {{ predictionText(pick.prediction) }}
+                  </small>
+                </article>
               </div>
             </article>
           </div>
@@ -143,6 +148,20 @@
                 <span>{{ order.quantity }} / {{ formatPrice(order.price) }}</span>
               </div>
               <p>{{ order.reason }}</p>
+              <div class="arena-order-explain">
+                <div>
+                  <strong>为什么{{ order.action === 'SELL' ? '卖' : '买' }}</strong>
+                  <span>{{ orderDecisionReason(order) }}</span>
+                </div>
+                <div>
+                  <strong>关键价位</strong>
+                  <span>{{ orderPricePlan(order) }}</span>
+                </div>
+                <div>
+                  <strong>数据输入</strong>
+                  <span>{{ orderDataSources(order) }}</span>
+                </div>
+              </div>
               <MarketKlineChart
                 v-if="order.charts"
                 title="交易走势与买卖点"
@@ -151,6 +170,10 @@
                 :interval-series="order.charts.interval_series"
                 :forecast-series="order.charts.forecast_series"
                 :markers="order.charts.trade_markers"
+                :data-summary="order.charts.data_summary"
+                :forecast-snapshot="order.charts.forecast_snapshot"
+                :forecast-actual-comparison="order.charts.forecast_actual_comparison"
+                :explanation-notes="order.charts.explanation_notes"
               />
             </article>
           </div>
@@ -194,7 +217,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation } from '@/types'
+import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation, ArenaOrder } from '@/types'
 import BreakdownChart from '@/components/charts/BreakdownChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 
@@ -377,9 +400,18 @@ function scoreText(value: unknown): string {
   return typeof value === 'number' ? value.toFixed(1) : '--'
 }
 
+function firstText(values: unknown): string {
+  return Array.isArray(values) ? String(values.find(Boolean) || '') : ''
+}
+
 function formatPrice(value: number | null | undefined): string {
   if (typeof value !== 'number') return '--'
   return value.toFixed(value >= 100 ? 2 : 3)
+}
+
+function formatChange(value: number | null | undefined): string {
+  if (typeof value !== 'number') return '--'
+  return `${value.toFixed(2)}%`
 }
 
 function formatAmount(value: number | null | undefined): string {
@@ -398,6 +430,48 @@ function profitClass(value: number): string {
   if (value > 0) return 'profit-up'
   if (value < 0) return 'profit-down'
   return ''
+}
+
+function nestedRecord(value: unknown, key: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object') return {}
+  const record = value as Record<string, unknown>
+  const child = record[key]
+  return child && typeof child === 'object' ? child as Record<string, unknown> : {}
+}
+
+function orderDecisionReason(order: ArenaOrder): string {
+  const candidate = nestedRecord(order.decision_context, 'selected_candidate')
+  const aiSelection = nestedRecord(candidate, 'ai_selection')
+  const reasons = aiSelection.selection_reasons
+  if (Array.isArray(reasons) && reasons.length) return reasons.slice(0, 2).join('；')
+  const rationale = candidate.rationale
+  return typeof rationale === 'string' && rationale ? rationale : order.reason
+}
+
+function orderPricePlan(order: ArenaOrder): string {
+  const retail = nestedRecord(order.decision_context, 'retail_analysis')
+  const entry = nestedRecord(retail, 'entry_zone')
+  const sell = nestedRecord(retail, 'sell_plan')
+  const entryText = entry.low && entry.high ? `买入区 ${entry.low}-${entry.high}` : `成交 ${formatPrice(order.price)}`
+  const sellText = sell.stop_loss || sell.first_target
+    ? `止损 ${sell.stop_loss ?? '--'}，目标 ${sell.first_target ?? '--'}`
+    : '按图表支撑压力与订单纪律执行'
+  return `${entryText}；${sellText}`
+}
+
+function orderDataSources(order: ArenaOrder): string {
+  const sources = (order.decision_context?.data_sources ?? []) as unknown
+  if (Array.isArray(sources) && sources.length) return sources.slice(0, 5).join(' / ')
+  const summary = order.charts?.data_summary
+  if (summary?.latest_hourly_source) return `分时 ${String(summary.latest_hourly_source)}`
+  return '本地日线 + 后端统一行情缓存'
+}
+
+function predictionText(value: Record<string, unknown>): string {
+  const base = value.history_end_date ? `基于 ${String(value.history_end_date)}` : '已保存'
+  const comparison = value.actual_comparison as Record<string, unknown> | undefined
+  if (comparison?.summary) return `${base}；${String(comparison.summary)}`
+  return base
 }
 
 onMounted(() => {
@@ -637,18 +711,47 @@ onBeforeUnmount(() => {
 }
 
 .arena-agent-picks {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.arena-agent-picks span {
+.arena-pick-card,
+.arena-order-explain > div {
+  display: grid;
+  gap: 4px;
   border: 1px solid #e5e7eb;
-  border-radius: 999px;
+  border-radius: 10px;
   background: #f9fafb;
   color: #374151;
-  padding: 6px 8px;
+  padding: 9px;
   font-size: 12px;
+}
+
+.arena-pick-card strong,
+.arena-order-explain strong {
+  color: #111827;
+  font-size: 12px;
+}
+
+.arena-pick-card p {
+  margin: 0;
+  color: #6b7280;
+  line-height: 1.35;
+}
+
+.arena-pick-card small,
+.arena-order-explain span {
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.arena-order-explain {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 10px;
 }
 
 @media (max-width: 900px) {
@@ -681,6 +784,11 @@ onBeforeUnmount(() => {
   .arena-agent-detail-sidebar {
     position: static;
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .arena-agent-picks,
+  .arena-order-explain {
+    grid-template-columns: 1fr;
   }
 }
 </style>

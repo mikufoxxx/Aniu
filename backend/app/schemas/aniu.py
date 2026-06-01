@@ -696,6 +696,8 @@ class StockAnalysisChartsRead(BaseModel):
     support_resistance: dict[str, Any] = Field(default_factory=dict)
     return_distribution: list[dict[str, Any]] = Field(default_factory=list)
     volume_profile: list[dict[str, Any]] = Field(default_factory=list)
+    data_summary: dict[str, Any] = Field(default_factory=dict)
+    forecast_actual_comparison: dict[str, Any] = Field(default_factory=dict)
 
 
 class OrderChartsRead(BaseModel):
@@ -703,6 +705,10 @@ class OrderChartsRead(BaseModel):
     interval_series: dict[str, list[PriceSeriesPointRead]] = Field(default_factory=dict)
     forecast_series: list[dict[str, Any]] = Field(default_factory=list)
     trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
+    forecast_snapshot: dict[str, Any] = Field(default_factory=dict)
+    forecast_actual_comparison: dict[str, Any] = Field(default_factory=dict)
+    data_summary: dict[str, Any] = Field(default_factory=dict)
+    explanation_notes: list[str] = Field(default_factory=list)
 
 
 class ArenaOrderForecastResponse(BaseModel):

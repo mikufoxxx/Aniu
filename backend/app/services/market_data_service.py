@@ -33,6 +33,7 @@ _TENCENT_QUOTE_BATCH_SIZE = 60
 _EASTMONEY_QUOTE_BATCH_SIZE = 80
 _SINA_QUOTE_BATCH_SIZE = 220
 _TENCENT_QUOTE_TIMEOUT_SECONDS = 3.0
+_EASY_TDX_TIMEOUT_SECONDS = 4.0
 MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
@@ -60,6 +61,12 @@ def symbol_to_easy_tdx(symbol: str) -> str:
     normalized = normalize_symbol(symbol)
     code, suffix = normalized.split(".", 1)
     return f"{suffix} {code}"
+
+
+def symbol_to_easy_tdx_parts(symbol: str) -> tuple[str, str]:
+    normalized = normalize_symbol(symbol)
+    code, suffix = normalized.split(".", 1)
+    return suffix, code
 
 
 def symbol_to_eastmoney_secid(symbol: str) -> str:
@@ -159,8 +166,8 @@ class MarketDataService:
                 "name": "easy-tdx",
                 "tier": "quasi_high_frequency",
                 "status": "available" if easy_tdx_available else "optional_missing",
-                "cadence": "候选池 1-5 秒 quote 轮询",
-                "risk": "通达信公开服务器，分时/逐笔待独立接入，禁止全市场高压轮询。",
+                "cadence": "候选池 quote 交叉校验；分时 K 线在主源滞后时兜底",
+                "risk": "通达信公开服务器不稳定，必须走后端缓存，禁止全市场高压轮询。",
             },
             {
                 "id": "miaoxiang",
@@ -176,7 +183,7 @@ class MarketDataService:
             "recommended_usage": {
                 "daily": "Tushare",
                 "low_frequency": "腾讯行情主用，东方财富备用",
-                "quasi_high_frequency": "easy-tdx",
+                "quasi_high_frequency": "easy-tdx quote/kline",
                 "supplemental": "妙想",
             },
         }
@@ -190,7 +197,7 @@ class MarketDataService:
             "live_quote_cross_check": "easy_tdx",
             "live_quote_fallbacks": ["easy_tdx", "eastmoney", "sina", "local_fallback"],
             "intraday_primary": "eastmoney",
-            "intraday_fallback": "tencent_m5",
+            "intraday_fallback": "easy_tdx_kline, tencent_m5",
             "handoff_policy": {
                 "08:00-09:15": "早盘推荐只读 Tushare 历史日频、资金、财务、公告和新闻，不依赖盘中实时价。",
                 "09:15-15:35": "盘中图表和竞技场收益用腾讯低频快照缓存，5-30 秒粒度由后端统一拉取。",
@@ -413,12 +420,23 @@ class MarketDataService:
                 klt=klt,
                 limit=normalized_limit,
             )
-            if not results:
-                results = self._get_tencent_intraday_bars(
+            if self._intraday_needs_realtime_fallback(results):
+                easy_results = self._get_easy_tdx_intraday_bars(
                     normalized_symbol,
                     klt=klt,
                     limit=normalized_limit,
                 )
+                if self._is_newer_intraday_series(easy_results, results):
+                    results = easy_results
+
+            if self._intraday_needs_realtime_fallback(results):
+                tencent_results = self._get_tencent_intraday_bars(
+                    normalized_symbol,
+                    klt=klt,
+                    limit=normalized_limit,
+                )
+                if self._is_newer_intraday_series(tencent_results, results):
+                    results = tencent_results
             with self._intraday_cache_lock:
                 self._intraday_cache[cache_key] = [dict(item) for item in results]
                 self._intraday_cache_expires_at[cache_key] = time.time() + max(
@@ -461,6 +479,54 @@ class MarketDataService:
         if value not in mapping:
             raise ValueError("分时 K 线周期必须是 1m、5m、15m、30m 或 60m。")
         return mapping[value]
+
+    def _intraday_needs_realtime_fallback(self, rows: list[dict[str, Any]]) -> bool:
+        if not rows:
+            return True
+        latest_time = self._latest_intraday_datetime(rows)
+        if latest_time is None:
+            return True
+        now = _market_now().replace(tzinfo=None)
+        if now.weekday() >= 5:
+            return False
+        if (now.hour, now.minute) < (9, 30):
+            return False
+        return latest_time.date() < now.date()
+
+    def _is_newer_intraday_series(
+        self,
+        candidate: list[dict[str, Any]],
+        current: list[dict[str, Any]],
+    ) -> bool:
+        if not candidate:
+            return False
+        if not current:
+            return True
+        candidate_time = self._latest_intraday_datetime(candidate)
+        current_time = self._latest_intraday_datetime(current)
+        if candidate_time is None:
+            return False
+        if current_time is None:
+            return True
+        return candidate_time > current_time
+
+    def _latest_intraday_datetime(self, rows: list[dict[str, Any]]) -> datetime | None:
+        latest: datetime | None = None
+        for row in rows:
+            value = str(row.get("trade_date") or row.get("timestamp") or "").strip()
+            parsed = self._parse_intraday_datetime(value)
+            if parsed is not None and (latest is None or parsed > latest):
+                latest = parsed
+        return latest
+
+    def _parse_intraday_datetime(self, value: str) -> datetime | None:
+        text = value.replace("T", " ").strip()
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y%m%d%H%M%S", "%Y%m%d%H%M"):
+            try:
+                return datetime.strptime(text[: len(datetime.now().strftime(fmt))], fmt)
+            except ValueError:
+                continue
+        return None
 
     def _get_eastmoney_intraday_bars(
         self,
@@ -568,6 +634,82 @@ class MarketDataService:
             return self._aggregate_tencent_minutes_to_hourly(minute_rows)[-limit:]
         return minute_rows[-limit:]
 
+    def _get_easy_tdx_intraday_bars(
+        self,
+        symbol: str,
+        *,
+        klt: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if not shutil.which("easy-tdx"):
+            return []
+        period = {
+            "1": "1MIN",
+            "5": "5MIN",
+            "15": "15MIN",
+            "30": "30MIN",
+            "60": "60MIN",
+        }.get(klt)
+        if period is None:
+            return []
+        market, code = symbol_to_easy_tdx_parts(symbol)
+        payload = self._run_easy_tdx_json(
+            [
+                "easy-tdx",
+                "kline",
+                market,
+                code,
+                "--period",
+                period,
+                "--count",
+                str(max(1, min(int(limit or 120), 300))),
+                "--output",
+                "json",
+            ],
+            timeout=_EASY_TDX_TIMEOUT_SECONDS,
+        )
+        if not isinstance(payload, list):
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            trade_time = self._format_easy_tdx_datetime(item.get("datetime"))
+            close_price = _parse_float(item.get("close"))
+            if not trade_time or close_price is None:
+                continue
+            open_price = _parse_float(item.get("open"))
+            high_price = _parse_float(item.get("high"))
+            low_price = _parse_float(item.get("low"))
+            rows.append(
+                {
+                    "trade_date": _display_intraday_bar_time(trade_time),
+                    "open": round(open_price if open_price is not None else close_price, 4),
+                    "high": round(high_price if high_price is not None else close_price, 4),
+                    "low": round(low_price if low_price is not None else close_price, 4),
+                    "close": round(close_price, 4),
+                    "volume": float(_parse_float(item.get("vol")) or 0),
+                    "amount": float(_parse_float(item.get("amount")) or 0),
+                    "source": "easy_tdx_kline",
+                    "timestamp": _display_intraday_bar_time(trade_time),
+                    "is_realtime": True,
+                }
+            )
+        return rows[-limit:]
+
+    def _format_easy_tdx_datetime(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        text = text.replace("T", " ").replace("Z", "")
+        if "." in text:
+            text = text.split(".", 1)[0]
+        parsed = self._parse_intraday_datetime(text)
+        if parsed is None:
+            return text[:16]
+        return parsed.strftime("%Y-%m-%d %H:%M")
+
     def _parse_tencent_minute_rows(self, rows: list[Any]) -> list[dict[str, Any]]:
         parsed: list[dict[str, Any]] = []
         for row in rows:
@@ -644,24 +786,7 @@ class MarketDataService:
             "--output",
             "json",
         ]
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=12,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return []
-        if completed.returncode != 0:
-            return []
-        try:
-            import json
-
-            payload = json.loads(completed.stdout)
-        except (ValueError, TypeError):
-            return []
+        payload = self._run_easy_tdx_json(command, timeout=_EASY_TDX_TIMEOUT_SECONDS)
         if not isinstance(payload, list):
             return []
 
@@ -691,6 +816,29 @@ class MarketDataService:
                 }
             )
         return results
+
+    def _run_easy_tdx_json(
+        self,
+        command: list[str],
+        *,
+        timeout: float,
+    ) -> Any:
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        if completed.returncode != 0:
+            return []
+        try:
+            return json.loads(completed.stdout)
+        except (ValueError, TypeError):
+            return []
 
     def _get_tencent_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []

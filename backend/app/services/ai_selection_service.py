@@ -54,6 +54,18 @@ class AISelectionService:
             "refresh_endpoint": "/api/aniu/quant/dataset",
             "cadence": "30-60s",
         },
+        "news": {
+            "source": "mx_search_news",
+            "tables": [],
+            "refresh_endpoint": None,
+            "cadence": "realtime_or_event",
+        },
+        "announcement": {
+            "source": "mx_search_news",
+            "tables": [],
+            "refresh_endpoint": None,
+            "cadence": "realtime_or_event",
+        },
         "daily_history": {
             "source": "tushare_daily",
             "tables": ["daily_bars"],
@@ -418,6 +430,12 @@ class AISelectionService:
             bars_used = int(daily.get("bars_used") or 0)
             available = bars_used > 0
             summary = f"{bars_used} bars"
+        elif dimension == "news":
+            available = False
+            summary = "on demand news search"
+        elif dimension == "announcement":
+            available = False
+            summary = "on demand announcement search"
         elif dimension == "moneyflow":
             available = any(
                 _number(daily.get(key)) != 0

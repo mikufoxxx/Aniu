@@ -23,19 +23,22 @@ class AIStockPickerService:
         prefer_realtime: bool = True,
         lookback_days: int | None = None,
         agent: dict[str, Any] | None = None,
+        end_date: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         normalized_lookback_days = int(
             lookback_days or settings.market_data_maintenance_lookback_days
         )
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols] if symbols else None
-        dataset = quant_service.build_dataset(
-            db,
-            symbols=normalized_symbols,
-            limit=limit,
-            prefer_realtime=prefer_realtime,
-            lookback_days=normalized_lookback_days,
-        )
+        dataset_kwargs: dict[str, Any] = {
+            "symbols": normalized_symbols,
+            "limit": limit,
+            "prefer_realtime": prefer_realtime,
+            "lookback_days": normalized_lookback_days,
+        }
+        if end_date:
+            dataset_kwargs["end_date"] = end_date
+        dataset = quant_service.build_dataset(db, **dataset_kwargs)
         selection_plan = {
             **ai_selection_service.selection_plan(agent),
             "lookback_days": normalized_lookback_days,

@@ -1513,6 +1513,7 @@ def test_arena_run_requests_maximized_stock_pick_snapshot(monkeypatch, tmp_path)
         prefer_realtime=True,
         lookback_days=120,
         agent=None,
+        end_date=None,
     ):
         captured_requests.append((symbols, limit, prefer_realtime, lookback_days, (agent or {}).get("style")))
         call_index = len(captured_requests)
@@ -1600,6 +1601,7 @@ def test_arena_run_ignores_user_symbols_and_builds_independent_snapshot_per_agen
         prefer_realtime=True,
         lookback_days=120,
         agent=None,
+        end_date=None,
     ):
         captured_requests.append((symbols, limit, prefer_realtime, lookback_days, (agent or {}).get("style")))
         call_index = len(captured_requests)
@@ -1836,7 +1838,11 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     tmp_path,
 ) -> None:
     from app.db.models import ArenaRun
+    from app.services.ai_data_request_service import ai_data_request_service
+    from app.services.arena_service import ARENA_SCHEDULE_TIMEZONE, arena_service
     from app.services.market_data_service import market_data_service
+
+    requests: list[dict[str, object]] = []
 
     def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
         return [
@@ -1864,7 +1870,35 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
             },
         ]
 
+    def fake_execute(db, *, symbols, dimensions, limit, lookback_days, prefer_realtime, refresh, end_date=None):
+        requests.append(
+            {
+                "symbols": symbols,
+                "dimensions": dimensions,
+                "prefer_realtime": prefer_realtime,
+                "end_date": end_date,
+            }
+        )
+        return {
+            "requested_symbols": symbols,
+            "requested_dimensions": dimensions,
+            "actions": [
+                {"dimension": item, "source": f"source:{item}", "temporal_window": {}}
+                for item in dimensions
+            ],
+            "refresh": None,
+            "dataset": {"item_count": len(symbols), "data_sources": [], "coverage": {}},
+            "context": "早盘历史与资讯上下文",
+            "context_length": 11,
+        }
+
+    monkeypatch.setattr(
+        arena_service,
+        "_now_shanghai",
+        lambda: datetime(2026, 5, 29, 8, 20, tzinfo=ARENA_SCHEDULE_TIMEZONE),
+    )
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(ai_data_request_service, "execute", fake_execute)
 
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
@@ -1908,6 +1942,12 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
         "long_defensive",
     }
     assert payload["agent_recommendations"][0]["decision_context"]["action"] == "WATCH"
+    assert requests[0]["dimensions"][:3] == ["daily_history", "news", "announcement"]
+    assert requests[0]["prefer_realtime"] is False
+    assert requests[0]["end_date"] == "20260528"
+    request_context = payload["agent_recommendations"][0]["decision_context"]["ai_data_request"]
+    assert request_context["phase_context"]["phase"] == "morning_recommendation"
+    assert request_context["phase_context"]["history_end_date"] == "20260528"
     assert stored_run.phase == "morning_recommendation"
     assert stored_run.candidate_payload["agent_recommendations"][0]["agent_id"] == "momentum_ai"
 
@@ -1963,6 +2003,7 @@ def test_arena_morning_auto_agents_diversify_recommendations_by_model(
         prefer_realtime=True,
         lookback_days=120,
         agent=None,
+        end_date=None,
     ):
         items = [candidate(index) for index in range(8)]
         return {
@@ -2143,6 +2184,10 @@ def test_arena_closing_phase_records_agent_memory_and_reuses_it_in_prompt(
     assert closing_payload["agent_reviews"][0]["agent_id"] == "memory_ai"
     assert closing_payload["agent_reviews"][0]["memory_type"] == "closing_review"
     assert "收益" in closing_payload["agent_reviews"][0]["summary"]
+    assert "今日操作" in closing_payload["agent_reviews"][0]["summary"]
+    assert "历史日线" in closing_payload["agent_reviews"][0]["summary"]
+    assert closing_payload["agent_reviews"][0]["metrics"]["phase_context"]["phase"] == "closing_review"
+    assert "today_operations" in closing_payload["agent_reviews"][0]["metrics"]["phase_context"]["required_inputs"]
     assert memories.status_code == 200
     assert memories.json()["memories"][0]["summary"] == closing_payload["agent_reviews"][0]["summary"]
     assert second_run.status_code == 200
@@ -2224,6 +2269,8 @@ def test_arena_nightly_phase_records_backtest_learning_memory(
     assert payload["orders"] == []
     assert payload["agent_reviews"][0]["memory_type"] == "nightly_learning"
     assert "回测" in payload["agent_reviews"][0]["summary"]
+    assert payload["agent_reviews"][0]["metrics"]["phase_context"]["phase"] == "nightly_learning"
+    assert "backtest" in payload["agent_reviews"][0]["metrics"]["phase_context"]["required_inputs"]
     assert payload["agent_reviews"][0]["metrics"]["backtest"]["selected_symbol"] == "000001.SZ"
     assert payload["agent_reviews"][0]["metrics"]["backtest"]["return_ratio"] > 0
     assert stored_memory is not None
@@ -2707,13 +2754,18 @@ def test_arena_decision_uses_agent_on_demand_data_request(monkeypatch, tmp_path)
     assert requests[0]["symbols"] == ["000001.SZ"]
     assert requests[0]["dimensions"] == [
         "quote",
+        "news",
+        "announcement",
         "daily_history",
         "moneyflow",
         "sector_heat",
         "limit_event",
     ]
+    assert requests[0]["prefer_realtime"] is True
     assert requests[0]["refresh"] is False
     context = response.json()["orders"][0]["decision_context"]
+    assert context["ai_data_request"]["phase_context"]["phase"] == "intraday_trade"
+    assert "realtime_quote" in context["ai_data_request"]["phase_context"]["required_inputs"]
     assert context["ai_data_request"]["requested_symbols"] == ["000001.SZ"]
     assert context["ai_data_request"]["context_length"] == 18
     assert context["ai_data_request"]["actions"][0]["source"] == "tushare_moneyflow"
@@ -2850,6 +2902,8 @@ def test_arena_llm_can_request_extra_data_dimensions_before_decision(
     assert len(llm_payloads) == 2
     assert data_requests[-1]["dimensions"] == [
         "quote",
+        "news",
+        "announcement",
         "daily_history",
         "financial_indicator",
         "valuation",

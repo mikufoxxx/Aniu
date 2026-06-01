@@ -41,13 +41,15 @@ class AIDataRequestService:
                 dataset_limit=limit,
                 report_type=None,
             )
-        dataset = quant_service.build_dataset(
-            db,
-            symbols=normalized_symbols,
-            limit=limit,
-            prefer_realtime=prefer_realtime,
-            lookback_days=lookback_days,
-        )
+        dataset_kwargs: dict[str, Any] = {
+            "symbols": normalized_symbols,
+            "limit": limit,
+            "prefer_realtime": prefer_realtime,
+            "lookback_days": lookback_days,
+        }
+        if end_date:
+            dataset_kwargs["end_date"] = end_date
+        dataset = quant_service.build_dataset(db, **dataset_kwargs)
         context = ai_market_context_service.format_dataset_context(db, dataset)
         return {
             "requested_symbols": normalized_symbols,

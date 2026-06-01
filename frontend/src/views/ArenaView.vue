@@ -248,13 +248,12 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload } from '@/types'
+import type { AppSettings, ArenaAgentConfig, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload } from '@/types'
 import MultiEquityCurveChart from '@/components/charts/MultiEquityCurveChart.vue'
 
 const router = useRouter()
 const route = useRoute()
 const agents = ref<ArenaAgentConfig[]>([])
-const dashboards = ref<Record<string, ArenaAgentDashboardPayload>>({})
 const leaderboard = ref<ArenaLeaderboardPayload>({ items: [] })
 const equityCurves = ref<ArenaEquityCurvesPayload | null>(null)
 const aiConfig = ref<ArenaAIConfigPayload>({
@@ -287,27 +286,22 @@ const activeArenaView = computed<'ranking' | 'equity'>(() => {
 const rankedAgents = computed(() => {
   return agents.value
     .map((agent) => {
-      const board = dashboards.value[agent.id]
       const rank = leaderboard.value.items.find((item) => item.agent_id === agent.id)
       const rankPicks = rank?.latest_recommendation?.picks ?? []
-      const boardPicks = board?.morning.recommendations[0]?.picks ?? []
-      const latestPicks = rankPicks.length ? rankPicks : boardPicks
-      const summary = (board?.summary ?? {}) as Record<string, unknown>
+      const latestPicks = rankPicks
       const rankPositions = rank?.positions ?? []
-      const summaryPositions = Array.isArray(summary.positions) ? summary.positions : []
-      const latestOrder = board?.intraday.orders[0]
       return {
         ...agent,
-        totalAssets: rank?.total_assets ?? Number(board?.summary.total_assets ?? 0),
-        returnRatio: rank?.return_ratio ?? Number(board?.summary.return_ratio ?? 0),
-        orderCount: rank?.order_count ?? Number(board?.summary.order_count ?? 0),
-        cash: rank?.cash ?? Number(summary.cash ?? 0),
-        positionValue: rank?.position_value ?? Number(summary.position_value ?? 0),
-        realizedPnl: rank?.realized_pnl ?? Number(summary.realized_pnl ?? 0),
-        positionCount: rankPositions.length || summaryPositions.length,
-        latestAction: latestOrder ? `${latestOrder.action} ${latestOrder.name || latestOrder.symbol}` : '--',
-        closingCount: board?.closing.reviews.length ?? 0,
-        learningCount: board?.learning.reviews.length ?? 0,
+        totalAssets: rank?.total_assets ?? 0,
+        returnRatio: rank?.return_ratio ?? 0,
+        orderCount: rank?.order_count ?? 0,
+        cash: rank?.cash ?? 0,
+        positionValue: rank?.position_value ?? 0,
+        realizedPnl: rank?.realized_pnl ?? 0,
+        positionCount: rankPositions.length,
+        latestAction: '--',
+        closingCount: 0,
+        learningCount: 0,
         latestPicks,
       }
     })
@@ -341,27 +335,12 @@ async function loadArenaState(silent = false): Promise<void> {
     aiConfig.value = configPayload
     arenaInitialCash.value = normalizeInitialCash(settingsPayload)
     if (activeArenaView.value === 'equity') await loadEquityCurves(true)
-    if (silent) return
-    await loadDashboardPreviews()
   } catch (error) {
     if (!silent) errorMessage.value = error instanceof Error ? error.message : '竞技场加载失败。'
   } finally {
     arenaLoading = false
     if (!silent) loading.value = false
   }
-}
-
-async function loadDashboardPreviews(): Promise<void> {
-  const entries = await Promise.allSettled(
-    agents.value.map(async (agent) => [agent.id, await api.getArenaAgentDashboard(agent.id)] as const),
-  )
-  const nextDashboards = { ...dashboards.value }
-  for (const entry of entries) {
-    if (entry.status === 'fulfilled') {
-      nextDashboards[entry.value[0]] = entry.value[1]
-    }
-  }
-  dashboards.value = nextDashboards
 }
 
 async function loadEquityCurves(silent = false): Promise<void> {

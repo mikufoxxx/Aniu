@@ -83,6 +83,82 @@ ARENA_SCHEDULE_WINDOWS = (
         "window_minutes": 30,
     },
 )
+ARENA_PHASE_DATA_POLICIES = {
+    "morning_recommendation": {
+        "label": "早盘推荐",
+        "data_focus": "今天以前的历史数据、隔夜资讯和公告",
+        "ai_data_dimensions": [
+            "daily_history",
+            "news",
+            "announcement",
+            "quote",
+            "moneyflow",
+            "sector_heat",
+        ],
+        "required_inputs": [
+            "history_before_today",
+            "news",
+            "announcement",
+        ],
+        "prefer_realtime": False,
+        "history_cutoff": "before_today",
+    },
+    "intraday_trade": {
+        "label": "盘中模拟",
+        "data_focus": "实时行情、盘中新闻和已有历史结构",
+        "ai_data_dimensions": [
+            "quote",
+            "news",
+            "announcement",
+            "daily_history",
+        ],
+        "required_inputs": [
+            "realtime_quote",
+            "news",
+            "daily_history",
+            "positions",
+        ],
+        "prefer_realtime": True,
+        "history_cutoff": None,
+    },
+    "closing_review": {
+        "label": "收盘复盘",
+        "data_focus": "今日操作、收益、走势和历史日线",
+        "ai_data_dimensions": [
+            "quote",
+            "daily_history",
+            "moneyflow",
+            "sector_heat",
+            "news",
+        ],
+        "required_inputs": [
+            "today_operations",
+            "return",
+            "intraday_trend",
+            "daily_history",
+        ],
+        "prefer_realtime": True,
+        "history_cutoff": None,
+    },
+    "nightly_learning": {
+        "label": "夜间学习",
+        "data_focus": "历史数据和回测结果",
+        "ai_data_dimensions": [
+            "daily_history",
+            "moneyflow",
+            "sector_heat",
+            "financial_indicator",
+            "valuation",
+        ],
+        "required_inputs": [
+            "daily_history",
+            "backtest",
+            "historical_performance",
+        ],
+        "prefer_realtime": False,
+        "history_cutoff": None,
+    },
+}
 DEFAULT_AGENT_STYLES = ["auto", "auto", "auto", "auto", "auto"]
 
 STOP_LOSS_BY_STYLE = {
@@ -119,9 +195,12 @@ class ArenaService:
         settings = get_settings()
         app_settings = settings_service.get_or_create_settings(db)
         effective_initial_cash = self._arena_initial_cash(db, initial_cash)
+        phase_context = self._phase_data_context(db=db, phase=normalized_phase)
         agent_candidate_contexts = self._build_agent_candidate_contexts(
             db=db,
             agents=active_agents,
+            phase=normalized_phase,
+            phase_context=phase_context,
             limit=settings.market_data_maintenance_dataset_limit,
             lookback_days=settings.market_data_maintenance_lookback_days,
         )
@@ -143,6 +222,7 @@ class ArenaService:
             },
             "agent_recommendations": [],
             "schedule_context": schedule_context or {},
+            "phase_context": phase_context,
         }
         arena_run = ArenaRun(
             phase=normalized_phase,
@@ -276,6 +356,7 @@ class ArenaService:
                 stock_pick_snapshot_id=stock_pick_snapshot_id,
                 data_sources=agent_data_sources,
                 ai_data_request=candidate_context.get("ai_data_request"),
+                phase_context=candidate_context.get("phase_context") or phase_context,
                 app_settings=app_settings,
                 recent_memories=self.recent_agent_memories(
                     db,
@@ -357,6 +438,30 @@ class ArenaService:
                 "closing_review 或 nightly_learning。"
             )
         return normalized
+
+    def _phase_data_context(self, *, db: Session, phase: str) -> dict[str, Any]:
+        normalized_phase = self._normalize_phase(phase)
+        policy = dict(ARENA_PHASE_DATA_POLICIES[normalized_phase])
+        history_end_date = None
+        if policy.get("history_cutoff") == "before_today":
+            today = self._now_shanghai().strftime("%Y%m%d")
+            history_end_date = db.scalar(
+                select(DailyBar.trade_date)
+                .where(DailyBar.trade_date < today)
+                .order_by(DailyBar.trade_date.desc())
+                .limit(1)
+            )
+        return {
+            "phase": normalized_phase,
+            "label": policy["label"],
+            "data_focus": policy["data_focus"],
+            "ai_data_dimensions": list(policy["ai_data_dimensions"]),
+            "required_inputs": list(policy["required_inputs"]),
+            "prefer_realtime": bool(policy["prefer_realtime"]),
+            "history_cutoff": policy.get("history_cutoff"),
+            "history_end_date": history_end_date,
+            "timezone": str(ARENA_SCHEDULE_TIMEZONE),
+        }
 
     def _normalize_agent_payload(
         self,
@@ -528,23 +633,32 @@ class ArenaService:
         *,
         db: Session,
         agents: list[dict[str, Any]],
+        phase: str,
+        phase_context: dict[str, Any],
         limit: int,
         lookback_days: int,
     ) -> dict[str, dict[str, Any]]:
         contexts: dict[str, dict[str, Any]] = {}
+        prefer_realtime = bool(phase_context.get("prefer_realtime", True))
+        history_end_date = phase_context.get("history_end_date")
         for index, agent in enumerate(agents):
             agent_id = str(agent.get("id") or f"agent_{index + 1}")
-            stock_pick_snapshot = ai_stock_picker_service.build_snapshot(
-                db=db,
-                symbols=None,
-                limit=limit,
-                prefer_realtime=True,
-                lookback_days=lookback_days,
-                agent=agent,
-            )
+            snapshot_kwargs: dict[str, Any] = {
+                "db": db,
+                "symbols": None,
+                "limit": limit,
+                "prefer_realtime": prefer_realtime,
+                "lookback_days": lookback_days,
+                "agent": agent,
+            }
+            if history_end_date:
+                snapshot_kwargs["end_date"] = str(history_end_date)
+            stock_pick_snapshot = ai_stock_picker_service.build_snapshot(**snapshot_kwargs)
             selection_plan = stock_pick_snapshot.get("selection_plan") or {}
             candidates = stock_pick_snapshot["recommendations"]
             contexts[agent_id] = {
+                "phase": phase,
+                "phase_context": phase_context,
                 "stock_pick_snapshot": stock_pick_snapshot,
                 "stock_pick_snapshot_id": stock_pick_snapshot["snapshot_id"],
                 "selection_plan": selection_plan,
@@ -556,6 +670,7 @@ class ArenaService:
                     candidates=candidates,
                     selection_plan=selection_plan,
                     lookback_days=lookback_days,
+                    phase_context=phase_context,
                 ),
             }
         return contexts
@@ -567,6 +682,7 @@ class ArenaService:
         candidates: list[dict[str, Any]],
         selection_plan: dict[str, Any],
         lookback_days: int,
+        phase_context: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         symbols = [
             str(candidate.get("symbol") or "")
@@ -575,7 +691,13 @@ class ArenaService:
         ]
         if not symbols:
             return None
-        dimensions = list(selection_plan.get("dimensions") or ["quote", "daily_history"])
+        phase_dimensions = list((phase_context or {}).get("ai_data_dimensions") or [])
+        dimensions = self._merge_dimensions(
+            phase_dimensions,
+            list(selection_plan.get("dimensions") or ["quote", "daily_history"]),
+        )
+        prefer_realtime = bool((phase_context or {}).get("prefer_realtime", True))
+        history_end_date = (phase_context or {}).get("history_end_date")
         try:
             result = ai_data_request_service.execute(
                 db,
@@ -583,8 +705,9 @@ class ArenaService:
                 dimensions=dimensions,
                 limit=len(symbols),
                 lookback_days=int(selection_plan.get("lookback_days") or lookback_days),
-                prefer_realtime=True,
+                prefer_realtime=prefer_realtime,
                 refresh=False,
+                end_date=str(history_end_date) if history_end_date else None,
             )
         except Exception as exc:
             return {
@@ -595,9 +718,16 @@ class ArenaService:
                 "dataset": {},
                 "context": "",
                 "context_length": 0,
+                "prefer_realtime": prefer_realtime,
+                "history_end_date": str(history_end_date) if history_end_date else None,
+                "phase_context": phase_context or {},
                 "error": str(exc),
             }
-        return self._compact_ai_data_request(result)
+        compact = self._compact_ai_data_request(result)
+        compact["prefer_realtime"] = prefer_realtime
+        compact["history_end_date"] = str(history_end_date) if history_end_date else None
+        compact["phase_context"] = phase_context or {}
+        return compact
 
     def _compact_ai_data_request(self, result: dict[str, Any]) -> dict[str, Any]:
         dataset = result.get("dataset") or {}
@@ -718,6 +848,8 @@ class ArenaService:
             candidates = candidate_context["candidates"]
             stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
             data_sources = candidate_context["data_sources"]
+            phase_context = candidate_context.get("phase_context") or {}
+            ai_data_request = candidate_context.get("ai_data_request")
             style = str(agent.get("style") or "auto")
             picks = self._morning_picks(
                 candidates=candidates,
@@ -751,6 +883,7 @@ class ArenaService:
                         stock_pick_snapshot_id=stock_pick_snapshot_id,
                         agent=agent,
                         data_sources=data_sources,
+                        ai_data_request=ai_data_request,
                         candidate=candidate,
                         action="WATCH",
                         llm_decision=None,
@@ -871,6 +1004,7 @@ class ArenaService:
             candidates = candidate_context["candidates"]
             stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
             data_sources = candidate_context["data_sources"]
+            phase_context = candidate_context.get("phase_context") or {}
             account = db.scalar(
                 select(ArenaAccount)
                 .options(selectinload(ArenaAccount.positions))
@@ -885,6 +1019,8 @@ class ArenaService:
                 "snapshot_id": snapshot_id,
                 "stock_pick_snapshot_id": stock_pick_snapshot_id,
                 "data_sources": data_sources,
+                "phase_context": phase_context,
+                "ai_data_request": candidate_context.get("ai_data_request"),
                 "leaderboard": metrics,
                 "recent_orders": recent_orders,
             }
@@ -918,6 +1054,7 @@ class ArenaService:
             candidates = candidate_context["candidates"]
             stock_pick_snapshot_id = candidate_context["stock_pick_snapshot_id"]
             data_sources = candidate_context["data_sources"]
+            phase_context = candidate_context.get("phase_context") or {}
             backtest_symbols = [
                 str(item["symbol"]) for item in candidates if item.get("symbol")
             ]
@@ -942,6 +1079,8 @@ class ArenaService:
                 "snapshot_id": snapshot_id,
                 "stock_pick_snapshot_id": stock_pick_snapshot_id,
                 "data_sources": data_sources,
+                "phase_context": phase_context,
+                "ai_data_request": candidate_context.get("ai_data_request"),
                 "backtest": backtest,
                 "recent_memories": recent_memories,
             }
@@ -1347,6 +1486,7 @@ class ArenaService:
         stock_pick_snapshot_id: str,
         data_sources: list[str],
         ai_data_request: dict[str, Any] | None,
+        phase_context: dict[str, Any],
         app_settings: AppSettings,
         recent_memories: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
@@ -1380,6 +1520,7 @@ class ArenaService:
                         ),
                     },
                     lookback_days=get_settings().market_data_maintenance_lookback_days,
+                    phase_context=phase_context,
                 )
         llm_decision = self._llm_decision(
             agent=agent,
@@ -1684,6 +1825,8 @@ class ArenaService:
     ) -> dict[str, Any] | None:
         allowed_dimensions = [
             "quote",
+            "news",
+            "announcement",
             "daily_history",
             "moneyflow",
             "sector_heat",
@@ -2487,10 +2630,16 @@ class ArenaService:
                 for account in accounts
                 for position in account.positions
                 if position.symbol and position.quantity > 0
-            ]
+            ],
+            prefer_realtime=False,
         )
 
-    def _realtime_quotes_for_symbols(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+    def _realtime_quotes_for_symbols(
+        self,
+        symbols: list[str],
+        *,
+        prefer_realtime: bool = True,
+    ) -> dict[str, dict[str, Any]]:
         normalized_symbols: set[str] = set()
         for symbol in symbols:
             try:
@@ -2501,7 +2650,7 @@ class ArenaService:
         if not symbols:
             return {}
         try:
-            quotes = market_data_service.get_quotes(symbols, prefer_realtime=True)
+            quotes = market_data_service.get_quotes(symbols, prefer_realtime=prefer_realtime)
         except Exception:
             return {}
         return {
@@ -2575,11 +2724,27 @@ class ArenaService:
         return_pct = float(metrics.get("return_ratio") or 0) * 100
         position_count = len(metrics.get("positions") or [])
         trade_count = len(recent_orders)
+        trend_summary = self._closing_trend_summary(recent_orders)
         return (
             f"{metrics['agent_name']} 收盘复盘：总资产 {metrics['total_assets']:.2f}，"
             f"收益 {return_pct:.2f}%，现金 {metrics['cash']:.2f}，"
-            f"持仓 {position_count} 只，最近成交 {trade_count} 笔。"
+            f"持仓 {position_count} 只，今日操作 {trade_count} 笔，"
+            f"{trend_summary}；已结合历史日线复核。"
         )
+
+    def _closing_trend_summary(self, recent_orders: list[dict[str, Any]]) -> str:
+        for order in recent_orders:
+            price_series = ((order.get("charts") or {}).get("price_series") or [])
+            prices = [
+                float(item.get("close") or item.get("price") or 0)
+                for item in price_series
+                if isinstance(item, dict) and (item.get("close") or item.get("price"))
+            ]
+            if len(prices) < 2 or prices[0] <= 0:
+                continue
+            change_pct = (prices[-1] - prices[0]) / prices[0] * 100
+            return f"走势 {change_pct:+.2f}%"
+        return "走势暂无足够成交图表"
 
     def _backtest_window(
         self,

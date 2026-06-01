@@ -45,13 +45,15 @@ class QuantService:
         limit: int = 20,
         prefer_realtime: bool = True,
         lookback_days: int = 20,
+        end_date: str | None = None,
     ) -> dict[str, Any]:
-        universe = self._resolve_universe(db, symbols, limit=limit)
+        universe = self._resolve_universe(db, symbols, limit=limit, end_date=end_date)
         quotes = market_data_service.get_quotes(universe, prefer_realtime=prefer_realtime)
         daily_factors = self._daily_factors_by_symbol(
             db,
             symbols=universe,
             lookback_days=lookback_days,
+            end_date=end_date,
         )
         profiles = self._profiles_by_symbol(db, universe)
         financials = self._financial_indicators_by_symbol(db, universe)
@@ -109,18 +111,31 @@ class QuantService:
         symbols: list[str] | None,
         *,
         limit: int,
+        end_date: str | None = None,
     ) -> list[str]:
         if symbols:
             return [normalize_symbol(symbol) for symbol in symbols]
-        stored = self._stored_universe(db, limit=max(limit, self._AUTO_UNIVERSE_LIMIT))
+        stored = self._stored_universe(
+            db,
+            limit=max(limit, self._AUTO_UNIVERSE_LIMIT),
+            end_date=end_date,
+        )
         return stored or [normalize_symbol(symbol) for symbol in DEFAULT_UNIVERSE]
 
-    def _stored_universe(self, db: Session | None, *, limit: int) -> list[str]:
+    def _stored_universe(
+        self,
+        db: Session | None,
+        *,
+        limit: int,
+        end_date: str | None = None,
+    ) -> list[str]:
         if db is None:
             return []
+        trade_date_query = select(DailyBar.trade_date).group_by(DailyBar.trade_date)
+        if end_date:
+            trade_date_query = trade_date_query.where(DailyBar.trade_date <= end_date)
         trade_date = db.scalar(
-            select(DailyBar.trade_date)
-            .group_by(DailyBar.trade_date)
+            trade_date_query
             .order_by(func.count(DailyBar.symbol).desc(), DailyBar.trade_date.desc())
             .limit(1)
         )
@@ -143,6 +158,7 @@ class QuantService:
         limit: int = 50,
         prefer_realtime: bool = True,
         lookback_days: int = 20,
+        end_date: str | None = None,
     ) -> dict[str, Any]:
         payload = self.generate_candidates(
             db=db,
@@ -150,6 +166,7 @@ class QuantService:
             limit=limit,
             prefer_realtime=prefer_realtime,
             lookback_days=lookback_days,
+            end_date=end_date,
         )
         items = payload["candidates"]
         coverage = {
@@ -405,13 +422,15 @@ class QuantService:
         *,
         symbols: list[str],
         lookback_days: int,
+        end_date: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         if db is None:
             return {}
+        query = select(DailyBar).where(DailyBar.symbol.in_(symbols))
+        if end_date:
+            query = query.where(DailyBar.trade_date <= end_date)
         rows = db.scalars(
-            select(DailyBar)
-            .where(DailyBar.symbol.in_(symbols))
-            .order_by(DailyBar.symbol, DailyBar.trade_date)
+            query.order_by(DailyBar.symbol, DailyBar.trade_date)
         ).all()
         by_symbol: dict[str, list[DailyBar]] = {}
         for row in rows:
@@ -420,19 +439,19 @@ class QuantService:
             symbol: self._daily_factors(bars[-max(1, lookback_days):])
             for symbol, bars in by_symbol.items()
         }
-        sector_heat = self._sector_heat_by_symbol(db, symbols)
+        sector_heat = self._sector_heat_by_symbol(db, symbols, end_date=end_date)
         for symbol, sectors in sector_heat.items():
             factors.setdefault(symbol, self._empty_daily_factors())["sector_heat"] = sectors
-        limit_events = self._limit_events_by_symbol(db, symbols)
+        limit_events = self._limit_events_by_symbol(db, symbols, end_date=end_date)
         for symbol, event in limit_events.items():
             factors.setdefault(symbol, self._empty_daily_factors())["limit_event"] = event
-        margin_details = self._margin_details_by_symbol(db, symbols)
+        margin_details = self._margin_details_by_symbol(db, symbols, end_date=end_date)
         for symbol, detail in margin_details.items():
             factors.setdefault(symbol, self._empty_daily_factors())["margin_detail"] = detail
-        dragon_tiger = self._dragon_tiger_by_symbol(db, symbols)
+        dragon_tiger = self._dragon_tiger_by_symbol(db, symbols, end_date=end_date)
         for symbol, item in dragon_tiger.items():
             factors.setdefault(symbol, self._empty_daily_factors())["dragon_tiger"] = item
-        block_trades = self._block_trades_by_symbol(db, symbols)
+        block_trades = self._block_trades_by_symbol(db, symbols, end_date=end_date)
         for symbol, item in block_trades.items():
             factors.setdefault(symbol, self._empty_daily_factors())["block_trade"] = item
         shareholder_numbers = self._shareholder_numbers_by_symbol(db, symbols)
@@ -510,11 +529,13 @@ class QuantService:
         self,
         db: Session,
         symbols: list[str],
+        end_date: str | None = None,
     ) -> dict[str, dict[str, Any]]:
+        query = select(LimitEvent).where(LimitEvent.symbol.in_(symbols))
+        if end_date:
+            query = query.where(LimitEvent.trade_date <= end_date)
         rows = db.scalars(
-            select(LimitEvent)
-            .where(LimitEvent.symbol.in_(symbols))
-            .order_by(
+            query.order_by(
                 LimitEvent.symbol,
                 desc(LimitEvent.trade_date),
                 LimitEvent.limit_type,
@@ -551,11 +572,13 @@ class QuantService:
         self,
         db: Session,
         symbols: list[str],
+        end_date: str | None = None,
     ) -> dict[str, dict[str, Any]]:
+        query = select(MarginDetail).where(MarginDetail.symbol.in_(symbols))
+        if end_date:
+            query = query.where(MarginDetail.trade_date <= end_date)
         rows = db.scalars(
-            select(MarginDetail)
-            .where(MarginDetail.symbol.in_(symbols))
-            .order_by(MarginDetail.symbol, desc(MarginDetail.trade_date))
+            query.order_by(MarginDetail.symbol, desc(MarginDetail.trade_date))
         ).all()
         latest: dict[str, MarginDetail] = {}
         for row in rows:
@@ -581,11 +604,13 @@ class QuantService:
         self,
         db: Session,
         symbols: list[str],
+        end_date: str | None = None,
     ) -> dict[str, dict[str, Any]]:
+        query = select(DragonTigerList).where(DragonTigerList.symbol.in_(symbols))
+        if end_date:
+            query = query.where(DragonTigerList.trade_date <= end_date)
         rows = db.scalars(
-            select(DragonTigerList)
-            .where(DragonTigerList.symbol.in_(symbols))
-            .order_by(
+            query.order_by(
                 DragonTigerList.symbol,
                 desc(DragonTigerList.trade_date),
                 desc(DragonTigerList.net_amount),
@@ -633,11 +658,13 @@ class QuantService:
         self,
         db: Session,
         symbols: list[str],
+        end_date: str | None = None,
     ) -> dict[str, dict[str, Any]]:
+        query = select(BlockTrade).where(BlockTrade.symbol.in_(symbols))
+        if end_date:
+            query = query.where(BlockTrade.trade_date <= end_date)
         rows = db.scalars(
-            select(BlockTrade)
-            .where(BlockTrade.symbol.in_(symbols))
-            .order_by(BlockTrade.symbol, desc(BlockTrade.trade_date))
+            query.order_by(BlockTrade.symbol, desc(BlockTrade.trade_date))
         ).all()
         latest_dates: dict[str, str] = {}
         for row in rows:
@@ -784,10 +811,12 @@ class QuantService:
         self,
         db: Session,
         symbols: list[str],
+        end_date: str | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
-        trade_date = db.scalar(
-            select(SectorBar.trade_date).order_by(desc(SectorBar.trade_date)).limit(1)
-        )
+        trade_date_query = select(SectorBar.trade_date)
+        if end_date:
+            trade_date_query = trade_date_query.where(SectorBar.trade_date <= end_date)
+        trade_date = db.scalar(trade_date_query.order_by(desc(SectorBar.trade_date)).limit(1))
         if not trade_date:
             return {}
         sector_rows = db.scalars(

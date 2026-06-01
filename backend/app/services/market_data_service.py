@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 from datetime import datetime
+from threading import RLock
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -111,9 +112,9 @@ def _display_intraday_bar_time(value: str) -> str:
 
 class MarketDataService:
     def __init__(self) -> None:
-        self._quote_cache: dict[str, Any] | None = None
-        self._quote_cache_key = ""
-        self._quote_cache_expires_at = 0.0
+        self._quote_cache: dict[str, list[dict[str, Any]]] = {}
+        self._quote_cache_expires_at: dict[str, float] = {}
+        self._quote_cache_lock = RLock()
         self._intraday_cache: dict[str, list[dict[str, Any]]] = {}
         self._intraday_cache_expires_at: dict[str, float] = {}
 
@@ -176,6 +177,23 @@ class MarketDataService:
             },
         }
 
+    def cache_policy(self) -> dict[str, Any]:
+        ttl = max(1, int(get_settings().realtime_quote_cache_ttl_seconds))
+        return {
+            "quote_cache_ttl_seconds": ttl,
+            "intraday_cache_ttl_seconds": ttl,
+            "live_quote_primary": "tencent",
+            "live_quote_fallbacks": ["easy_tdx", "eastmoney", "sina", "local_fallback"],
+            "intraday_primary": "eastmoney",
+            "intraday_fallback": "tencent_m5",
+            "handoff_policy": {
+                "08:00-09:15": "早盘推荐只读 Tushare 历史日频、资金、财务、公告和新闻，不依赖盘中实时价。",
+                "09:15-15:35": "盘中图表和竞技场收益用腾讯低频快照缓存，5-30 秒粒度由后端统一拉取。",
+                "15:35-20:30": "收盘复盘冻结盘中缓存和当日操作，等待日频数据补齐。",
+                "20:30之后": "夜间学习、回测和历史图表优先使用 Tushare 固化后的日频数据。",
+            },
+        }
+
     def get_quotes(
         self,
         symbols: list[str],
@@ -185,24 +203,22 @@ class MarketDataService:
         cache_prefix = "realtime" if prefer_realtime else "low_frequency"
         cache_key = f"{cache_prefix}:" + ",".join(normalized_symbols)
         now = time.time()
-        if (
-            self._quote_cache is not None
-            and self._quote_cache_key == cache_key
-            and self._quote_cache_expires_at > now
-        ):
-            return [dict(item) for item in self._quote_cache]
+        with self._quote_cache_lock:
+            if not isinstance(self._quote_cache, dict):
+                self._quote_cache = {}
+                self._quote_cache_expires_at = {}
+            if self._quote_cache_expires_at.get(cache_key, 0) > now:
+                return [dict(item) for item in self._quote_cache.get(cache_key, [])]
 
         quote_by_symbol: dict[str, dict[str, Any]] = {}
-        if prefer_realtime:
-            for quote in self._get_easy_tdx_quotes(normalized_symbols):
-                symbol = normalize_symbol(str(quote.get("symbol") or ""))
-                quote_by_symbol[symbol] = quote
-
+        for quote in self._get_tencent_quotes(normalized_symbols):
+            symbol = normalize_symbol(str(quote.get("symbol") or ""))
+            quote_by_symbol[symbol] = quote
         missing_symbols = [
             symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
         ]
-        if missing_symbols:
-            for quote in self._get_tencent_quotes(missing_symbols):
+        if prefer_realtime and missing_symbols:
+            for quote in self._get_easy_tdx_quotes(missing_symbols):
                 symbol = normalize_symbol(str(quote.get("symbol") or ""))
                 quote_by_symbol[symbol] = quote
         missing_symbols = [
@@ -233,11 +249,11 @@ class MarketDataService:
             if symbol in quote_by_symbol
         ]
 
-        self._quote_cache = [dict(item) for item in quotes]
-        self._quote_cache_key = cache_key
-        self._quote_cache_expires_at = now + max(
-            1, int(get_settings().realtime_quote_cache_ttl_seconds)
-        )
+        with self._quote_cache_lock:
+            self._quote_cache[cache_key] = [dict(item) for item in quotes]
+            self._quote_cache_expires_at[cache_key] = time.time() + max(
+                1, int(get_settings().realtime_quote_cache_ttl_seconds)
+            )
         return quotes
 
     def get_intraday_bars(

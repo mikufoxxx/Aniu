@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.db.database import get_db
-from app.schemas.aniu import AppSettingsRead, AppSettingsUpdate
+from app.schemas.aniu import AppSettingsRead, AppSettingsUpdate, SettingsWorkspaceResponse
 from app.services.ai_forecast_service import ai_forecast_service
+from app.services.skill_admin_service import skill_admin_service
 from app.services.settings_service import settings_service
 
 router = APIRouter(prefix="/settings", tags=["aniu-settings"])
@@ -24,6 +25,17 @@ def get_settings(
     _user: str = Depends(get_current_user),
 ) -> AppSettingsRead:
     return _settings_read_payload(settings_service.get_or_create_settings(db))
+
+
+@router.get("/workspace", response_model=SettingsWorkspaceResponse)
+def get_settings_workspace(
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> SettingsWorkspaceResponse:
+    return {
+        "settings": _settings_read_payload(settings_service.get_or_create_settings(db)),
+        "skills": skill_admin_service.list_skills(db),
+    }
 
 
 @router.put("", response_model=AppSettingsRead)

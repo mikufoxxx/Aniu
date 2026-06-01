@@ -299,6 +299,7 @@ import { onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { useSkillManager } from '@/composables/useSkillManager'
+import { api } from '@/services/api'
 import { useAppStore } from '@/stores/legacy'
 import type { SkillCompatibilityLevel, SkillListItem } from '@/types'
 
@@ -313,7 +314,7 @@ const {
   errorMessage: skillsErrorMessage,
   installedOverview,
   enabledOverview,
-  loadSkills,
+  setSkills,
   setImportFile,
   importSkill: submitSkillImport,
   reloadSkills: reloadSkillList,
@@ -456,10 +457,9 @@ function skillPreviewTools(skill: SkillListItem) {
 
 onMounted(async () => {
   try {
-    await Promise.all([
-      store.loadSettings(),
-      loadSkills(),
-    ])
+    const payload = await api.getSettingsWorkspace()
+    store.applySettings(payload.settings)
+    setSkills(payload.skills)
     providerConfigsText.value = formatProviderConfigs(settings.value.llm_provider_configs)
   } catch (error) {
     errorMessage.value = (error as Error).message

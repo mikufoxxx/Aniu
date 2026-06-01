@@ -4,7 +4,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
@@ -21,9 +21,23 @@ def get_engine():
         settings.sqlite_db_path.parent.mkdir(parents=True, exist_ok=True)
         _engine = create_engine(
             f"sqlite:///{settings.sqlite_db_path.as_posix()}",
-            connect_args={"check_same_thread": False},
+            connect_args={"check_same_thread": False, "timeout": 30},
         )
+        _configure_sqlite_connection(_engine)
     return _engine
+
+
+def _configure_sqlite_connection(engine) -> None:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
 
 
 def get_session_local():

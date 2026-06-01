@@ -236,32 +236,17 @@ def test_tencent_quotes_are_requested_in_batches(monkeypatch) -> None:
     assert all(len(batch) <= 60 for batch in calls)
 
 
-def test_realtime_quotes_fill_easy_tdx_gaps_with_tencent(monkeypatch) -> None:
+def test_realtime_quotes_use_tencent_first_and_fill_gaps_with_easy_tdx(monkeypatch) -> None:
     from app.services.market_data_service import market_data_service
 
     captured: dict[str, list[str]] = {}
 
-    def fake_easy_tdx(symbols: list[str]):
-        return [
-            {
-                "symbol": "000001.SZ",
-                "name": "平安银行",
-                "price": 10.0,
-                "change_pct": 1.0,
-                "amount": 1000,
-                "turnover": 1.0,
-                "volume_ratio": 1.0,
-                "source": "easy_tdx",
-                "timestamp": "2026-05-29 15:00:00",
-            }
-        ]
-
     def fake_tencent(symbols: list[str]):
-        captured["missing"] = symbols
+        captured["tencent"] = symbols
         return [
             {
-                "symbol": symbol,
-                "name": symbol,
+                "symbol": "000002.SZ",
+                "name": "万科A",
                 "price": 9.0,
                 "change_pct": 0.5,
                 "amount": 900,
@@ -270,31 +255,14 @@ def test_realtime_quotes_fill_easy_tdx_gaps_with_tencent(monkeypatch) -> None:
                 "source": "tencent",
                 "timestamp": "2026-05-29 15:00:00",
             }
-            for symbol in symbols
         ]
 
-    monkeypatch.setattr(market_data_service, "_get_easy_tdx_quotes", fake_easy_tdx)
-    monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
-    market_data_service._quote_cache = None
-
-    quotes = market_data_service.get_quotes(["000001.SZ", "000002.SZ", "000003.SZ"])
-
-    assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
-    assert [item["source"] for item in quotes] == ["easy_tdx", "tencent", "tencent"]
-    assert captured["missing"] == ["000002.SZ", "000003.SZ"]
-
-
-def test_quote_cache_separates_realtime_and_low_frequency_modes(monkeypatch) -> None:
-    from app.services.market_data_service import market_data_service
-
-    calls: list[tuple[str, tuple[str, ...]]] = []
-
     def fake_easy_tdx(symbols: list[str]):
-        calls.append(("easy_tdx", tuple(symbols)))
+        captured["easy_tdx"] = symbols
         return [
             {
-                "symbol": "000001.SZ",
-                "name": "平安银行",
+                "symbol": symbol,
+                "name": symbol,
                 "price": 10.0,
                 "change_pct": 1.0,
                 "amount": 1000,
@@ -303,7 +271,25 @@ def test_quote_cache_separates_realtime_and_low_frequency_modes(monkeypatch) -> 
                 "source": "easy_tdx",
                 "timestamp": "2026-05-29 15:00:00",
             }
+            for symbol in symbols
         ]
+
+    monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
+    monkeypatch.setattr(market_data_service, "_get_easy_tdx_quotes", fake_easy_tdx)
+    market_data_service._quote_cache = None
+
+    quotes = market_data_service.get_quotes(["000001.SZ", "000002.SZ", "000003.SZ"])
+
+    assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert [item["source"] for item in quotes] == ["easy_tdx", "tencent", "easy_tdx"]
+    assert captured["tencent"] == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert captured["easy_tdx"] == ["000001.SZ", "000003.SZ"]
+
+
+def test_quote_cache_separates_realtime_and_low_frequency_modes(monkeypatch) -> None:
+    from app.services.market_data_service import market_data_service
+
+    calls: list[tuple[str, tuple[str, ...]]] = []
 
     def fake_tencent(symbols: list[str]):
         calls.append(("tencent", tuple(symbols)))
@@ -322,19 +308,54 @@ def test_quote_cache_separates_realtime_and_low_frequency_modes(monkeypatch) -> 
             for symbol in symbols
         ]
 
-    monkeypatch.setattr(market_data_service, "_get_easy_tdx_quotes", fake_easy_tdx)
     monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
     market_data_service._quote_cache = None
 
     realtime = market_data_service.get_quotes(["000001.SZ"], prefer_realtime=True)
     low_frequency = market_data_service.get_quotes(["000001.SZ"], prefer_realtime=False)
 
-    assert realtime[0]["source"] == "easy_tdx"
+    assert realtime[0]["source"] == "tencent"
     assert low_frequency[0]["source"] == "tencent"
     assert calls == [
-        ("easy_tdx", ("000001.SZ",)),
+        ("tencent", ("000001.SZ",)),
         ("tencent", ("000001.SZ",)),
     ]
+
+
+def test_quote_cache_keeps_multiple_symbol_sets(monkeypatch) -> None:
+    from app.services.market_data_service import market_data_service
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_tencent(symbols: list[str]):
+        calls.append(tuple(symbols))
+        return [
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 1000,
+                "turnover": 1.0,
+                "volume_ratio": 1.0,
+                "source": "tencent",
+                "timestamp": "2026-05-29 15:00:00",
+            }
+            for symbol in symbols
+        ]
+
+    monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
+    market_data_service._quote_cache = {}
+    market_data_service._quote_cache_expires_at = {}
+
+    first = market_data_service.get_quotes(["000001.SZ"], prefer_realtime=True)
+    second = market_data_service.get_quotes(["000002.SZ"], prefer_realtime=True)
+    first_again = market_data_service.get_quotes(["000001.SZ"], prefer_realtime=True)
+
+    assert first[0]["symbol"] == "000001.SZ"
+    assert second[0]["symbol"] == "000002.SZ"
+    assert first_again[0]["symbol"] == "000001.SZ"
+    assert calls == [("000001.SZ",), ("000002.SZ",)]
 
 
 def test_tencent_quotes_fill_partial_batch_gaps_with_fallback(monkeypatch) -> None:

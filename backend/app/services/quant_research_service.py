@@ -4,10 +4,10 @@ from collections import defaultdict
 from statistics import mean
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.db.models import DailyBar
+from app.db.models import DailyBar, QuantResearchReport
 from app.services.chart_data_service import chart_data_service
 from app.services.historical_data_service import _normalize_trade_date
 from app.services.market_data_service import normalize_symbol
@@ -57,7 +57,7 @@ class QuantResearchService:
         strategies.sort(key=lambda item: item["score"], reverse=True)
         best_strategy = strategies[0]
         benchmark_curve = self._benchmark_curve(profiles, initial_cash)
-        return {
+        payload = {
             "symbol_count": len(set(normalized_symbols)),
             "bar_count": len(bars),
             "start_date": start,
@@ -71,6 +71,109 @@ class QuantResearchService:
             "alpha_curve": self._alpha_curve(best_strategy, benchmark_curve),
             "ai_learning_context": self._learning_context(best_strategy, strategies),
         }
+        return self._save_report(
+            db,
+            symbols=normalized_symbols,
+            payload=payload,
+        )
+
+    def list_reports(self, db: Session, *, limit: int = 20) -> dict[str, Any]:
+        normalized_limit = max(1, min(100, int(limit or 20)))
+        records = db.scalars(
+            select(QuantResearchReport)
+            .order_by(desc(QuantResearchReport.id))
+            .limit(normalized_limit)
+        ).all()
+        return {
+            "items": [self._report_summary(record) for record in records],
+        }
+
+    def get_report(self, db: Session, *, report_id: int) -> dict[str, Any] | None:
+        record = db.get(QuantResearchReport, report_id)
+        if record is None:
+            return None
+        payload = dict(record.report_payload or {})
+        payload.setdefault("id", record.id)
+        payload.setdefault("title", record.title)
+        payload.setdefault("summary", record.summary)
+        payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
+        return payload
+
+    def _save_report(
+        self,
+        db: Session,
+        *,
+        symbols: list[str],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        best = payload["best_strategy"]
+        title = self._report_title(symbols, payload)
+        summary = self._report_summary_text(payload)
+        record = QuantResearchReport(
+            title=title,
+            summary=summary,
+            symbols_json=symbols,
+            start_date=payload["start_date"],
+            end_date=payload["end_date"],
+            initial_cash=payload["initial_cash"],
+            symbol_count=payload["symbol_count"],
+            bar_count=payload["bar_count"],
+            best_strategy_name=best["strategy_name"],
+            best_strategy_display_name=best["display_name"],
+            final_assets=best["final_assets"],
+            return_ratio=best["return_ratio"],
+            max_drawdown=best["max_drawdown"],
+            trade_count=best["trade_count"],
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+
+        saved_payload = {
+            **payload,
+            "id": record.id,
+            "title": title,
+            "summary": summary,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+        }
+        record.report_payload = saved_payload
+        db.add(record)
+        db.commit()
+        return saved_payload
+
+    def _report_summary(self, record: QuantResearchReport) -> dict[str, Any]:
+        return {
+            "id": record.id,
+            "title": record.title,
+            "summary": record.summary,
+            "symbols": list(record.symbols_json or []),
+            "start_date": record.start_date,
+            "end_date": record.end_date,
+            "initial_cash": record.initial_cash,
+            "symbol_count": record.symbol_count,
+            "bar_count": record.bar_count,
+            "best_strategy_name": record.best_strategy_name,
+            "best_strategy_display_name": record.best_strategy_display_name,
+            "final_assets": record.final_assets,
+            "return_ratio": record.return_ratio,
+            "max_drawdown": record.max_drawdown,
+            "trade_count": record.trade_count,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+        }
+
+    def _report_title(self, symbols: list[str], payload: dict[str, Any]) -> str:
+        best = payload["best_strategy"]
+        symbol_text = "、".join(symbols[:3])
+        if len(symbols) > 3:
+            symbol_text += f" 等 {len(symbols)} 股"
+        return f"{symbol_text} {best['display_name']}研究"
+
+    def _report_summary_text(self, payload: dict[str, Any]) -> str:
+        best = payload["best_strategy"]
+        return (
+            f"最佳策略 {best['display_name']}，收益 {best['return_ratio']:.2%}，"
+            f"最大回撤 {best['max_drawdown']:.2%}，样本 {payload['symbol_count']} 股。"
+        )
 
     def _profile_symbol(self, bars: list[DailyBar]) -> dict[str, Any]:
         first = bars[0]

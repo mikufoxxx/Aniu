@@ -209,6 +209,38 @@
         </div>
       </section>
     </section>
+
+    <section class="panel analysis-history-panel">
+      <div class="panel-head stock-panel-head">
+        <div class="stock-panel-title">
+          <h2>分析报告</h2>
+          <p class="analysis-muted">已保存的股票分析结果，点击卡片查看完整报告。</p>
+        </div>
+        <button class="button ghost small" type="button" @click="loadAnalysisWorkspace">
+          <span class="material-symbols-rounded" aria-hidden="true">sync</span>
+          刷新
+        </button>
+      </div>
+      <div class="analysis-report-list">
+        <button
+          v-for="report in reports"
+          :key="report.id"
+          class="analysis-saved-card"
+          type="button"
+          @click="openReport(report.id)"
+        >
+          <div>
+            <strong>{{ report.title }}</strong>
+            <span>{{ report.symbol }} · {{ report.model || '默认模型' }} · {{ formatDate(report.created_at) }}</span>
+            <small>{{ report.summary || report.rating }}</small>
+          </div>
+          <b :class="actionClass(report.action)">{{ report.action }}</b>
+        </button>
+        <div v-if="!reports.length" class="empty-state">
+          <p>暂无保存的股票分析报告。</p>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -216,7 +248,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { ForecastAIConfig, QuantCandidate, SkillListItem, StockAnalysisPayload } from '@/types'
+import type { ForecastAIConfig, QuantCandidate, SkillListItem, StockAnalysisPayload, StockAnalysisReportSummary } from '@/types'
 import DistributionChart from '@/components/charts/DistributionChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
@@ -229,6 +261,7 @@ const symbolText = ref('')
 const candidates = ref<QuantCandidate[]>([])
 const selectedSymbol = ref('')
 const analysis = ref<StockAnalysisPayload | null>(null)
+const reports = ref<StockAnalysisReportSummary[]>([])
 const loadingCandidates = ref(false)
 const analyzing = ref(false)
 const chartRefreshing = ref(false)
@@ -263,15 +296,13 @@ const analysisSkills = computed(() => {
   })
 })
 
-async function loadAnalysisOptions(): Promise<void> {
+async function loadAnalysisWorkspace(): Promise<void> {
   try {
-    const [settingsPayload, skillPayload] = await Promise.all([
-      api.getSettings(),
-      api.listSkills(),
-    ])
-    aiConfig.value = settingsPayload.forecast_ai_config
-    skills.value = skillPayload
-    selectedModel.value ||= settingsPayload.forecast_ai_config.models[0] ?? ''
+    const payload = await api.getStockAnalysisWorkspace({ limit: 20 })
+    aiConfig.value = payload.ai_config
+    skills.value = payload.skills
+    reports.value = payload.reports.items
+    selectedModel.value ||= payload.ai_config.models[0] ?? ''
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '分析配置加载失败。'
   }
@@ -338,6 +369,23 @@ async function analyzeSelected(): Promise<void> {
       model: selectedModel.value || undefined,
       skill_ids: selectedSkillIds.value,
     })
+    if (analysis.value.analysis_report) {
+      reports.value = [
+        {
+          id: analysis.value.analysis_report.id,
+          symbol: analysis.value.analysis_report.symbol,
+          name: analysis.value.analysis_report.name,
+          title: analysis.value.analysis_report.title,
+          model: analysis.value.analysis_report.model,
+          action: analysis.value.analysis_report.action,
+          rating: analysis.value.analysis_report.rating,
+          summary: analysis.value.analysis_report.summary,
+          selected_skills: analysis.value.analysis_report.selected_skills,
+          created_at: analysis.value.analysis_report.created_at,
+        },
+        ...reports.value.filter((item) => item.id !== analysis.value?.analysis_report.id),
+      ].slice(0, 20)
+    }
     startChartAutoRefresh()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '股票分析失败。'
@@ -414,6 +462,11 @@ function formatPrice(value: number | null | undefined): string {
   return value.toFixed(value >= 100 ? 2 : 3)
 }
 
+function formatDate(value: string | null | undefined): string {
+  if (!value) return '--'
+  return value.replace('T', ' ').slice(0, 16)
+}
+
 function retailText(key: string): string {
   const value = retailAnalysis.value?.[key]
   return typeof value === 'string' && value.trim() ? value : '--'
@@ -425,7 +478,7 @@ function retailList(key: string): string[] {
 }
 
 onMounted(() => {
-  loadAnalysisOptions()
+  loadAnalysisWorkspace()
 })
 
 onBeforeUnmount(() => {
@@ -614,6 +667,66 @@ onBeforeUnmount(() => {
 
 .analysis-skill-empty {
   color: #9ca3af;
+  font-size: 12px;
+}
+
+.analysis-history-panel {
+  align-self: start;
+}
+
+.analysis-report-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analysis-saved-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #ececf1;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+  text-align: left;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.analysis-saved-card:hover {
+  border-color: #d8d8d3;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  transform: translateY(-1px);
+}
+
+.analysis-saved-card div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.analysis-saved-card strong,
+.analysis-saved-card span,
+.analysis-saved-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-saved-card strong {
+  color: #202123;
+  font-size: 14px;
+}
+
+.analysis-saved-card span,
+.analysis-saved-card small {
+  color: #6f6f6f;
+  font-size: 12px;
+}
+
+.analysis-saved-card b {
+  border-radius: 999px;
+  padding: 5px 8px;
   font-size: 12px;
 }
 
@@ -860,6 +973,7 @@ onBeforeUnmount(() => {
   .analysis-hero,
   .analysis-grid,
   .analysis-chart-grid,
+  .analysis-report-list,
   .support-grid {
     grid-template-columns: 1fr;
   }

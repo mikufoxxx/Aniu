@@ -48,6 +48,7 @@ def create_test_client(monkeypatch, tmp_path) -> TestClient:
     aniu_service._account_overview_cache = None
     aniu_service._account_overview_cache_expires_at = None
     arena_service._order_forecast_cache.clear()
+    arena_service._invalidate_live_payload_cache()
     app = create_app()
     return TestClient(app)
 
@@ -62,6 +63,9 @@ def _auth_headers(client: TestClient) -> dict[str, str]:
 
 
 def _reset_state() -> None:
+    from app.services.arena_service import arena_service
+
+    arena_service._invalidate_live_payload_cache()
     database_module._engine = None
     database_module._session_local = None
     get_settings.cache_clear()
@@ -80,6 +84,28 @@ def test_market_source_health_exposes_all_data_tiers(monkeypatch, tmp_path) -> N
     assert {"daily", "low_frequency", "quasi_high_frequency", "supplemental"} <= tiers
     assert payload["recommended_usage"]["daily"] == "Tushare"
     assert payload["recommended_usage"]["quasi_high_frequency"] == "easy-tdx"
+
+    _reset_state()
+
+
+def test_page_overview_endpoints_collapse_initial_requests(monkeypatch, tmp_path) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        data_response = client.get("/api/aniu/data-lab/overview", headers=headers)
+        arena_response = client.get(
+            "/api/aniu/arena/overview?interval=daily&refresh_quotes=false",
+            headers=headers,
+        )
+
+    assert data_response.status_code == 200
+    data_payload = data_response.json()
+    assert {"source_health", "coverage", "maintenance_runs", "cache_policy"} <= set(data_payload)
+    assert data_payload["cache_policy"]["live_quote_primary"] == "tencent"
+
+    assert arena_response.status_code == 200
+    arena_payload = arena_response.json()
+    assert {"agents", "ai_config", "leaderboard", "equity_curves", "arena_initial_cash"} <= set(arena_payload)
+    assert arena_payload["equity_curves"]["interval"] == "daily"
 
     _reset_state()
 
@@ -991,9 +1017,20 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
                 "initial_cash": 200000,
             },
         )
+        list_response = client.get(
+            "/api/aniu/quant/research-reports",
+            headers=headers,
+        )
+        detail_response = client.get(
+            f"/api/aniu/quant/research-reports/{response.json()['id']}",
+            headers=headers,
+        )
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["id"] > 0
+    assert payload["title"]
+    assert payload["summary"]
     assert payload["symbol_count"] == 3
     assert payload["bar_count"] == 9
     assert [item["strategy_name"] for item in payload["strategies"]] == [
@@ -1069,6 +1106,11 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
     assert payload["strategy_equity_curves"][0]["strategy_name"] == "daily_momentum"
     assert "daily_momentum" in payload["ai_learning_context"]
     assert "最大回撤" in payload["ai_learning_context"]
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["id"] == payload["id"]
+    assert list_response.json()["items"][0]["best_strategy_name"] == "daily_momentum"
+    assert detail_response.status_code == 200
+    assert detail_response.json()["id"] == payload["id"]
 
     _reset_state()
 
@@ -3090,12 +3132,25 @@ def test_stock_analysis_uses_multiple_skills_and_persists_report(
             f"/api/aniu/stocks/analysis-reports/{report['id']}",
             headers=headers,
         )
+        list_response = client.get(
+            "/api/aniu/stocks/analysis-reports",
+            headers=headers,
+        )
+        workspace_response = client.get(
+            "/api/aniu/stocks/analysis-workspace",
+            headers=headers,
+        )
 
     assert detail_response.status_code == 200
     detail_payload = detail_response.json()
     assert detail_payload["id"] == report["id"]
     assert detail_payload["summary"] == report["summary"]
     assert "forecast-secret-key" not in detail_response.text
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["id"] == report["id"]
+    assert workspace_response.status_code == 200
+    assert workspace_response.json()["reports"]["items"][0]["id"] == report["id"]
+    assert "forecast-secret-key" not in workspace_response.text
 
     _reset_state()
 

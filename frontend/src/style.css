@@ -295,6 +295,11 @@ textarea {
 
 .page-shell.is-sidebar-collapsed .tab-button {
   justify-content: center;
+  gap: 0;
+}
+
+.page-shell.is-sidebar-collapsed .header-action-button {
+  gap: 0;
 }
 
 .page-shell.is-sidebar-collapsed .tab-button-label,

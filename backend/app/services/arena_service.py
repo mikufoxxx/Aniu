@@ -4,7 +4,10 @@ import hashlib
 import json
 import logging
 import re
+import time
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from threading import RLock
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -176,6 +179,10 @@ STOP_LOSS_BY_STYLE = {
 class ArenaService:
     _order_forecast_cache: dict[str, dict[str, Any]] = {}
 
+    def __init__(self) -> None:
+        self._live_payload_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._live_payload_cache_lock = RLock()
+
     def _utcnow(self) -> datetime:
         return datetime.now(UTC).replace(tzinfo=None)
 
@@ -253,6 +260,7 @@ class ArenaService:
             arena_run.candidate_payload = candidate_payload
             db.add(arena_run)
             db.commit()
+            self._invalidate_live_payload_cache()
             return {
                 "run_id": arena_run.id,
                 "phase": normalized_phase,
@@ -283,6 +291,7 @@ class ArenaService:
             arena_run.leaderboard_payload = leaderboard
             db.add(arena_run)
             db.commit()
+            self._invalidate_live_payload_cache()
             return {
                 "run_id": arena_run.id,
                 "phase": normalized_phase,
@@ -314,6 +323,7 @@ class ArenaService:
             arena_run.leaderboard_payload = leaderboard
             db.add(arena_run)
             db.commit()
+            self._invalidate_live_payload_cache()
             return {
                 "run_id": arena_run.id,
                 "phase": normalized_phase,
@@ -415,6 +425,7 @@ class ArenaService:
         arena_run.leaderboard_payload = leaderboard
         db.add(arena_run)
         db.commit()
+        self._invalidate_live_payload_cache()
         return {
             "run_id": arena_run.id,
             "phase": normalized_phase,
@@ -1240,13 +1251,17 @@ class ArenaService:
         *,
         refresh_quotes: bool = False,
     ) -> dict[str, Any]:
+        cache_key = f"leaderboard:{refresh_quotes}"
+        cached = self._cached_live_payload(cache_key)
+        if cached is not None:
+            return cached
         items = self._leaderboard_items(
             db,
             include_latest_recommendation=True,
             refresh_quotes=refresh_quotes,
         )
         items.sort(key=lambda item: item["total_assets"], reverse=True)
-        return {"items": items}
+        return self._store_live_payload(cache_key, {"items": items})
 
     def equity_curves(
         self,
@@ -1258,6 +1273,10 @@ class ArenaService:
         normalized_interval = str(interval or "daily").strip().lower()
         if normalized_interval not in {"daily", "weekly", "hourly"}:
             raise ValueError("收益曲线粒度必须是 daily、weekly 或 hourly。")
+        cache_key = f"equity_curves:{normalized_interval}:{refresh_quotes}"
+        cached = self._cached_live_payload(cache_key)
+        if cached is not None:
+            return cached
 
         now = datetime.now(ARENA_SCHEDULE_TIMEZONE)
         agents = self.list_agents(db)["agents"]
@@ -1343,11 +1362,40 @@ class ArenaService:
                 }
             )
         curves.sort(key=lambda curve: current_order.get(str(curve["agent_id"]), 10_000))
-        return {
+        return self._store_live_payload(cache_key, {
             "interval": normalized_interval,
             "refreshed_at": now.isoformat(),
             "curves": curves,
-        }
+        })
+
+    def _cached_live_payload(self, cache_key: str) -> dict[str, Any] | None:
+        now = time.time()
+        with self._live_payload_cache_lock:
+            cached = self._live_payload_cache.get(cache_key)
+            if cached is None:
+                return None
+            expires_at, payload = cached
+            if expires_at <= now:
+                self._live_payload_cache.pop(cache_key, None)
+                return None
+            return deepcopy(payload)
+
+    def _store_live_payload(
+        self,
+        cache_key: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        ttl_seconds = max(1, int(get_settings().realtime_quote_cache_ttl_seconds))
+        with self._live_payload_cache_lock:
+            self._live_payload_cache[cache_key] = (
+                time.time() + ttl_seconds,
+                deepcopy(payload),
+            )
+        return payload
+
+    def _invalidate_live_payload_cache(self) -> None:
+        with self._live_payload_cache_lock:
+            self._live_payload_cache.clear()
 
     def _leaderboard_items(
         self,
@@ -1494,6 +1542,7 @@ class ArenaService:
             if agent_id not in seen:
                 db.delete(record)
         db.commit()
+        self._invalidate_live_payload_cache()
         for item in saved:
             db.refresh(item)
         return {"agents": [self._agent_config_payload(item) for item in saved]}
@@ -1529,6 +1578,7 @@ class ArenaService:
         record.enabled = bool(agent.get("enabled", True))
         db.add(record)
         db.commit()
+        self._invalidate_live_payload_cache()
         db.refresh(record)
         return self._agent_config_payload(record)
 
@@ -1540,6 +1590,7 @@ class ArenaService:
             return None
         db.delete(record)
         db.commit()
+        self._invalidate_live_payload_cache()
         stored = db.scalars(
             select(ArenaAgentConfig).order_by(ArenaAgentConfig.id)
         ).all()

@@ -54,6 +54,11 @@ const router = createRouter({
       component: () => import('@/views/QuantResearchView.vue')
     },
     {
+      path: '/quant-research/reports/:reportId',
+      name: 'quant-research-report',
+      component: () => import('@/views/QuantResearchReportView.vue')
+    },
+    {
       path: '/tasks',
       redirect: '/arena'
     },

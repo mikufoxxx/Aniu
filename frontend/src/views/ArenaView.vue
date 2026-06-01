@@ -248,7 +248,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { AppSettings, ArenaAgentConfig, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload } from '@/types'
+import type { ArenaAgentConfig, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload } from '@/types'
 import MultiEquityCurveChart from '@/components/charts/MultiEquityCurveChart.vue'
 
 const router = useRouter()
@@ -324,17 +324,12 @@ async function loadArenaState(silent = false): Promise<void> {
     errorMessage.value = ''
   }
   try {
-    const [agentPayload, leaderboardPayload, configPayload, settingsPayload] = await Promise.all([
-      api.getArenaAgents(),
-      api.getArenaLeaderboard(true),
-      api.getArenaAIConfig(),
-      api.getSettings(),
-    ])
-    agents.value = agentPayload.agents.map(normalizeAgent)
-    leaderboard.value = leaderboardPayload
-    aiConfig.value = configPayload
-    arenaInitialCash.value = normalizeInitialCash(settingsPayload)
-    if (activeArenaView.value === 'equity') await loadEquityCurves(true)
+    const payload = await api.getArenaOverview(equityInterval.value, true)
+    agents.value = payload.agents.map(normalizeAgent)
+    leaderboard.value = payload.leaderboard
+    aiConfig.value = payload.ai_config
+    equityCurves.value = payload.equity_curves
+    arenaInitialCash.value = normalizeInitialCash(payload.arena_initial_cash)
   } catch (error) {
     if (!silent) errorMessage.value = error instanceof Error ? error.message : '竞技场加载失败。'
   } finally {
@@ -343,25 +338,23 @@ async function loadArenaState(silent = false): Promise<void> {
   }
 }
 
-async function loadEquityCurves(silent = false): Promise<void> {
-  if (!silent) equityLoading.value = true
-  try {
-    equityCurves.value = await api.getArenaEquityCurves(equityInterval.value, true)
-  } catch (error) {
-    if (!silent) errorMessage.value = error instanceof Error ? error.message : '收益曲线加载失败。'
-  } finally {
-    if (!silent) equityLoading.value = false
-  }
-}
-
 function setArenaView(view: 'ranking' | 'equity'): void {
   router.replace({ path: route.path, query: { ...route.query, view: view === 'equity' ? 'equity' : undefined } })
-  if (view === 'equity') void loadEquityCurves()
+  if (view === 'equity') void reloadEquityState()
 }
 
 function setEquityInterval(interval: 'daily' | 'weekly' | 'hourly'): void {
   equityInterval.value = interval
-  void loadEquityCurves()
+  void reloadEquityState()
+}
+
+async function reloadEquityState(): Promise<void> {
+  equityLoading.value = true
+  try {
+    await loadArenaState(true)
+  } finally {
+    equityLoading.value = false
+  }
 }
 
 const configAgent = computed(() => agents.value[configAgentIndex.value] ?? null)
@@ -474,8 +467,8 @@ function formatTime(value: string): string {
   return date.toLocaleString('zh-CN', { hour12: false })
 }
 
-function normalizeInitialCash(payload: AppSettings): number {
-  const value = Number(payload.arena_initial_cash)
+function normalizeInitialCash(value: number): number {
+  value = Number(value)
   return Number.isFinite(value) && value >= 10000 ? value : 200000
 }
 

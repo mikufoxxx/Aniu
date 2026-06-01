@@ -198,14 +198,10 @@ async function loadDataLab(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [healthPayload, coveragePayload, runPayload] = await Promise.all([
-      api.getMarketSourceHealth(),
-      api.getMarketDataCoverage(),
-      api.listMarketDataMaintenanceRuns({ limit: 6 }),
-    ])
-    sourceHealth.value = healthPayload
-    coverage.value = coveragePayload
-    maintenanceRuns.value = runPayload.items
+    const payload = await api.getDataLabOverview({ limit: 6 })
+    sourceHealth.value = payload.source_health
+    coverage.value = payload.coverage
+    maintenanceRuns.value = payload.maintenance_runs.items
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '数据实验室加载失败。'
   } finally {

@@ -731,6 +731,9 @@ export interface QuantResearchStrategy {
 }
 
 export interface QuantResearchPayload {
+  id?: number | null
+  title?: string
+  summary?: string
   symbol_count: number
   bar_count: number
   start_date: string
@@ -753,6 +756,30 @@ export interface QuantResearchPayload {
   benchmark_curve: EquityCurvePoint[]
   alpha_curve: AlphaCurvePoint[]
   ai_learning_context: string
+  created_at?: string | null
+}
+
+export interface QuantResearchReportSummary {
+  id: number
+  title: string
+  summary: string
+  symbols: string[]
+  start_date: string
+  end_date: string
+  initial_cash: number
+  symbol_count: number
+  bar_count: number
+  best_strategy_name: string
+  best_strategy_display_name: string
+  final_assets: number
+  return_ratio: number
+  max_drawdown: number
+  trade_count: number
+  created_at?: string | null
+}
+
+export interface QuantResearchReportListPayload {
+  items: QuantResearchReportSummary[]
 }
 
 export interface ArenaAgentConfig {
@@ -770,6 +797,15 @@ export interface ArenaAgentsPayload {
 }
 
 export type ArenaAIConfigPayload = ForecastAIConfig
+
+export interface ArenaOverviewPayload {
+  agents: ArenaAgentConfig[]
+  ai_config: ArenaAIConfigPayload
+  arena_initial_cash: number
+  leaderboard: ArenaLeaderboardPayload
+  equity_curves: ArenaEquityCurvesPayload | null
+  cache_policy: Record<string, unknown>
+}
 
 export interface ArenaOrder {
   id: number
@@ -989,6 +1025,48 @@ export interface StockAnalysisReportPayload {
   }>
   source_snapshot: Record<string, unknown>
   created_at?: string | null
+}
+
+export interface StockAnalysisReportSummary {
+  id: number
+  symbol: string
+  name: string
+  title: string
+  model: string
+  action: string
+  rating: string
+  summary: string
+  selected_skills: Array<{
+    id: string
+    name: string
+    description?: string
+    source?: string
+    run_types?: string[]
+  }>
+  created_at?: string | null
+}
+
+export interface StockAnalysisReportListPayload {
+  items: StockAnalysisReportSummary[]
+}
+
+export interface StockAnalysisWorkspacePayload {
+  ai_config: ForecastAIConfig
+  skills: SkillListItem[]
+  reports: StockAnalysisReportListPayload
+  cache_policy: Record<string, unknown>
+}
+
+export interface DataLabOverviewPayload {
+  source_health: MarketSourceHealthPayload
+  coverage: MarketDataCoveragePayload
+  maintenance_runs: MarketDataMaintenanceRunListPayload
+  cache_policy: Record<string, unknown>
+}
+
+export interface SettingsWorkspacePayload {
+  settings: AppSettings
+  skills: SkillListItem[]
 }
 
 export interface ChatToolCall {

@@ -625,6 +625,30 @@ class StockAnalysisReport(Base):
     )
 
 
+class QuantResearchReport(Base):
+    __tablename__ = "quant_research_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(160), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    symbols_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    start_date: Mapped[str] = mapped_column(String(8), index=True)
+    end_date: Mapped[str] = mapped_column(String(8), index=True)
+    initial_cash: Mapped[float] = mapped_column(Float, default=200000.0)
+    symbol_count: Mapped[int] = mapped_column(Integer, default=0)
+    bar_count: Mapped[int] = mapped_column(Integer, default=0)
+    best_strategy_name: Mapped[str] = mapped_column(String(64), default="")
+    best_strategy_display_name: Mapped[str] = mapped_column(String(120), default="")
+    final_assets: Mapped[float] = mapped_column(Float, default=0.0)
+    return_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    max_drawdown: Mapped[float] = mapped_column(Float, default=0.0)
+    trade_count: Mapped[int] = mapped_column(Integer, default=0)
+    report_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), index=True
+    )
+
+
 class MarketDataMaintenanceRun(Base):
     __tablename__ = "market_data_maintenance_runs"
 

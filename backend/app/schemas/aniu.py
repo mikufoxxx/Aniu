@@ -96,6 +96,11 @@ class SkillInfoRead(SkillListItemRead):
     location: str
 
 
+class SettingsWorkspaceResponse(BaseModel):
+    settings: AppSettingsRead
+    skills: list[SkillListItemRead] = Field(default_factory=list)
+
+
 class SkillImportClawHubRequest(BaseModel):
     slug_or_url: str = Field(min_length=1, max_length=512)
 
@@ -601,6 +606,13 @@ class MarketDataMaintenanceRunListResponse(BaseModel):
     items: list[MarketDataMaintenanceRunRead] = Field(default_factory=list)
 
 
+class DataLabOverviewResponse(BaseModel):
+    source_health: MarketSourceHealthResponse
+    coverage: MarketDataCoverageResponse
+    maintenance_runs: MarketDataMaintenanceRunListResponse
+    cache_policy: dict[str, Any] = Field(default_factory=dict)
+
+
 class BacktestRequest(BaseModel):
     symbols: list[str] = Field(min_length=1, max_length=200)
     start_date: str = Field(min_length=8, max_length=10)
@@ -741,6 +753,9 @@ class QuantResearchStrategyRead(BaseModel):
 
 
 class QuantResearchResponse(BaseModel):
+    id: int | None = None
+    title: str = ""
+    summary: str = ""
     symbol_count: int
     bar_count: int
     start_date: str
@@ -753,6 +768,30 @@ class QuantResearchResponse(BaseModel):
     benchmark_curve: list[dict[str, Any]] = Field(default_factory=list)
     alpha_curve: list[dict[str, Any]] = Field(default_factory=list)
     ai_learning_context: str
+    created_at: str | None = None
+
+
+class QuantResearchReportSummaryRead(BaseModel):
+    id: int
+    title: str
+    summary: str
+    symbols: list[str] = Field(default_factory=list)
+    start_date: str
+    end_date: str
+    initial_cash: float
+    symbol_count: int
+    bar_count: int
+    best_strategy_name: str
+    best_strategy_display_name: str
+    final_assets: float
+    return_ratio: float
+    max_drawdown: float
+    trade_count: int
+    created_at: str | None = None
+
+
+class QuantResearchReportListResponse(BaseModel):
+    items: list[QuantResearchReportSummaryRead] = Field(default_factory=list)
 
 
 class ArenaAgentRequest(BaseModel):
@@ -858,6 +897,15 @@ class ArenaLeaderboardResponse(BaseModel):
     items: list[ArenaLeaderboardItemRead] = Field(default_factory=list)
 
 
+class ArenaOverviewResponse(BaseModel):
+    agents: list[ArenaAgentRequest] = Field(default_factory=list)
+    ai_config: ArenaAIConfigResponse
+    arena_initial_cash: float = 200000.0
+    leaderboard: ArenaLeaderboardResponse
+    equity_curves: ArenaEquityCurvesResponse | None = None
+    cache_policy: dict[str, Any] = Field(default_factory=dict)
+
+
 class ArenaAgentMemoryRead(BaseModel):
     id: int
     agent_id: str
@@ -933,6 +981,30 @@ class StockAnalysisReportResponse(BaseModel):
     sections: list[dict[str, Any]] = Field(default_factory=list)
     source_snapshot: dict[str, Any] = Field(default_factory=dict)
     created_at: str | None = None
+
+
+class StockAnalysisReportSummaryRead(BaseModel):
+    id: int
+    symbol: str
+    name: str
+    title: str
+    model: str
+    action: str
+    rating: str
+    summary: str
+    selected_skills: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str | None = None
+
+
+class StockAnalysisReportListResponse(BaseModel):
+    items: list[StockAnalysisReportSummaryRead] = Field(default_factory=list)
+
+
+class StockAnalysisWorkspaceResponse(BaseModel):
+    ai_config: ArenaAIConfigResponse
+    skills: list[SkillListItemRead] = Field(default_factory=list)
+    reports: StockAnalysisReportListResponse
+    cache_policy: dict[str, Any] = Field(default_factory=dict)
 
 
 class StockAnalysisResponse(BaseModel):

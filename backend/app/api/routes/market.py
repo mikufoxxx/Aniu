@@ -17,6 +17,7 @@ from app.schemas.aniu import (
     ArenaAgentRequest,
     ArenaAIConfigResponse,
     ArenaEquityCurvesResponse,
+    ArenaOverviewResponse,
     ArenaOrderForecastResponse,
     ArenaRunRequest,
     ArenaRunResponse,
@@ -25,6 +26,7 @@ from app.schemas.aniu import (
     ArenaAgentsUpdateRequest,
     BacktestRequest,
     BacktestResponse,
+    DataLabOverviewResponse,
     DailyRangeRefreshRequest,
     DailyRangeRefreshResponse,
     DailyRefreshRequest,
@@ -44,11 +46,14 @@ from app.schemas.aniu import (
     QuantDatasetRequest,
     QuantDatasetResponse,
     QuantResearchRequest,
+    QuantResearchReportListResponse,
     QuantResearchResponse,
     StockAnalysisChartsRequest,
     StockAnalysisChartsResponse,
     StockAnalysisRequest,
+    StockAnalysisReportListResponse,
     StockAnalysisReportResponse,
+    StockAnalysisWorkspaceResponse,
     StockAnalysisResponse,
 )
 from app.services.ai_market_context_service import ai_market_context_service
@@ -63,6 +68,8 @@ from app.services.market_data_service import market_data_service
 from app.services.market_report_service import market_report_service
 from app.services.quant_service import quant_service
 from app.services.quant_research_service import quant_research_service
+from app.services.settings_service import settings_service
+from app.services.skill_admin_service import skill_admin_service
 
 router = APIRouter(tags=["aniu-market-quant-arena"])
 
@@ -80,6 +87,20 @@ def get_market_data_coverage(
     _user: str = Depends(get_current_user),
 ) -> MarketDataCoverageResponse:
     return historical_data_service.summarize_daily_coverage(db)
+
+
+@router.get("/data-lab/overview", response_model=DataLabOverviewResponse)
+def get_data_lab_overview(
+    limit: int = 6,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> DataLabOverviewResponse:
+    return {
+        "source_health": market_data_service.source_health(),
+        "coverage": historical_data_service.summarize_daily_coverage(db),
+        "maintenance_runs": market_data_maintenance_service.list_runs(db, limit=limit),
+        "cache_policy": market_data_service.cache_policy(),
+    }
 
 
 @router.post("/quant/candidates", response_model=QuantCandidatesResponse)
@@ -360,6 +381,50 @@ def run_quant_research(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/quant/research-reports", response_model=QuantResearchReportListResponse)
+def list_quant_research_reports(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> QuantResearchReportListResponse:
+    return quant_research_service.list_reports(db, limit=limit)
+
+
+@router.get("/quant/research-reports/{report_id}", response_model=QuantResearchResponse)
+def get_quant_research_report(
+    report_id: int,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> QuantResearchResponse:
+    report = quant_research_service.get_report(db, report_id=report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="量化研究报告不存在。")
+    return report
+
+
+@router.get("/quant/research-workspace", response_model=QuantResearchReportListResponse)
+def get_quant_research_workspace(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> QuantResearchReportListResponse:
+    return quant_research_service.list_reports(db, limit=limit)
+
+
+@router.get("/stocks/analysis-workspace", response_model=StockAnalysisWorkspaceResponse)
+def get_stock_analysis_workspace(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> StockAnalysisWorkspaceResponse:
+    return {
+        "ai_config": ai_forecast_service.public_config(),
+        "skills": skill_admin_service.list_skills(db),
+        "reports": stock_analysis_service.list_reports(db, limit=limit),
+        "cache_policy": market_data_service.cache_policy(),
+    }
+
+
 @router.post("/stocks/analyze", response_model=StockAnalysisResponse)
 def analyze_stock(
     payload: StockAnalysisRequest,
@@ -398,6 +463,15 @@ def refresh_stock_analysis_charts(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/stocks/analysis-reports", response_model=StockAnalysisReportListResponse)
+def list_stock_analysis_reports(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> StockAnalysisReportListResponse:
+    return stock_analysis_service.list_reports(db, limit=limit)
+
+
 @router.get("/stocks/analysis-reports/{report_id}", response_model=StockAnalysisReportResponse)
 def get_stock_analysis_report(
     report_id: int,
@@ -428,6 +502,31 @@ def run_arena_once(
             agents=agents,
             initial_cash=payload.initial_cash,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/arena/overview", response_model=ArenaOverviewResponse)
+def get_arena_overview(
+    interval: str = "daily",
+    refresh_quotes: bool = False,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaOverviewResponse:
+    try:
+        settings = settings_service.get_or_create_settings(db)
+        return {
+            "agents": arena_service.list_agents(db)["agents"],
+            "ai_config": ai_forecast_service.public_config(),
+            "arena_initial_cash": settings.arena_initial_cash,
+            "leaderboard": arena_service.leaderboard(db, refresh_quotes=refresh_quotes),
+            "equity_curves": arena_service.equity_curves(
+                db,
+                interval=interval,
+                refresh_quotes=refresh_quotes,
+            ),
+            "cache_policy": market_data_service.cache_policy(),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

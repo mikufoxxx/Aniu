@@ -96,6 +96,41 @@
       </section>
     </section>
 
+    <section class="panel quant-report-panel">
+      <div class="panel-head">
+        <div>
+          <h2>研究报告</h2>
+          <p class="quant-muted">已保存的量化研究结果，点击进入完整策略详情。</p>
+        </div>
+        <button class="button ghost small" type="button" @click="loadResearchWorkspace">
+          <span class="material-symbols-rounded" aria-hidden="true">sync</span>
+          刷新
+        </button>
+      </div>
+      <div class="quant-report-list">
+        <button
+          v-for="report in reports"
+          :key="report.id"
+          class="quant-report-card"
+          type="button"
+          @click="openResearchReport(report.id)"
+        >
+          <div>
+            <strong>{{ report.title }}</strong>
+            <span>{{ report.start_date }} - {{ report.end_date }} · {{ report.best_strategy_display_name }}</span>
+            <small>{{ report.summary }}</small>
+          </div>
+          <div class="quant-report-card-metrics">
+            <b :class="profitClass(report.return_ratio)">{{ formatPercent(report.return_ratio) }}</b>
+            <span>{{ formatPercent(report.max_drawdown) }}</span>
+          </div>
+        </button>
+        <div v-if="!reports.length" class="empty-state">
+          <p>暂无保存的量化研究报告。</p>
+        </div>
+      </div>
+    </section>
+
     <section v-if="research" class="quant-chart-grid">
       <MarketKlineChart
         title="价格走势与交易点"
@@ -157,9 +192,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { QuantCandidate, QuantResearchPayload } from '@/types'
+import type { QuantCandidate, QuantResearchPayload, QuantResearchReportSummary } from '@/types'
 import BenchmarkAlphaChart from '@/components/charts/BenchmarkAlphaChart.vue'
 import DistributionChart from '@/components/charts/DistributionChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
@@ -169,6 +205,7 @@ import StrategyComparisonChart from '@/components/charts/StrategyComparisonChart
 import TechnicalIndicatorChart from '@/components/charts/TechnicalIndicatorChart.vue'
 
 const limit = ref(20)
+const router = useRouter()
 const candidates = ref<QuantCandidate[]>([])
 const loading = ref(false)
 const researching = ref(false)
@@ -177,6 +214,7 @@ const symbolsText = ref('600011.SH,000767.SZ,600023.SH')
 const startDate = ref('20250101')
 const endDate = ref(todayCompactDate())
 const research = ref<QuantResearchPayload | null>(null)
+const reports = ref<QuantResearchReportSummary[]>([])
 
 const riskMetricItems = computed(() => {
   const metrics = research.value?.best_strategy.charts.risk_metrics ?? {}
@@ -225,11 +263,47 @@ async function runResearch(): Promise<void> {
       end_date: endDate.value,
       initial_cash: 200000,
     })
+    if (research.value.id) {
+      reports.value = [
+        {
+          id: research.value.id,
+          title: research.value.title || '量化研究报告',
+          summary: research.value.summary || research.value.ai_learning_context,
+          symbols,
+          start_date: research.value.start_date,
+          end_date: research.value.end_date,
+          initial_cash: research.value.initial_cash,
+          symbol_count: research.value.symbol_count,
+          bar_count: research.value.bar_count,
+          best_strategy_name: research.value.best_strategy.strategy_name,
+          best_strategy_display_name: research.value.best_strategy.display_name,
+          final_assets: research.value.best_strategy.final_assets,
+          return_ratio: research.value.best_strategy.return_ratio,
+          max_drawdown: research.value.best_strategy.max_drawdown,
+          trade_count: research.value.best_strategy.trade_count,
+          created_at: research.value.created_at,
+        },
+        ...reports.value.filter((item) => item.id !== research.value?.id),
+      ].slice(0, 20)
+    }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '策略研究失败。'
   } finally {
     researching.value = false
   }
+}
+
+async function loadResearchWorkspace(): Promise<void> {
+  try {
+    const payload = await api.getQuantResearchWorkspace({ limit: 20 })
+    reports.value = payload.items
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '量化研究报告加载失败。'
+  }
+}
+
+function openResearchReport(reportId: number): void {
+  router.push({ name: 'quant-research-report', params: { reportId: String(reportId) } })
 }
 
 function parseSymbols(value: string): string[] {
@@ -262,11 +336,9 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(2)}%`
 }
 
-function formatAmount(value: number): string {
-  if (Math.abs(value) >= 100000000) return `${(value / 100000000).toFixed(2)}亿`
-  if (Math.abs(value) >= 10000) return `${(value / 10000).toFixed(2)}万`
-  return value.toFixed(2)
-}
+onMounted(() => {
+  loadResearchWorkspace()
+})
 </script>
 
 <style scoped>
@@ -317,6 +389,67 @@ function formatAmount(value: number): string {
 
 .quant-chart-grid > :first-child {
   grid-row: span 2;
+}
+
+.quant-report-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.quant-report-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid #ececf1;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+  text-align: left;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.quant-report-card:hover {
+  border-color: #d8d8d3;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  transform: translateY(-1px);
+}
+
+.quant-report-card div:first-child {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.quant-report-card strong,
+.quant-report-card span,
+.quant-report-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quant-report-card strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.quant-report-card span,
+.quant-report-card small {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.quant-report-card-metrics {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.quant-report-card-metrics b {
+  color: #111827;
+  font-size: 14px;
 }
 
 .quant-risk-panel {
@@ -461,6 +594,7 @@ function formatAmount(value: number): string {
 @media (max-width: 980px) {
   .quant-hero,
   .quant-grid,
+  .quant-report-list,
   .quant-chart-grid {
     grid-template-columns: 1fr;
   }

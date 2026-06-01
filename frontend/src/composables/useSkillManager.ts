@@ -72,6 +72,10 @@ export function useSkillManager(client: SkillApiClient = api) {
     }
   }
 
+  function setSkills(nextSkills: SkillListItem[]) {
+    skills.value = [...nextSkills]
+  }
+
   async function importFromSkillHub() {
     const normalized = importInput.value.trim()
     if (!normalized) {
@@ -192,6 +196,7 @@ export function useSkillManager(client: SkillApiClient = api) {
     installedOverview,
     enabledOverview,
     loadSkills,
+    setSkills,
     setImportFile,
     importFromSkillHub,
     importFromZip,

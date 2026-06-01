@@ -56,10 +56,10 @@ class Settings(BaseSettings):
 
     scheduler_poll_seconds: int = Field(default=15, alias="SCHEDULER_POLL_SECONDS")
     market_data_maintenance_enabled: bool = Field(
-        default=False, alias="MARKET_DATA_MAINTENANCE_ENABLED"
+        default=True, alias="MARKET_DATA_MAINTENANCE_ENABLED"
     )
     market_data_maintenance_times: str = Field(
-        default="08:45,15:30", alias="MARKET_DATA_MAINTENANCE_TIMES"
+        default="07:45,15:35,20:30", alias="MARKET_DATA_MAINTENANCE_TIMES"
     )
     market_data_maintenance_lookback_days: int = Field(
         default=1825, alias="MARKET_DATA_MAINTENANCE_LOOKBACK_DAYS"

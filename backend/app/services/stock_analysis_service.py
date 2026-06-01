@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.db.models import StockAnalysisReport
@@ -440,6 +441,33 @@ class StockAnalysisService:
         payload.setdefault("source_snapshot", {})
         payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
         return payload
+
+    def list_reports(self, db: Session, *, limit: int = 20) -> dict[str, Any]:
+        normalized_limit = max(1, min(100, int(limit or 20)))
+        records = db.scalars(
+            select(StockAnalysisReport)
+            .order_by(desc(StockAnalysisReport.id))
+            .limit(normalized_limit)
+        ).all()
+        return {
+            "items": [self._report_summary(record) for record in records],
+        }
+
+    def _report_summary(self, record: StockAnalysisReport) -> dict[str, Any]:
+        payload = record.report_payload or {}
+        summary = str(payload.get("summary") or "")
+        return {
+            "id": record.id,
+            "symbol": record.symbol,
+            "name": record.name,
+            "title": record.title or f"{record.name or record.symbol} 分析报告",
+            "model": record.model,
+            "action": record.action,
+            "rating": record.rating,
+            "summary": summary,
+            "selected_skills": list(record.selected_skills_payload or []),
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+        }
 
     def _build_analysis_report_payload(
         self,

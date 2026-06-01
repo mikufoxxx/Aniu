@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisChartsPayload, StockAnalysisPayload, StockAnalysisReportPayload } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload, ArenaOverviewPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, DataLabOverviewPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, QuantResearchReportListPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SettingsWorkspacePayload, SkillInfo, SkillListItem, StockAnalysisChartsPayload, StockAnalysisPayload, StockAnalysisReportListPayload, StockAnalysisReportPayload, StockAnalysisWorkspacePayload } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -217,6 +217,9 @@ export const api = {
   getSettings() {
     return request<AppSettings>(`${API_PREFIX}/settings`)
   },
+  getSettingsWorkspace() {
+    return request<SettingsWorkspacePayload>(`${API_PREFIX}/settings/workspace`)
+  },
   updateSettings(payload: Omit<AppSettings, 'id' | 'created_at' | 'updated_at' | 'forecast_ai_config'>) {
     return request<AppSettings>(`${API_PREFIX}/settings`, {
       method: 'PUT',
@@ -373,6 +376,11 @@ export const api = {
   getMarketDataCoverage() {
     return request<MarketDataCoveragePayload>(`${API_PREFIX}/market/data/coverage`)
   },
+  getDataLabOverview(options: { limit?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('limit', String(options.limit ?? 6))
+    return request<DataLabOverviewPayload>(`${API_PREFIX}/data-lab/overview?${params.toString()}`)
+  },
   generateQuantCandidates(payload: { symbols?: string[]; limit?: number; prefer_realtime?: boolean; lookback_days?: number }) {
     return request<QuantCandidatesPayload>(`${API_PREFIX}/quant/candidates`, {
       method: 'POST',
@@ -473,6 +481,19 @@ export const api = {
       timeoutMs: 60000,
     })
   },
+  listQuantResearchReports(options: { limit?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('limit', String(options.limit ?? 20))
+    return request<QuantResearchReportListPayload>(`${API_PREFIX}/quant/research-reports?${params.toString()}`)
+  },
+  getQuantResearchReport(reportId: number) {
+    return request<QuantResearchPayload>(`${API_PREFIX}/quant/research-reports/${encodeURIComponent(String(reportId))}`)
+  },
+  getQuantResearchWorkspace(options: { limit?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('limit', String(options.limit ?? 20))
+    return request<QuantResearchReportListPayload>(`${API_PREFIX}/quant/research-workspace?${params.toString()}`)
+  },
   runArena(payload: { phase?: 'morning_recommendation' | 'intraday_trade' | 'closing_review' | 'nightly_learning'; agents?: ArenaAgentConfig[]; initial_cash?: number }) {
     return request<ArenaRunPayload>(`${API_PREFIX}/arena/run`, {
       method: 'POST',
@@ -495,6 +516,24 @@ export const api = {
   },
   getStockAnalysisReport(reportId: number) {
     return request<StockAnalysisReportPayload>(`${API_PREFIX}/stocks/analysis-reports/${encodeURIComponent(String(reportId))}`)
+  },
+  listStockAnalysisReports(options: { limit?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('limit', String(options.limit ?? 20))
+    return request<StockAnalysisReportListPayload>(`${API_PREFIX}/stocks/analysis-reports?${params.toString()}`)
+  },
+  getStockAnalysisWorkspace(options: { limit?: number } = {}) {
+    const params = new URLSearchParams()
+    params.set('limit', String(options.limit ?? 20))
+    return request<StockAnalysisWorkspacePayload>(`${API_PREFIX}/stocks/analysis-workspace?${params.toString()}`)
+  },
+  getArenaOverview(interval: 'daily' | 'weekly' | 'hourly' = 'daily', refreshQuotes = false) {
+    const params = new URLSearchParams()
+    params.set('interval', interval)
+    params.set('refresh_quotes', String(refreshQuotes))
+    return request<ArenaOverviewPayload>(`${API_PREFIX}/arena/overview?${params.toString()}`, {
+      timeoutMs: 60000,
+    })
   },
   getArenaAgents() {
     return request<ArenaAgentsPayload>(`${API_PREFIX}/arena/agents`)

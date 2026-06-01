@@ -464,21 +464,21 @@ onMounted(() => {
 .arena-agent-row {
   position: relative;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) minmax(360px, 0.92fr);
-  gap: 12px;
-  align-items: center;
+  grid-template-columns: minmax(430px, 1fr) minmax(280px, 340px);
+  gap: 16px;
+  align-items: stretch;
   border: 1px solid #ececf1;
   border-radius: 12px;
   background: #ffffff;
-  padding: 12px 82px 12px 12px;
+  padding: 14px 14px 14px 56px;
   cursor: pointer;
   transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .arena-card-config {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 12px;
+  right: 12px;
   z-index: 1;
 }
 
@@ -490,8 +490,24 @@ onMounted(() => {
 }
 
 .arena-rank {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #f7f7f5;
   color: #6b7280;
+  font-size: 12px;
   font-weight: 650;
+}
+
+.arena-agent-main {
+  min-width: 0;
+  padding-right: 82px;
 }
 
 .arena-agent-title {
@@ -534,8 +550,8 @@ onMounted(() => {
 }
 
 .arena-pick-chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-top: 8px;
 }
@@ -543,13 +559,13 @@ onMounted(() => {
 .arena-pick-chips span {
   display: grid;
   gap: 2px;
+  min-width: 0;
   border: 1px solid #ececf1;
   border-radius: 10px;
   background: #f7f7f5;
   color: #374151;
   padding: 6px 8px;
   font-size: 12px;
-  min-width: 148px;
 }
 
 .arena-pick-chips b {
@@ -569,8 +585,9 @@ onMounted(() => {
 
 .arena-agent-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  padding-top: 42px;
 }
 
 .arena-agent-metrics div {
@@ -741,6 +758,18 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 
+  .arena-agent-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding-top: 0;
+  }
+}
+
+@media (max-width: 820px) {
+  .arena-agent-main {
+    padding-right: 0;
+  }
+
+  .arena-pick-chips,
   .arena-agent-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

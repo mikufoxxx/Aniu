@@ -1626,6 +1626,140 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     _reset_state()
 
 
+def test_arena_morning_auto_agents_diversify_recommendations_by_model(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_data_request_service import ai_data_request_service
+    from app.services.ai_stock_picker_service import ai_stock_picker_service
+
+    def candidate(index: int) -> dict[str, object]:
+        symbol = f"6000{index:02d}.SH"
+        return {
+            "symbol": symbol,
+            "name": f"测试股{index}",
+            "price": 10.0 + index,
+            "change_pct": 6.0 - index * 0.4,
+            "amount": 1_200_000_000 - index * 70_000_000,
+            "turnover": 1.0 + index * 0.1,
+            "volume_ratio": 2.0 - index * 0.08,
+            "source": "easy_tdx",
+            "timestamp": "2026-05-29 08:20:00",
+            "score": 90 - index,
+            "factor_scores": {"test": 90 - index},
+            "daily_factors": {
+                "recent_momentum_pct": 8.0 - index,
+                "momentum_pct": 16.0 - index,
+                "above_ma20": index % 2 == 0,
+                "above_ma60": index % 3 != 0,
+                "volatility_pct": 2.0 + index,
+            },
+            "financial_factors": {
+                "roe": 8.0 + index * 2,
+                "netprofit_yoy": 4.0 + index * 3,
+                "grossprofit_margin": 20.0 + index,
+            },
+            "ai_selection": {
+                "score": 90 - index,
+                "risk_flags": ["overheated_intraday"] if index == 0 else [],
+                "plan": {"strategy": "auto_adaptive"},
+            },
+            "rationale": "测试候选",
+        }
+
+    def fake_build_snapshot(
+        *,
+        db,
+        symbols=None,
+        limit=50,
+        prefer_realtime=True,
+        lookback_days=120,
+        agent=None,
+    ):
+        items = [candidate(index) for index in range(8)]
+        return {
+            "snapshot_id": f"ai-picks-{(agent or {}).get('id')}",
+            "selection_mode": "auto_universe",
+            "data_sources": ["easy_tdx", "tushare_daily"],
+            "coverage": {},
+            "selection_plan": {"strategy": "auto_adaptive", "dimensions": ["quote"]},
+            "dataset": {
+                "universe_size": len(items),
+                "item_count": len(items),
+                "lookback_days": lookback_days,
+                "data_sources": ["easy_tdx", "tushare_daily"],
+                "coverage": {"daily_history_symbols": len(items)},
+                "items": items,
+            },
+            "recommendations": items,
+            "context": "context",
+            "context_length": 7,
+        }
+
+    monkeypatch.setattr(ai_stock_picker_service, "build_snapshot", fake_build_snapshot)
+    monkeypatch.setattr(
+        ai_data_request_service,
+        "execute",
+        lambda *args, **kwargs: {
+            "requested_symbols": kwargs.get("symbols") or [],
+            "requested_dimensions": kwargs.get("dimensions") or [],
+            "actions": [],
+            "refresh": None,
+            "dataset": {"item_count": 0, "data_sources": [], "coverage": {}},
+            "context": "",
+            "context_length": 0,
+        },
+    )
+
+    agents = [
+        {"id": "model_gpt_5_5", "name": "GPT-5.5", "style": "auto", "model": "gpt-5.5"},
+        {
+            "id": "model_deepseek_v4_flash",
+            "name": "DeepSeek V4 Flash",
+            "style": "auto",
+            "model": "deepseek-v4-flash",
+        },
+        {
+            "id": "model_grok_4_20",
+            "name": "Grok 4.20",
+            "style": "auto",
+            "model": "grok-4.20-0309-non-reasoning",
+        },
+        {"id": "model_minimax_m2_7", "name": "MiniMax M2.7", "style": "auto", "model": "minimax-m2.7"},
+        {
+            "id": "model_deepseek_v4_pro",
+            "name": "DeepSeek V4 Pro",
+            "style": "auto",
+            "model": "deepseek-v4-pro",
+        },
+    ]
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "phase": "morning_recommendation",
+                "initial_cash": 200000,
+                "agents": agents,
+            },
+        )
+
+    assert response.status_code == 200
+    recommendations = response.json()["agent_recommendations"]
+    pick_orders = {
+        item["agent_id"]: tuple(pick["symbol"] for pick in item["picks"])
+        for item in recommendations
+    }
+    assert len(pick_orders) == 5
+    assert all(len(order) == 5 for order in pick_orders.values())
+    assert len(set(pick_orders.values())) > 1
+    assert len({order[0] for order in pick_orders.values()}) > 1
+
+    _reset_state()
+
+
 def test_arena_closing_phase_records_agent_memory_and_reuses_it_in_prompt(
     monkeypatch,
     tmp_path,

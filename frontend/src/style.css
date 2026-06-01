@@ -195,7 +195,7 @@ textarea {
 }
 
 .page-shell.is-sidebar-collapsed {
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
 }
 
 .page-shell.is-login-shell {
@@ -208,8 +208,8 @@ textarea {
   height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 18px;
-  padding: 16px 12px 20px;
+  gap: 16px;
+  padding: 14px 10px 18px;
   border-right: 1px solid var(--color-border);
   background: var(--color-surface-subtle);
   transition: padding 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
@@ -224,8 +224,8 @@ textarea {
 }
 
 .sidebar-collapse-button {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--color-border);
   border-radius: 12px;
   background: var(--color-surface);
@@ -249,8 +249,8 @@ textarea {
 }
 
 .page-shell.is-sidebar-collapsed .app-sidebar {
-  gap: 18px;
-  padding: 16px 8px 20px;
+  gap: 14px;
+  padding: 14px 8px 16px;
 }
 
 .page-shell.is-sidebar-collapsed .app-sidebar-top {
@@ -278,7 +278,9 @@ textarea {
 
 .page-shell.is-sidebar-collapsed .tab-button,
 .page-shell.is-sidebar-collapsed .header-action-button {
-  padding-inline: 4px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   text-align: center;
 }
 
@@ -3427,10 +3429,16 @@ textarea {
   gap: 14px;
   align-content: start;
   min-width: 0;
-  width: min(100%, 1180px);
+  width: 100%;
+  max-width: 1180px;
   padding: 20px 24px;
-  justify-self: center;
+  justify-self: start;
   margin-top: 0;
+}
+
+.page-shell.is-sidebar-collapsed .stack-layout:not(.is-market-map-route) {
+  max-width: 1240px;
+  padding-left: 28px;
 }
 
 .stack-layout.is-market-map-route {

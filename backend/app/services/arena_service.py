@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -720,6 +721,7 @@ class ArenaService:
             picks = self._morning_picks(
                 candidates=candidates,
                 style=style,
+                agent=agent,
                 agent_index=index,
             )
             candidate = picks[0] if picks else None
@@ -1284,9 +1286,19 @@ class ArenaService:
             allocation_ratio = 0.3
 
         budget = available_cash * allocation_ratio
-        preferred_index = 0 if fallback_style == "momentum" else min(agent_index, len(candidates) - 1)
-        candidate = self._select_affordable_candidate(
+        preferred_index = (
+            0
+            if style == "auto" or fallback_style == "momentum"
+            else min(agent_index, len(candidates) - 1)
+        )
+        ordered_candidates = self._ordered_candidates_for_agent(
             candidates=candidates,
+            style=style,
+            agent=agent,
+            agent_index=agent_index,
+        )
+        candidate = self._select_affordable_candidate(
+            candidates=ordered_candidates,
             preferred_index=preferred_index,
             budget=budget,
         )
@@ -1991,11 +2003,80 @@ class ArenaService:
         *,
         candidates: list[dict[str, Any]],
         style: str,
+        agent: dict[str, Any],
         agent_index: int,
     ) -> list[dict[str, Any]]:
         if not candidates:
             return []
+        ordered = self._ordered_candidates_for_agent(
+            candidates=candidates,
+            style=style,
+            agent=agent,
+            agent_index=agent_index,
+        )
+        pick_limit = min(5, max(1, len(ordered) - 1))
+        return [self._pick_payload(candidate) for candidate in ordered[:pick_limit]]
+
+    def _ordered_candidates_for_agent(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        style: str,
+        agent: dict[str, Any],
+        agent_index: int,
+    ) -> list[dict[str, Any]]:
+        if not candidates:
+            return []
+        normalized_style = str(style or "auto").strip()
         fallback_style = self._fallback_style(style)
+        if normalized_style == "auto":
+            profile = self._agent_profile_index(agent)
+            if profile == 0:
+                ordered = sorted(
+                    candidates,
+                    key=lambda item: (
+                        self._candidate_ai_score(item),
+                        self._candidate_recent_momentum(item),
+                        self._number(item.get("change_pct")),
+                        self._number(item.get("amount")),
+                    ),
+                    reverse=True,
+                )
+            elif profile == 1:
+                ordered = sorted(
+                    candidates,
+                    key=lambda item: (
+                        self._candidate_financial_quality(item),
+                        self._candidate_ai_score(item),
+                        self._candidate_recent_momentum(item),
+                    ),
+                    reverse=True,
+                )
+            elif profile == 2:
+                ordered = sorted(
+                    candidates,
+                    key=lambda item: (
+                        self._candidate_risk_adjusted_score(item),
+                        self._candidate_ai_score(item),
+                        self._number(item.get("amount")),
+                    ),
+                    reverse=True,
+                )
+            else:
+                ordered = sorted(
+                    candidates,
+                    key=lambda item: (
+                        self._number(item.get("amount")),
+                        self._number(item.get("volume_ratio")),
+                        self._candidate_ai_score(item),
+                    ),
+                    reverse=True,
+                )
+            return self._rotate_priority_band(
+                ordered,
+                agent=agent,
+                agent_index=agent_index,
+            )
         if fallback_style == "risk_control":
             ordered = sorted(
                 candidates,
@@ -2009,8 +2090,71 @@ class ArenaService:
             ordered = candidates[agent_index:] + candidates[:agent_index]
         else:
             ordered = candidates
-        pick_limit = min(5, max(1, len(ordered) - 1))
-        return [self._pick_payload(candidate) for candidate in ordered[:pick_limit]]
+        return list(ordered)
+
+    def _rotate_priority_band(
+        self,
+        ordered: list[dict[str, Any]],
+        *,
+        agent: dict[str, Any],
+        agent_index: int,
+    ) -> list[dict[str, Any]]:
+        band_size = min(len(ordered), 8)
+        if band_size <= 1:
+            return ordered
+        offset = (self._agent_seed(agent) + agent_index) % band_size
+        if offset == 0:
+            return ordered
+        priority_band = ordered[:band_size]
+        return priority_band[offset:] + priority_band[:offset] + ordered[band_size:]
+
+    def _agent_profile_index(self, agent: dict[str, Any]) -> int:
+        return self._agent_seed(agent) % 4
+
+    def _agent_seed(self, agent: dict[str, Any]) -> int:
+        identity = "|".join(
+            str(agent.get(key) or "")
+            for key in ("id", "model", "name", "provider", "prompt")
+        )
+        return int(hashlib.sha256(identity.encode("utf-8")).hexdigest()[:8], 16)
+
+    def _candidate_ai_score(self, candidate: dict[str, Any]) -> float:
+        ai_selection = candidate.get("ai_selection") or {}
+        return self._number(ai_selection.get("score") or candidate.get("score"))
+
+    def _candidate_recent_momentum(self, candidate: dict[str, Any]) -> float:
+        daily = candidate.get("daily_factors") or {}
+        return self._number(daily.get("recent_momentum_pct") or daily.get("momentum_pct"))
+
+    def _candidate_financial_quality(self, candidate: dict[str, Any]) -> float:
+        financial = candidate.get("financial_factors") or {}
+        return (
+            self._number(financial.get("roe")) * 0.4
+            + self._number(financial.get("netprofit_yoy")) * 0.3
+            + self._number(financial.get("grossprofit_margin")) * 0.1
+            + self._candidate_ai_score(candidate) * 0.2
+        )
+
+    def _candidate_risk_adjusted_score(self, candidate: dict[str, Any]) -> float:
+        ai_selection = candidate.get("ai_selection") or {}
+        risk_count = len(ai_selection.get("risk_flags") or [])
+        daily = candidate.get("daily_factors") or {}
+        above_ma60 = bool(daily.get("above_ma60"))
+        volatility = self._number(daily.get("volatility_pct"))
+        change_pct = self._number(candidate.get("change_pct"))
+        return (
+            self._candidate_ai_score(candidate)
+            - risk_count * 8
+            + (8 if above_ma60 else 0)
+            + max(0.0, 6.0 - volatility)
+            - max(0.0, change_pct - 5.0)
+        )
+
+    def _number(self, value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     def _pick_payload(self, candidate: dict[str, Any]) -> dict[str, Any]:
         ai_selection = candidate.get("ai_selection") or {}

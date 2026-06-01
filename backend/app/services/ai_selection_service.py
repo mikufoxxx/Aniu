@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
@@ -14,6 +15,37 @@ def _number(value: Any, default: float = 0.0) -> float:
 
 class AISelectionService:
     """AI-ready A-share selection context built from quote, daily and retail signals."""
+
+    _AUTO_PROFILES = (
+        {
+            "key": "trend_breakout",
+            "label": "趋势突破",
+            "dimensions": ["quote", "daily_history", "moneyflow", "sector_heat", "limit_event"],
+            "risk_checks": ["below_ma20", "overheated_intraday", "high_retail_risk"],
+            "ranking_focus": ["recent_momentum", "volume_ratio", "moneyflow", "trend"],
+        },
+        {
+            "key": "quality_compound",
+            "label": "质量复合",
+            "dimensions": ["quote", "daily_history", "financial_indicator", "valuation", "moneyflow"],
+            "risk_checks": ["below_ma60", "high_retail_risk", "valuation_stretch"],
+            "ranking_focus": ["financial_quality", "retail_score", "valuation_sanity", "trend"],
+        },
+        {
+            "key": "risk_adjusted",
+            "label": "风险调整",
+            "dimensions": ["quote", "daily_history", "financial_indicator", "valuation", "pledge_stat"],
+            "risk_checks": ["below_ma60", "overheated_intraday", "high_retail_risk", "pledge_risk"],
+            "ranking_focus": ["low_risk", "above_ma60", "drawdown_control", "financial_quality"],
+        },
+        {
+            "key": "liquidity_rotation",
+            "label": "流动性轮动",
+            "dimensions": ["quote", "daily_history", "moneyflow", "sector_heat", "stock_profile"],
+            "risk_checks": ["illiquid", "overheated_intraday", "below_ma20"],
+            "ranking_focus": ["amount", "volume_ratio", "sector_heat", "recent_momentum"],
+        },
+    )
 
     _DIMENSION_ACTIONS = {
         "quote": {
@@ -91,12 +123,15 @@ class AISelectionService:
                 "ranking_focus": ["above_ma60", "low_risk", "retail_score", "financial_quality"],
             }
         if style == "auto":
+            profile = self._auto_profile(agent)
             return {
                 "strategy": "auto_adaptive",
                 "label": "AI自适应",
-                "dimensions": ["quote", "daily_history", "moneyflow", "valuation", "financial_indicator"],
-                "risk_checks": ["below_ma60", "overheated_intraday", "high_retail_risk"],
-                "ranking_focus": ["ai_selection_score", "retail_score", "moneyflow", "trend"],
+                "agent_profile": profile["key"],
+                "agent_profile_label": profile["label"],
+                "dimensions": list(profile["dimensions"]),
+                "risk_checks": list(profile["risk_checks"]),
+                "ranking_focus": list(profile["ranking_focus"]),
             }
         return {
             "strategy": "balanced",
@@ -173,9 +208,53 @@ class AISelectionService:
             if temporal["range_position_pct"] >= 90:
                 score -= 10
             score -= len(risk_flags) * 11
+        elif strategy == "auto_adaptive":
+            profile = str(plan.get("agent_profile") or "")
+            score -= len(risk_flags) * 7
+            if profile == "trend_breakout":
+                score += max(min(_number(candidate.get("change_pct")) * 0.9, 9), -5)
+                score += max(min(temporal["recent_momentum_pct"] * 0.9, 12), -7)
+                if temporal["above_ma20"]:
+                    score += 4
+                if temporal["range_position_pct"] >= 96:
+                    score -= 5
+            elif profile == "quality_compound":
+                financial = candidate.get("financial_factors") or {}
+                score += max(min(_number(financial.get("roe")) / 4, 9), -3)
+                score += max(min(_number(financial.get("netprofit_yoy")) / 5, 8), -4)
+                score += max(min(_number(financial.get("grossprofit_margin")) / 20, 5), 0)
+                if temporal["above_ma60"]:
+                    score += 4
+            elif profile == "risk_adjusted":
+                score -= len(risk_flags) * 4
+                if temporal["above_ma60"]:
+                    score += 8
+                if temporal["volatility_pct"] <= 4:
+                    score += 7
+                if temporal["max_drawdown_pct"] <= -15:
+                    score -= 8
+                if _number(candidate.get("change_pct")) >= 7:
+                    score -= 7
+            elif profile == "liquidity_rotation":
+                amount_bonus = min(_number(candidate.get("amount")) / 1_000_000_000 * 8, 10)
+                volume_bonus = max(min((_number(candidate.get("volume_ratio")) - 1) * 4, 8), -2)
+                score += amount_bonus + volume_bonus
+                score += max(min(_number(candidate.get("change_pct")) * 0.45, 5), -3)
+            else:
+                score += max(min(temporal["recent_momentum_pct"] * 0.4, 5), -4)
         else:
             score -= len(risk_flags) * 7
         return round(max(0.0, min(120.0, score)), 4)
+
+    def _auto_profile(self, agent: dict[str, Any] | None) -> dict[str, Any]:
+        if not agent:
+            return dict(self._AUTO_PROFILES[0])
+        identity = "|".join(
+            str((agent or {}).get(key) or "")
+            for key in ("id", "model", "name", "provider", "prompt")
+        )
+        seed = int(hashlib.sha256(identity.encode("utf-8")).hexdigest()[:8], 16)
+        return dict(self._AUTO_PROFILES[seed % len(self._AUTO_PROFILES)])
 
     def _temporal_profile(self, candidate: dict[str, Any]) -> dict[str, Any]:
         daily = candidate.get("daily_factors") or {}

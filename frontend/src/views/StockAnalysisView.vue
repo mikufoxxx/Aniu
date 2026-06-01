@@ -213,7 +213,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ForecastAIConfig, QuantCandidate, SkillListItem, StockAnalysisPayload } from '@/types'
@@ -231,6 +231,7 @@ const selectedSymbol = ref('')
 const analysis = ref<StockAnalysisPayload | null>(null)
 const loadingCandidates = ref(false)
 const analyzing = ref(false)
+const chartRefreshing = ref(false)
 const errorMessage = ref('')
 const aiConfig = ref<ForecastAIConfig>({
   base_url: '',
@@ -242,6 +243,7 @@ const aiConfig = ref<ForecastAIConfig>({
 const skills = ref<SkillListItem[]>([])
 const selectedModel = ref('')
 const selectedSkillIds = ref<string[]>([])
+let chartRefreshTimer: number | null = null
 
 interface RetailDimension {
   key: string
@@ -295,6 +297,7 @@ async function loadCandidates(): Promise<void> {
     candidates.value = payload.recommendations
     selectedSymbol.value = candidates.value[0]?.symbol ?? ''
     analysis.value = null
+    stopChartAutoRefresh()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'AI 选股失败。'
   } finally {
@@ -335,11 +338,55 @@ async function analyzeSelected(): Promise<void> {
       model: selectedModel.value || undefined,
       skill_ids: selectedSkillIds.value,
     })
+    startChartAutoRefresh()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '股票分析失败。'
   } finally {
     analyzing.value = false
   }
+}
+
+function analysisFactorScores(): Record<string, number> {
+  if (!analysis.value) return {}
+  return Object.fromEntries(
+    analysis.value.charts.factor_radar.map((item) => [item.key, item.value]),
+  )
+}
+
+async function refreshAnalysisCharts(): Promise<void> {
+  if (!analysis.value || chartRefreshing.value || analyzing.value) return
+  chartRefreshing.value = true
+  try {
+    const payload = await api.refreshStockAnalysisCharts({
+      symbol: analysis.value.symbol,
+      action: analysis.value.action,
+      price: analysis.value.price,
+      quantity: Number(analysis.value.decision.suggested_quantity || 0),
+      factor_scores: analysisFactorScores(),
+    })
+    analysis.value = {
+      ...analysis.value,
+      price: payload.latest_price ?? analysis.value.price,
+      charts: payload.charts,
+    }
+  } catch {
+    // 图表低频刷新失败不覆盖已有 AI 分析结果。
+  } finally {
+    chartRefreshing.value = false
+  }
+}
+
+function startChartAutoRefresh(): void {
+  stopChartAutoRefresh()
+  chartRefreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void refreshAnalysisCharts()
+  }, 30000)
+}
+
+function stopChartAutoRefresh(): void {
+  if (!chartRefreshTimer) return
+  window.clearInterval(chartRefreshTimer)
+  chartRefreshTimer = null
 }
 
 function actionClass(action: string): string {
@@ -379,6 +426,10 @@ function retailList(key: string): string[] {
 
 onMounted(() => {
   loadAnalysisOptions()
+})
+
+onBeforeUnmount(() => {
+  stopChartAutoRefresh()
 })
 </script>
 

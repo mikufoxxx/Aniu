@@ -1067,6 +1067,181 @@ def test_order_charts_append_realtime_quote_after_latest_daily_bar(monkeypatch, 
     _reset_state()
 
 
+def test_arena_leaderboard_revalues_positions_and_exposes_latest_morning(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.db.models import ArenaAccount, ArenaPosition, ArenaRun
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.0,
+                "change_pct": 2.5,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.2,
+                "source": "easy_tdx",
+                "timestamp": "2026-06-01 10:31:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            account = ArenaAccount(
+                agent_id="live_ai",
+                agent_name="实时 AI",
+                style="auto",
+                initial_cash=200000,
+                cash=190000,
+                order_count=1,
+            )
+            account.positions.append(
+                ArenaPosition(
+                    symbol="000001.SZ",
+                    name="平安银行",
+                    quantity=1000,
+                    avg_cost=9.0,
+                    last_price=10.0,
+                )
+            )
+            db.add(account)
+            db.add(
+                ArenaRun(
+                    phase="morning_recommendation",
+                    initial_cash=200000,
+                    candidate_payload={
+                        "agent_recommendations": [
+                            {
+                                "agent_id": "live_ai",
+                                "agent_name": "实时 AI",
+                                "style": "auto",
+                                "action": "WATCH",
+                                "symbol": "000001.SZ",
+                                "name": "平安银行",
+                                "score": 88,
+                                "price": 11.5,
+                                "reason": "早盘精选",
+                                "picks": [
+                                    {
+                                        "symbol": "000001.SZ",
+                                        "name": "平安银行",
+                                        "score": 88,
+                                        "ai_selection_score": 91,
+                                        "risk_flags": [],
+                                        "price": 11.5,
+                                        "change_pct": 2.5,
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                )
+            )
+        response = client.get("/api/aniu/arena/leaderboard", headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    item = next(entry for entry in items if entry["agent_id"] == "live_ai")
+    assert item["position_value"] == 12000
+    assert item["total_assets"] == 202000
+    assert item["return_ratio"] == 0.01
+    assert item["positions"][0]["last_price"] == 12
+    assert item["positions"][0]["unrealized_pnl"] == 3000
+    assert item["latest_recommendation"]["picks"][0]["symbol"] == "000001.SZ"
+
+    _reset_state()
+
+
+def test_arena_equity_curves_support_hourly_weekly_and_current_live_point(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.db.models import ArenaAccount, ArenaPosition, ArenaRun
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.0,
+                "change_pct": 2.5,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.2,
+                "source": "easy_tdx",
+                "timestamp": "2026-06-01 10:31:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            account = ArenaAccount(
+                agent_id="curve_ai",
+                agent_name="曲线 AI",
+                style="auto",
+                initial_cash=200000,
+                cash=190000,
+            )
+            account.positions.append(
+                ArenaPosition(
+                    symbol="000001.SZ",
+                    name="平安银行",
+                    quantity=1000,
+                    avg_cost=9.0,
+                    last_price=10.0,
+                )
+            )
+            db.add(account)
+            db.add(
+                ArenaRun(
+                    phase="intraday_trade",
+                    initial_cash=200000,
+                    leaderboard_payload=[
+                        {
+                            "agent_id": "curve_ai",
+                            "agent_name": "曲线 AI",
+                            "total_assets": 201000,
+                            "return_ratio": 0.005,
+                        }
+                    ],
+                    created_at=datetime(2026, 5, 29, 10, 15),
+                )
+            )
+        hourly_response = client.get(
+            "/api/aniu/arena/equity-curves?interval=hourly",
+            headers=headers,
+        )
+        weekly_response = client.get(
+            "/api/aniu/arena/equity-curves?interval=weekly",
+            headers=headers,
+        )
+
+    assert hourly_response.status_code == 200
+    hourly_payload = hourly_response.json()
+    curve = next(item for item in hourly_payload["curves"] if item["agent_id"] == "curve_ai")
+    assert hourly_payload["interval"] == "hourly"
+    assert curve["points"][-1]["value"] == 202000
+    assert curve["points"][-1]["return_ratio"] == 0.01
+    assert ":00" in curve["points"][-1]["trade_date"]
+
+    assert weekly_response.status_code == 200
+    weekly_curve = next(item for item in weekly_response.json()["curves"] if item["agent_id"] == "curve_ai")
+    assert weekly_curve["points"][-1]["trade_date"].startswith("2026-W")
+
+    _reset_state()
+
+
 def test_quant_dataset_uses_most_complete_stored_trade_date(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 
@@ -2070,6 +2245,57 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["charts"]["forecast_series"][0]["source"] == "quant_regime_projection"
     assert "confidence" in payload["charts"]["forecast_series"][0]
     assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(payload["charts"]["price_series"][-1])
+
+    _reset_state()
+
+
+def test_stock_analysis_chart_refresh_updates_charts_without_new_report(monkeypatch, tmp_path) -> None:
+    from app.db.models import StockAnalysisReport
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.4,
+                "change_pct": 3.33,
+                "amount": 2_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.2,
+                "source": "tencent",
+                "timestamp": "2026-06-01 10:31:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260529", open=11, high=12, low=10.8, close=12, amount=1200))
+        response = client.post(
+            "/api/aniu/stocks/charts/refresh",
+            headers=headers,
+            json={
+                "symbol": "000001.SZ",
+                "action": "BUY",
+                "price": 12.0,
+                "quantity": 1000,
+                "factor_scores": {"technical": 70, "liquidity": 65},
+            },
+        )
+        with session_scope() as db:
+            report_count = db.query(StockAnalysisReport).count()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["latest_price"] == 12.4
+    assert payload["charts"]["price_series"][-1]["trade_date"] == "20260601"
+    assert payload["charts"]["price_series"][-1]["is_realtime"] is True
+    assert payload["charts"]["price_series"][-1]["source"] == "tencent"
+    assert payload["charts"]["factor_radar"]
+    assert report_count == 0
 
     _reset_state()
 

@@ -80,6 +80,7 @@ class ChartDataService:
         start_date: str | None = None,
         end_date: str | None = None,
         limit: int = 120,
+        realtime_quote: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         series = self.price_series(
             db,
@@ -90,7 +91,11 @@ class ChartDataService:
         )
         if end_date:
             return series
-        return self._merge_realtime_quote(series, symbol=symbol)
+        return self._merge_realtime_quote(
+            series,
+            symbol=symbol,
+            realtime_quote=realtime_quote,
+        )
 
     def strategy_charts(
         self,
@@ -129,8 +134,14 @@ class ChartDataService:
         price: float,
         quantity: int,
         factor_scores: dict[str, Any],
+        realtime_quote: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        series = self.price_series_with_realtime(db, symbol=symbol, limit=90)
+        series = self.price_series_with_realtime(
+            db,
+            symbol=symbol,
+            limit=90,
+            realtime_quote=realtime_quote,
+        )
         trade_date = series[-1]["trade_date"] if series else None
         marker_price = float(price or (series[-1]["close"] if series else 0))
         return {
@@ -165,8 +176,14 @@ class ChartDataService:
         trade_date: str | None,
         price: float,
         quantity: int,
+        realtime_quote: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        series = self.price_series_with_realtime(db, symbol=symbol, limit=90)
+        series = self.price_series_with_realtime(
+            db,
+            symbol=symbol,
+            limit=90,
+            realtime_quote=realtime_quote,
+        )
         return {
             "price_series": series,
             "interval_series": self.interval_series(series),
@@ -427,14 +444,17 @@ class ChartDataService:
         price_series: list[dict[str, Any]],
         *,
         symbol: str,
+        realtime_quote: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        try:
-            quotes = market_data_service.get_quotes([normalize_symbol(symbol)], prefer_realtime=True)
-        except Exception:
-            return price_series
-        if not quotes:
-            return price_series
-        quote = quotes[0]
+        quote = realtime_quote
+        if quote is None:
+            try:
+                quotes = market_data_service.get_quotes([normalize_symbol(symbol)], prefer_realtime=True)
+            except Exception:
+                return price_series
+            if not quotes:
+                return price_series
+            quote = quotes[0]
         if str(quote.get("source") or "") == "fallback":
             return price_series
         price = self._safe_float(quote.get("price"))

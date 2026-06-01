@@ -28,6 +28,7 @@ DEFAULT_UNIVERSE = [
 
 _TENCENT_QUOTE_BATCH_SIZE = 60
 _EASTMONEY_QUOTE_BATCH_SIZE = 80
+_SINA_QUOTE_BATCH_SIZE = 220
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -61,6 +62,12 @@ def symbol_to_eastmoney_secid(symbol: str) -> str:
     code, suffix = normalized.split(".", 1)
     market = "1" if suffix == "SH" else "0"
     return f"{market}.{code}"
+
+
+def symbol_to_sina(symbol: str) -> str:
+    normalized = normalize_symbol(symbol)
+    code, suffix = normalized.split(".", 1)
+    return f"{suffix.lower()}{code}"
 
 
 def _parse_float(value: Any) -> float | None:
@@ -173,6 +180,14 @@ class MarketDataService:
         ]
         if missing_symbols:
             for quote in self._get_eastmoney_quotes(missing_symbols):
+                symbol = normalize_symbol(str(quote.get("symbol") or ""))
+                quote_by_symbol[symbol] = quote
+
+        missing_symbols = [
+            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
+        ]
+        if missing_symbols:
+            for quote in self._get_sina_quotes(missing_symbols):
                 symbol = normalize_symbol(str(quote.get("symbol") or ""))
                 quote_by_symbol[symbol] = quote
 
@@ -328,7 +343,7 @@ class MarketDataService:
         params = {
             "fltt": "2",
             "invt": "2",
-            "fields": "f12,f13,f14,f2,f3,f4,f5,f6,f8,f10,f17,f18,f20,f21",
+            "fields": "f12,f13,f14,f2,f3,f4,f5,f6,f8,f10,f17,f18,f20,f21,f24,f25,f109,f110,f124,f127,f160",
             "secids": ",".join(symbol_to_eastmoney_secid(symbol) for symbol in symbols),
         }
         try:
@@ -360,6 +375,12 @@ class MarketDataService:
             change_pct = _parse_float(item.get("f3"))
             amount = _parse_float(item.get("f6"))
             turnover = _parse_float(item.get("f8"))
+            timestamp_value = _parse_float(item.get("f124"))
+            timestamp = (
+                datetime.fromtimestamp(timestamp_value).strftime("%Y-%m-%d %H:%M:%S")
+                if timestamp_value
+                else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
             results.append(
                 {
                     "symbol": f"{code}.{suffix}",
@@ -370,7 +391,64 @@ class MarketDataService:
                     "turnover": turnover,
                     "volume_ratio": _parse_float(item.get("f10")),
                     "source": "eastmoney",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "timestamp": timestamp,
+                }
+            )
+        return results
+
+    def _get_sina_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for start in range(0, len(symbols), _SINA_QUOTE_BATCH_SIZE):
+            batch = symbols[start : start + _SINA_QUOTE_BATCH_SIZE]
+            results.extend(self._request_sina_quote_batch(batch))
+        return results
+
+    def _request_sina_quote_batch(self, symbols: list[str]) -> list[dict[str, Any]]:
+        if not symbols:
+            return []
+        query = ",".join(symbol_to_sina(symbol) for symbol in symbols)
+        try:
+            response = httpx.get(
+                "https://hq.sinajs.cn/list=" + query,
+                timeout=8.0,
+                headers={
+                    "User-Agent": "Aniu/1.0",
+                    "Referer": "https://finance.sina.com.cn/",
+                },
+            )
+            response.raise_for_status()
+        except Exception:
+            return []
+
+        text = response.content.decode("gbk", errors="ignore")
+        results: list[dict[str, Any]] = []
+        for line in text.split(";"):
+            if "=" not in line:
+                continue
+            raw_symbol = line.split("=", 1)[0].replace("var hq_str_", "").strip()
+            fields = line.split('"', 1)[-1].rsplit('"', 1)[0].split(",")
+            if len(fields) < 32 or not fields[0]:
+                continue
+            code = raw_symbol[-6:].zfill(6)
+            suffix = "SH" if raw_symbol.startswith("sh") else "SZ"
+            price = _parse_float(fields[3])
+            prev_close = _parse_float(fields[2])
+            change_pct = None
+            if price is not None and prev_close not in (None, 0):
+                change_pct = (price - prev_close) / prev_close * 100
+            date_text = fields[30] if len(fields) > 30 else ""
+            time_text = fields[31] if len(fields) > 31 else ""
+            results.append(
+                {
+                    "symbol": f"{code}.{suffix}",
+                    "name": fields[0] or code,
+                    "price": price,
+                    "change_pct": change_pct,
+                    "amount": _parse_float(fields[9] if len(fields) > 9 else None),
+                    "turnover": None,
+                    "volume_ratio": None,
+                    "source": "sina",
+                    "timestamp": f"{date_text} {time_text}".strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
         return results

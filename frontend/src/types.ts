@@ -853,10 +853,24 @@ export interface ArenaLeaderboardItem {
     market_value: number
     unrealized_pnl: number
   }>
+  latest_recommendation?: ArenaAgentRecommendation | null
 }
 
 export interface ArenaLeaderboardPayload {
   items: ArenaLeaderboardItem[]
+}
+
+export interface ArenaEquityCurve {
+  agent_id: string
+  agent_name: string
+  model: string
+  points: EquityCurvePoint[]
+}
+
+export interface ArenaEquityCurvesPayload {
+  interval: 'daily' | 'weekly' | 'hourly'
+  refreshed_at: string
+  curves: ArenaEquityCurve[]
 }
 
 export interface ArenaRunPayload {
@@ -937,6 +951,13 @@ export interface StockAnalysisPayload {
   data_sources: string[]
   context: string
   stock_pick_snapshot?: AIStockPicksPayload | null
+  charts: StockAnalysisCharts
+}
+
+export interface StockAnalysisChartsPayload {
+  symbol: string
+  latest_price?: number | null
+  refreshed_at: string
   charts: StockAnalysisCharts
 }
 

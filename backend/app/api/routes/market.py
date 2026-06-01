@@ -16,6 +16,7 @@ from app.schemas.aniu import (
     ArenaAgentMemoriesResponse,
     ArenaAgentRequest,
     ArenaAIConfigResponse,
+    ArenaEquityCurvesResponse,
     ArenaOrderForecastResponse,
     ArenaRunRequest,
     ArenaRunResponse,
@@ -44,6 +45,8 @@ from app.schemas.aniu import (
     QuantDatasetResponse,
     QuantResearchRequest,
     QuantResearchResponse,
+    StockAnalysisChartsRequest,
+    StockAnalysisChartsResponse,
     StockAnalysisRequest,
     StockAnalysisReportResponse,
     StockAnalysisResponse,
@@ -376,6 +379,25 @@ def analyze_stock(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/stocks/charts/refresh", response_model=StockAnalysisChartsResponse)
+def refresh_stock_analysis_charts(
+    payload: StockAnalysisChartsRequest,
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> StockAnalysisChartsResponse:
+    try:
+        return stock_analysis_service.refresh_charts(
+            db,
+            symbol=payload.symbol,
+            action=payload.action,
+            price=payload.price,
+            quantity=payload.quantity,
+            factor_scores=payload.factor_scores,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/stocks/analysis-reports/{report_id}", response_model=StockAnalysisReportResponse)
 def get_stock_analysis_report(
     report_id: int,
@@ -416,6 +438,18 @@ def get_arena_leaderboard(
     _user: str = Depends(get_current_user),
 ) -> ArenaLeaderboardResponse:
     return arena_service.leaderboard(db)
+
+
+@router.get("/arena/equity-curves", response_model=ArenaEquityCurvesResponse)
+def get_arena_equity_curves(
+    interval: str = "daily",
+    db: Session = Depends(get_db),
+    _user: str = Depends(get_current_user),
+) -> ArenaEquityCurvesResponse:
+    try:
+        return arena_service.equity_curves(db, interval=interval)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/arena/agents", response_model=ArenaAgentsResponse)

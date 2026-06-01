@@ -31,6 +31,7 @@ from app.services.chart_data_service import chart_data_service
 from app.services.llm_service import llm_service
 from app.services.ai_stock_picker_service import ai_stock_picker_service
 from app.services.historical_data_service import historical_data_service
+from app.services.market_data_service import market_data_service, normalize_symbol
 from app.services.settings_service import settings_service
 
 
@@ -960,14 +961,143 @@ class ArenaService:
         return reviews
 
     def leaderboard(self, db: Session) -> dict[str, Any]:
+        items = self._leaderboard_items(db, include_latest_recommendation=True)
+        items.sort(key=lambda item: item["total_assets"], reverse=True)
+        return {"items": items}
+
+    def equity_curves(self, db: Session, *, interval: str = "daily") -> dict[str, Any]:
+        normalized_interval = str(interval or "daily").strip().lower()
+        if normalized_interval not in {"daily", "weekly", "hourly"}:
+            raise ValueError("收益曲线粒度必须是 daily、weekly 或 hourly。")
+
+        now = datetime.now(ARENA_SCHEDULE_TIMEZONE)
+        agents = self.list_agents(db)["agents"]
+        agent_by_id = {str(agent.get("id")): agent for agent in agents}
+        current_items = self._leaderboard_items(db, include_latest_recommendation=False)
+        curve_map: dict[str, dict[str, Any]] = {
+            str(item["agent_id"]): {
+                "agent_id": str(item["agent_id"]),
+                "agent_name": str(item["agent_name"]),
+                "model": str(agent_by_id.get(str(item["agent_id"]), {}).get("model") or ""),
+                "points_by_bucket": {},
+            }
+            for item in current_items
+        }
+
+        runs = db.scalars(
+            select(ArenaRun)
+            .where(ArenaRun.leaderboard_payload.is_not(None))
+            .order_by(ArenaRun.id)
+        ).all()
+        for run in runs:
+            created_at = self._local_time(run.created_at)
+            bucket = self._equity_bucket(created_at, normalized_interval)
+            for item in run.leaderboard_payload or []:
+                if not isinstance(item, dict) or not item.get("agent_id"):
+                    continue
+                agent_id = str(item["agent_id"])
+                agent = agent_by_id.get(agent_id, {})
+                curve = curve_map.setdefault(
+                    agent_id,
+                    {
+                        "agent_id": agent_id,
+                        "agent_name": str(item.get("agent_name") or agent.get("name") or agent_id),
+                        "model": str(agent.get("model") or ""),
+                        "points_by_bucket": {},
+                    },
+                )
+                curve["points_by_bucket"][bucket] = {
+                    "trade_date": bucket,
+                    "value": round(self._number(item.get("total_assets")), 2),
+                    "return_ratio": round(self._number(item.get("return_ratio")), 6),
+                }
+
+        current_bucket = self._equity_bucket(now, normalized_interval)
+        for item in current_items:
+            agent_id = str(item["agent_id"])
+            curve = curve_map.setdefault(
+                agent_id,
+                {
+                    "agent_id": agent_id,
+                    "agent_name": str(item["agent_name"]),
+                    "model": str(agent_by_id.get(agent_id, {}).get("model") or ""),
+                    "points_by_bucket": {},
+                },
+            )
+            curve["agent_name"] = str(item["agent_name"])
+            curve["points_by_bucket"][current_bucket] = {
+                "trade_date": current_bucket,
+                "value": round(self._number(item.get("total_assets")), 2),
+                "return_ratio": round(self._number(item.get("return_ratio")), 6),
+            }
+
+        current_order = {str(item["agent_id"]): index for index, item in enumerate(current_items)}
+        curves = []
+        for curve in curve_map.values():
+            points = [
+                curve["points_by_bucket"][key]
+                for key in sorted(curve["points_by_bucket"])
+            ]
+            curves.append(
+                {
+                    "agent_id": curve["agent_id"],
+                    "agent_name": curve["agent_name"],
+                    "model": curve.get("model") or "",
+                    "points": points,
+                }
+            )
+        curves.sort(key=lambda curve: current_order.get(str(curve["agent_id"]), 10_000))
+        return {
+            "interval": normalized_interval,
+            "refreshed_at": now.isoformat(),
+            "curves": curves,
+        }
+
+    def _leaderboard_items(
+        self,
+        db: Session,
+        *,
+        include_latest_recommendation: bool,
+    ) -> list[dict[str, Any]]:
         accounts = db.scalars(
             select(ArenaAccount)
             .options(selectinload(ArenaAccount.positions))
             .order_by(ArenaAccount.id)
         ).all()
-        items = [self._leaderboard_item(account, include_positions=True) for account in accounts]
-        items.sort(key=lambda item: item["total_assets"], reverse=True)
-        return {"items": items}
+        account_by_agent_id = {account.agent_id: account for account in accounts}
+        agents = self.list_agents(db)["agents"]
+        agent_by_id = {str(agent.get("id")): agent for agent in agents}
+        ordered_agent_ids = [str(agent.get("id")) for agent in agents if agent.get("id")]
+        for account in accounts:
+            if account.agent_id not in agent_by_id:
+                agent_by_id[account.agent_id] = {
+                    "id": account.agent_id,
+                    "name": account.agent_name,
+                    "style": account.style,
+                    "model": "",
+                }
+                ordered_agent_ids.append(account.agent_id)
+
+        settings = settings_service.get_or_create_settings(db)
+        initial_cash = float(settings.arena_initial_cash or ARENA_DEFAULT_INITIAL_CASH)
+        quote_by_symbol = self._realtime_quotes_for_positions(accounts)
+        items: list[dict[str, Any]] = []
+        for agent_id in ordered_agent_ids:
+            agent = agent_by_id[agent_id]
+            account = account_by_agent_id.get(agent_id)
+            if account is None:
+                item = self._empty_leaderboard_item(agent=agent, initial_cash=initial_cash)
+            else:
+                item = self._leaderboard_item(
+                    account,
+                    include_positions=True,
+                    quote_by_symbol=quote_by_symbol,
+                )
+            if include_latest_recommendation:
+                recent = self._recent_agent_recommendations(db, agent_id=agent_id, limit=1)
+                item["latest_recommendation"] = recent[0] if recent else None
+            items.append(item)
+        return items
 
     def recent_agent_memories(
         self,
@@ -1186,7 +1316,12 @@ class ArenaService:
                 "positions": [],
                 "playbook": self._playbook_for_style(str(agent.get("style") or "auto")),
             }
-        payload = self._leaderboard_item(account, include_positions=True)
+        quote_by_symbol = self._realtime_quotes_for_positions([account])
+        payload = self._leaderboard_item(
+            account,
+            include_positions=True,
+            quote_by_symbol=quote_by_symbol,
+        )
         payload["playbook"] = self._playbook_for_style(account.style)
         return payload
 
@@ -1959,23 +2094,31 @@ class ArenaService:
         account: ArenaAccount,
         *,
         include_positions: bool = False,
+        quote_by_symbol: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        position_payloads = [
-            {
-                "symbol": position.symbol,
-                "name": position.name,
-                "quantity": position.quantity,
-                "avg_cost": round(position.avg_cost, 4),
-                "last_price": round(position.last_price, 4),
-                "market_value": round(position.quantity * position.last_price, 2),
-                "unrealized_pnl": round(
-                    position.quantity * (position.last_price - position.avg_cost),
-                    2,
-                ),
-            }
-            for position in account.positions
-            if position.quantity > 0
-        ]
+        position_payloads: list[dict[str, Any]] = []
+        quote_map = quote_by_symbol or {}
+        for position in account.positions:
+            if position.quantity <= 0:
+                continue
+            normalized_symbol = normalize_symbol(position.symbol)
+            quote = quote_map.get(normalized_symbol) or {}
+            quote_price = self._number(quote.get("price"), default=0.0)
+            last_price = quote_price if quote_price > 0 else float(position.last_price or 0)
+            position_payloads.append(
+                {
+                    "symbol": normalized_symbol,
+                    "name": position.name,
+                    "quantity": position.quantity,
+                    "avg_cost": round(position.avg_cost, 4),
+                    "last_price": round(last_price, 4),
+                    "market_value": round(position.quantity * last_price, 2),
+                    "unrealized_pnl": round(
+                        position.quantity * (last_price - position.avg_cost),
+                        2,
+                    ),
+                }
+            )
         position_value = sum(item["market_value"] for item in position_payloads)
         total_assets = account.cash + position_value
         payload = {
@@ -1997,6 +2140,25 @@ class ArenaService:
         if include_positions:
             payload["positions"] = position_payloads
         return payload
+
+    def _empty_leaderboard_item(
+        self,
+        *,
+        agent: dict[str, Any],
+        initial_cash: float,
+    ) -> dict[str, Any]:
+        return {
+            "agent_id": str(agent.get("id") or ""),
+            "agent_name": str(agent.get("name") or agent.get("id") or "AI"),
+            "style": str(agent.get("style") or "auto"),
+            "cash": round(initial_cash, 2),
+            "position_value": 0.0,
+            "total_assets": round(initial_cash, 2),
+            "return_ratio": 0.0,
+            "order_count": 0,
+            "realized_pnl": 0.0,
+            "positions": [],
+        }
 
     def _morning_picks(
         self,
@@ -2269,6 +2431,7 @@ class ArenaService:
             .order_by(ArenaOrder.id.desc())
             .limit(limit)
         ).all()
+        quote_by_symbol = self._realtime_quotes_for_orders(orders)
         return [
             {
                 "id": order.id,
@@ -2287,10 +2450,58 @@ class ArenaService:
                     trade_date=order.created_at.strftime("%Y%m%d") if order.created_at else None,
                     price=order.price,
                     quantity=order.quantity,
+                    realtime_quote=quote_by_symbol.get(normalize_symbol(order.symbol)),
                 ),
             }
             for order in orders
         ]
+
+    def _realtime_quotes_for_orders(self, orders: list[ArenaOrder]) -> dict[str, dict[str, Any]]:
+        return self._realtime_quotes_for_symbols([order.symbol for order in orders if order.symbol])
+
+    def _realtime_quotes_for_positions(self, accounts: list[ArenaAccount]) -> dict[str, dict[str, Any]]:
+        return self._realtime_quotes_for_symbols(
+            [
+                position.symbol
+                for account in accounts
+                for position in account.positions
+                if position.symbol and position.quantity > 0
+            ]
+        )
+
+    def _realtime_quotes_for_symbols(self, symbols: list[str]) -> dict[str, dict[str, Any]]:
+        normalized_symbols: set[str] = set()
+        for symbol in symbols:
+            try:
+                normalized_symbols.add(normalize_symbol(symbol))
+            except ValueError:
+                continue
+        symbols = sorted(normalized_symbols)
+        if not symbols:
+            return {}
+        try:
+            quotes = market_data_service.get_quotes(symbols, prefer_realtime=True)
+        except Exception:
+            return {}
+        return {
+            normalize_symbol(str(quote.get("symbol") or "")): quote
+            for quote in quotes
+            if quote.get("symbol")
+        }
+
+    def _local_time(self, value: datetime | None) -> datetime:
+        timestamp = value or datetime.now(UTC)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+        return timestamp.astimezone(ARENA_SCHEDULE_TIMEZONE)
+
+    def _equity_bucket(self, value: datetime, interval: str) -> str:
+        if interval == "hourly":
+            return value.strftime("%Y-%m-%d %H:00")
+        if interval == "weekly":
+            year, week, _ = value.isocalendar()
+            return f"{year}-W{week:02d}"
+        return value.strftime("%Y-%m-%d")
 
     def _closing_summary(
         self,

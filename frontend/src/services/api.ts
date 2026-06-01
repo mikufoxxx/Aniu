@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload, StockAnalysisReportPayload } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisChartsPayload, StockAnalysisPayload, StockAnalysisReportPayload } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -487,6 +487,12 @@ export const api = {
       timeoutMs: 60000,
     })
   },
+  refreshStockAnalysisCharts(payload: { symbol: string; action?: string; price?: number; quantity?: number; factor_scores?: Record<string, number> }) {
+    return request<StockAnalysisChartsPayload>(`${API_PREFIX}/stocks/charts/refresh`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
   getStockAnalysisReport(reportId: number) {
     return request<StockAnalysisReportPayload>(`${API_PREFIX}/stocks/analysis-reports/${encodeURIComponent(String(reportId))}`)
   },
@@ -529,6 +535,10 @@ export const api = {
   },
   getArenaLeaderboard() {
     return request<ArenaLeaderboardPayload>(`${API_PREFIX}/arena/leaderboard`)
+  },
+  getArenaEquityCurves(interval: 'daily' | 'weekly' | 'hourly' = 'daily') {
+    const params = new URLSearchParams({ interval })
+    return request<ArenaEquityCurvesPayload>(`${API_PREFIX}/arena/equity-curves?${params.toString()}`)
   },
   chat(payload: ChatRequest) {
     return request<ChatResponse>(`${API_PREFIX}/chat`, {

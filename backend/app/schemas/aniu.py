@@ -838,6 +838,20 @@ class ArenaLeaderboardItemRead(BaseModel):
     order_count: int
     realized_pnl: float = 0.0
     positions: list[ArenaPositionRead] = Field(default_factory=list)
+    latest_recommendation: dict[str, Any] | None = None
+
+
+class ArenaEquityCurveRead(BaseModel):
+    agent_id: str
+    agent_name: str
+    model: str = ""
+    points: list[EquityCurvePointRead] = Field(default_factory=list)
+
+
+class ArenaEquityCurvesResponse(BaseModel):
+    interval: Literal["daily", "weekly", "hourly"]
+    refreshed_at: str
+    curves: list[ArenaEquityCurveRead] = Field(default_factory=list)
 
 
 class ArenaLeaderboardResponse(BaseModel):
@@ -889,6 +903,21 @@ class StockAnalysisRequest(BaseModel):
     model: str | None = Field(default=None, max_length=128)
     skill_id: str | None = Field(default=None, max_length=128)
     skill_ids: list[str] = Field(default_factory=list, max_length=8)
+
+
+class StockAnalysisChartsRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=16)
+    action: Literal["BUY", "HOLD", "SELL"] = "HOLD"
+    price: float = Field(default=0.0, ge=0)
+    quantity: int = Field(default=0, ge=0)
+    factor_scores: dict[str, float] = Field(default_factory=dict)
+
+
+class StockAnalysisChartsResponse(BaseModel):
+    symbol: str
+    latest_price: float | None = None
+    refreshed_at: str
+    charts: StockAnalysisChartsRead
 
 
 class StockAnalysisReportResponse(BaseModel):

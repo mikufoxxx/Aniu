@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -111,6 +112,34 @@ class StockAnalysisService:
             "data_sources": snapshot["data_sources"],
             "context": snapshot["context"],
             "stock_pick_snapshot": snapshot,
+            "charts": charts,
+        }
+
+    def refresh_charts(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        action: str,
+        price: float,
+        quantity: int,
+        factor_scores: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized_symbol = normalize_symbol(symbol)
+        charts = chart_data_service.stock_analysis_charts(
+            db,
+            symbol=normalized_symbol,
+            action=action if action in {"BUY", "HOLD", "SELL"} else "HOLD",
+            price=price,
+            quantity=quantity,
+            factor_scores=factor_scores,
+        )
+        latest = charts["price_series"][-1] if charts["price_series"] else {}
+        latest_price = latest.get("close")
+        return {
+            "symbol": normalized_symbol,
+            "latest_price": float(latest_price) if isinstance(latest_price, (int, float)) else None,
+            "refreshed_at": datetime.now().isoformat(timespec="seconds"),
             "charts": charts,
         }
 

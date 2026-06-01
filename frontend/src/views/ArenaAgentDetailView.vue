@@ -15,7 +15,7 @@
             class="button ghost small soft-header-button overview-refresh-button"
             :class="{ 'is-loading': loading }"
             :disabled="loading"
-            @click="loadDashboard"
+            @click="loadDashboard()"
           >
             <span class="material-symbols-rounded" aria-hidden="true">sync</span>
             刷新
@@ -40,6 +40,49 @@
           <span>打法</span>
           <strong>{{ dashboard.summary.playbook?.holding_period || '--' }}</strong>
         </div>
+      </div>
+      <div v-if="dashboard" class="arena-allocation-panel">
+        <div class="arena-allocation-head">
+          <div>
+            <strong>资产配置</strong>
+            <span>按最新行情重估现金、持仓市值和仓位权重</span>
+          </div>
+          <span>{{ positionRows.length ? `${positionRows.length} 只持仓` : '当前空仓' }}</span>
+        </div>
+        <div class="arena-allocation-bars">
+          <div v-for="item in allocationItems" :key="item.key">
+            <div class="arena-allocation-line">
+              <span>{{ item.label }}</span>
+              <strong>{{ formatAmount(item.value) }}</strong>
+              <small>{{ formatPercent(item.weight) }}</small>
+            </div>
+            <div class="arena-allocation-track">
+              <span :style="{ width: `${Math.min(100, Math.max(0, item.weight * 100))}%` }"></span>
+            </div>
+          </div>
+        </div>
+        <div v-if="positionRows.length" class="arena-position-table">
+          <div class="arena-position-row arena-position-head">
+            <span>股票</span>
+            <span>数量</span>
+            <span>成本/现价</span>
+            <span>市值</span>
+            <span>仓位</span>
+            <span>浮盈亏</span>
+          </div>
+          <div v-for="position in positionRows" :key="position.symbol" class="arena-position-row">
+            <span>
+              <strong>{{ position.name || position.symbol }}</strong>
+              <small>{{ position.symbol }}</small>
+            </span>
+            <span>{{ position.quantity }}</span>
+            <span>{{ formatPrice(position.avg_cost) }} / {{ formatPrice(position.last_price) }}</span>
+            <span>{{ formatAmount(position.market_value) }}</span>
+            <span>{{ formatPercent(position.weight) }}</span>
+            <span :class="profitClass(position.unrealized_pnl)">{{ formatAmount(position.unrealized_pnl) }}</span>
+          </div>
+        </div>
+        <div v-else class="arena-allocation-empty">当前无持仓，资产全部以现金形式保留。</div>
       </div>
       <div v-if="dashboard" class="arena-dashboard-charts">
         <BreakdownChart
@@ -141,11 +184,14 @@
         </template>
       </section>
     </section>
+    <div v-else-if="loading" class="empty-state">
+      <p>正在整合最新行情、订单和图表…</p>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation } from '@/types'
@@ -164,6 +210,17 @@ interface DetailTab {
   action: string
 }
 
+interface DetailPosition {
+  symbol: string
+  name: string
+  quantity: number
+  avg_cost: number
+  last_price: number
+  market_value: number
+  unrealized_pnl: number
+  weight: number
+}
+
 const route = useRoute()
 const router = useRouter()
 const agentId = computed(() => String(route.params.agentId || ''))
@@ -171,6 +228,8 @@ const dashboard = ref<ArenaAgentDashboardPayload | null>(null)
 const loading = ref(false)
 const runningPhase = ref<ArenaPhase | null>(null)
 const errorMessage = ref('')
+let dashboardRefreshTimer: number | null = null
+let dashboardLoading = false
 const detailSections: DetailSection[] = ['morning', 'intraday', 'closing', 'learning']
 const activeSection = computed<DetailSection>({
   get() {
@@ -236,15 +295,60 @@ const symbolExposure = computed(() => {
   }))
 })
 
-async function loadDashboard(): Promise<void> {
-  loading.value = true
-  errorMessage.value = ''
+const positionRows = computed<DetailPosition[]>(() => {
+  const rawPositions = dashboard.value?.summary.positions
+  const totalAssets = numberValue(dashboard.value?.summary.total_assets)
+  if (!Array.isArray(rawPositions)) return []
+  return rawPositions.map((item) => {
+    const record = item as Record<string, unknown>
+    const marketValue = numberValue(record.market_value)
+    return {
+      symbol: String(record.symbol || ''),
+      name: String(record.name || record.symbol || ''),
+      quantity: Math.round(numberValue(record.quantity)),
+      avg_cost: numberValue(record.avg_cost),
+      last_price: numberValue(record.last_price),
+      market_value: marketValue,
+      unrealized_pnl: numberValue(record.unrealized_pnl),
+      weight: totalAssets > 0 ? marketValue / totalAssets : 0,
+    }
+  })
+})
+
+const allocationItems = computed(() => {
+  const totalAssets = numberValue(dashboard.value?.summary.total_assets)
+  const cash = numberValue(dashboard.value?.summary.cash)
+  const positionValue = numberValue(dashboard.value?.summary.position_value)
+  return [
+    {
+      key: 'cash',
+      label: '现金',
+      value: cash,
+      weight: totalAssets > 0 ? cash / totalAssets : 0,
+    },
+    {
+      key: 'position',
+      label: '持仓市值',
+      value: positionValue,
+      weight: totalAssets > 0 ? positionValue / totalAssets : 0,
+    },
+  ]
+})
+
+async function loadDashboard(silent = false): Promise<void> {
+  if (dashboardLoading) return
+  dashboardLoading = true
+  if (!silent) {
+    loading.value = true
+    errorMessage.value = ''
+  }
   try {
     dashboard.value = await api.getArenaAgentDashboard(agentId.value)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'AI 详情加载失败。'
+    if (!silent) errorMessage.value = error instanceof Error ? error.message : 'AI 详情加载失败。'
   } finally {
-    loading.value = false
+    dashboardLoading = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -290,8 +394,21 @@ function formatPercent(value: number | null | undefined): string {
   return `${(value * 100).toFixed(2)}%`
 }
 
+function profitClass(value: number): string {
+  if (value > 0) return 'profit-up'
+  if (value < 0) return 'profit-down'
+  return ''
+}
+
 onMounted(() => {
   loadDashboard()
+  dashboardRefreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void loadDashboard(true)
+  }, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (dashboardRefreshTimer) window.clearInterval(dashboardRefreshTimer)
 })
 </script>
 
@@ -311,6 +428,127 @@ onMounted(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
+}
+
+.arena-allocation-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.arena-allocation-head,
+.arena-allocation-line,
+.arena-position-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.arena-allocation-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.arena-allocation-head strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.arena-allocation-head span,
+.arena-allocation-line span,
+.arena-allocation-line small,
+.arena-position-row small {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.arena-allocation-bars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.arena-allocation-bars > div {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #f0f0ee;
+  border-radius: 10px;
+  background: #fbfbfa;
+  padding: 10px;
+}
+
+.arena-allocation-line strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.arena-allocation-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #ececf1;
+}
+
+.arena-allocation-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #111827;
+  transition: width 0.24s ease;
+}
+
+.arena-position-table {
+  display: grid;
+  gap: 4px;
+}
+
+.arena-position-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.3fr) 0.6fr 1fr 0.8fr 0.7fr 0.8fr;
+  min-height: 38px;
+  border-bottom: 1px solid #f0f0ee;
+  color: #374151;
+  font-size: 12px;
+}
+
+.arena-position-row:last-child {
+  border-bottom: 0;
+}
+
+.arena-position-row > span {
+  min-width: 0;
+}
+
+.arena-position-row > span:first-child {
+  display: grid;
+  gap: 1px;
+}
+
+.arena-position-row strong {
+  overflow: hidden;
+  color: #111827;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arena-position-head {
+  min-height: 28px;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.arena-allocation-empty {
+  border: 1px dashed #dededb;
+  border-radius: 10px;
+  color: #6b7280;
+  padding: 12px;
+  font-size: 12px;
 }
 
 .arena-agent-detail-summary div,
@@ -424,6 +662,20 @@ onMounted(() => {
 
   .arena-dashboard-charts {
     grid-template-columns: 1fr;
+  }
+
+  .arena-allocation-bars {
+    grid-template-columns: 1fr;
+  }
+
+  .arena-position-row {
+    grid-template-columns: minmax(120px, 1.2fr) 0.6fr 1fr;
+  }
+
+  .arena-position-row span:nth-child(4),
+  .arena-position-row span:nth-child(5),
+  .arena-position-row span:nth-child(6) {
+    display: none;
   }
 
   .arena-agent-detail-sidebar {

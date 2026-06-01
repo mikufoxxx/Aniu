@@ -14,11 +14,27 @@
               <span class="material-symbols-rounded" aria-hidden="true">person_add</span>
               新增 AI
             </button>
-            <button class="button ghost small" :disabled="loading" @click="loadArenaState">
+            <button class="button ghost small" :disabled="loading" @click="loadArenaState()">
               <span class="material-symbols-rounded" aria-hidden="true">sync</span>
               刷新
             </button>
           </div>
+        </div>
+        <div class="arena-view-tabs" role="tablist" aria-label="竞技场视图">
+          <button
+            type="button"
+            :class="{ active: activeArenaView === 'ranking' }"
+            @click="setArenaView('ranking')"
+          >
+            收益排名
+          </button>
+          <button
+            type="button"
+            :class="{ active: activeArenaView === 'equity' }"
+            @click="setArenaView('equity')"
+          >
+            收益曲线
+          </button>
         </div>
         <div class="arena-schedule-strip">
           <span>
@@ -30,7 +46,7 @@
           <span>夜间 20:00 起</span>
         </div>
 
-        <div class="arena-agent-list">
+        <div v-if="activeArenaView === 'ranking'" class="arena-agent-list">
           <template v-if="loading && !rankedAgents.length">
             <article v-for="item in 4" :key="item" class="arena-agent-row arena-agent-skeleton" aria-hidden="true">
               <div class="skeleton-block skeleton-rank"></div>
@@ -132,8 +148,37 @@
             </article>
           </template>
         </div>
-      </section>
+        <section v-else class="arena-equity-panel">
+          <div class="arena-equity-toolbar">
+            <div>
+              <strong>多 AI 收益变化</strong>
+              <span>{{ equityCurves?.refreshed_at ? `刷新 ${formatTime(equityCurves.refreshed_at)}` : '等待实时权益快照' }}</span>
+            </div>
+            <div class="arena-interval-tabs" role="tablist" aria-label="收益曲线粒度">
+              <button
+                v-for="interval in equityIntervals"
+                :key="interval.id"
+                type="button"
+                :class="{ active: equityInterval === interval.id }"
+                @click="setEquityInterval(interval.id)"
+              >
+                {{ interval.label }}
+              </button>
+            </div>
+          </div>
+          <MultiEquityCurveChart
+            v-if="equityChartCurves.length"
+            title="收益率曲线"
+            subtitle="每条线代表一个 AI 的独立模拟账户，按当前持仓实时重估"
+            :curves="equityChartCurves"
+            value-mode="return"
+          />
+          <div v-else class="empty-state">
+            <p>{{ equityLoading ? '正在加载收益曲线…' : '暂无收益曲线数据。' }}</p>
+          </div>
+        </section>
 
+      </section>
     </section>
 
     <Transition name="modal">
@@ -200,15 +245,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload } from '@/types'
+import type { AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload } from '@/types'
+import MultiEquityCurveChart from '@/components/charts/MultiEquityCurveChart.vue'
 
 const router = useRouter()
+const route = useRoute()
 const agents = ref<ArenaAgentConfig[]>([])
 const dashboards = ref<Record<string, ArenaAgentDashboardPayload>>({})
 const leaderboard = ref<ArenaLeaderboardPayload>({ items: [] })
+const equityCurves = ref<ArenaEquityCurvesPayload | null>(null)
 const aiConfig = ref<ArenaAIConfigPayload>({
   base_url: '',
   api_key_configured: false,
@@ -217,17 +265,33 @@ const aiConfig = ref<ArenaAIConfigPayload>({
   model_count: 0,
 })
 const loading = ref(false)
+const equityLoading = ref(false)
 const saving = ref(false)
 const errorMessage = ref('')
 const configAgentIndex = ref(-1)
 const arenaInitialCash = ref(200000)
+const equityInterval = ref<'daily' | 'weekly' | 'hourly'>('daily')
+let arenaRefreshTimer: number | null = null
+let arenaLoading = false
+
+const equityIntervals = [
+  { id: 'daily' as const, label: '日' },
+  { id: 'weekly' as const, label: '周' },
+  { id: 'hourly' as const, label: '小时' },
+]
+
+const activeArenaView = computed<'ranking' | 'equity'>(() => {
+  return route.query.view === 'equity' ? 'equity' : 'ranking'
+})
 
 const rankedAgents = computed(() => {
   return agents.value
     .map((agent) => {
       const board = dashboards.value[agent.id]
       const rank = leaderboard.value.items.find((item) => item.agent_id === agent.id)
-      const latestPicks = board?.morning.recommendations[0]?.picks ?? []
+      const rankPicks = rank?.latest_recommendation?.picks ?? []
+      const boardPicks = board?.morning.recommendations[0]?.picks ?? []
+      const latestPicks = rankPicks.length ? rankPicks : boardPicks
       const summary = (board?.summary ?? {}) as Record<string, unknown>
       const rankPositions = rank?.positions ?? []
       const summaryPositions = Array.isArray(summary.positions) ? summary.positions : []
@@ -250,9 +314,21 @@ const rankedAgents = computed(() => {
     .sort((left, right) => right.totalAssets - left.totalAssets)
 })
 
-async function loadArenaState(): Promise<void> {
-  loading.value = true
-  errorMessage.value = ''
+const equityChartCurves = computed(() => {
+  return (equityCurves.value?.curves ?? []).map((curve) => ({
+    strategy_name: curve.agent_id,
+    display_name: curve.agent_name,
+    points: curve.points,
+  }))
+})
+
+async function loadArenaState(silent = false): Promise<void> {
+  if (arenaLoading) return
+  arenaLoading = true
+  if (!silent) {
+    loading.value = true
+    errorMessage.value = ''
+  }
   try {
     const [agentPayload, leaderboardPayload, configPayload, settingsPayload] = await Promise.all([
       api.getArenaAgents(),
@@ -264,19 +340,49 @@ async function loadArenaState(): Promise<void> {
     leaderboard.value = leaderboardPayload
     aiConfig.value = configPayload
     arenaInitialCash.value = normalizeInitialCash(settingsPayload)
-    const entries = await Promise.allSettled(
-      agents.value.map(async (agent) => [agent.id, await api.getArenaAgentDashboard(agent.id)] as const),
-    )
-    dashboards.value = Object.fromEntries(
-      entries
-        .filter((entry): entry is PromiseFulfilledResult<readonly [string, ArenaAgentDashboardPayload]> => entry.status === 'fulfilled')
-        .map((entry) => entry.value),
-    )
+    if (activeArenaView.value === 'equity') await loadEquityCurves(true)
+    if (silent) return
+    await loadDashboardPreviews()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '竞技场加载失败。'
+    if (!silent) errorMessage.value = error instanceof Error ? error.message : '竞技场加载失败。'
   } finally {
-    loading.value = false
+    arenaLoading = false
+    if (!silent) loading.value = false
   }
+}
+
+async function loadDashboardPreviews(): Promise<void> {
+  const entries = await Promise.allSettled(
+    agents.value.map(async (agent) => [agent.id, await api.getArenaAgentDashboard(agent.id)] as const),
+  )
+  const nextDashboards = { ...dashboards.value }
+  for (const entry of entries) {
+    if (entry.status === 'fulfilled') {
+      nextDashboards[entry.value[0]] = entry.value[1]
+    }
+  }
+  dashboards.value = nextDashboards
+}
+
+async function loadEquityCurves(silent = false): Promise<void> {
+  if (!silent) equityLoading.value = true
+  try {
+    equityCurves.value = await api.getArenaEquityCurves(equityInterval.value)
+  } catch (error) {
+    if (!silent) errorMessage.value = error instanceof Error ? error.message : '收益曲线加载失败。'
+  } finally {
+    if (!silent) equityLoading.value = false
+  }
+}
+
+function setArenaView(view: 'ranking' | 'equity'): void {
+  router.replace({ path: route.path, query: { ...route.query, view: view === 'equity' ? 'equity' : undefined } })
+  if (view === 'equity') void loadEquityCurves()
+}
+
+function setEquityInterval(interval: 'daily' | 'weekly' | 'hourly'): void {
+  equityInterval.value = interval
+  void loadEquityCurves()
 }
 
 const configAgent = computed(() => agents.value[configAgentIndex.value] ?? null)
@@ -383,6 +489,12 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(2)}%`
 }
 
+function formatTime(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
 function normalizeInitialCash(payload: AppSettings): number {
   const value = Number(payload.arena_initial_cash)
   return Number.isFinite(value) && value >= 10000 ? value : 200000
@@ -390,6 +502,13 @@ function normalizeInitialCash(payload: AppSettings): number {
 
 onMounted(() => {
   loadArenaState()
+  arenaRefreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') void loadArenaState(true)
+  }, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (arenaRefreshTimer) window.clearInterval(arenaRefreshTimer)
 })
 </script>
 
@@ -428,6 +547,43 @@ onMounted(() => {
   gap: 8px;
 }
 
+.arena-view-tabs,
+.arena-interval-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  width: fit-content;
+  border: 1px solid #ececf1;
+  border-radius: 999px;
+  background: #f7f7f5;
+  padding: 3px;
+}
+
+.arena-view-tabs {
+  margin: 12px 0;
+}
+
+.arena-view-tabs button,
+.arena-interval-tabs button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #6b7280;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.arena-view-tabs button.active,
+.arena-interval-tabs button.active {
+  background: #ffffff;
+  color: #111827;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
 .arena-schedule-strip {
   display: flex;
   flex-wrap: wrap;
@@ -459,6 +615,37 @@ onMounted(() => {
 .arena-agent-list {
   display: grid;
   gap: 10px;
+}
+
+.arena-equity-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.arena-equity-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #ececf1;
+  border-radius: 12px;
+  background: #fbfbfa;
+  padding: 12px;
+}
+
+.arena-equity-toolbar > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.arena-equity-toolbar strong {
+  color: #111827;
+  font-size: 14px;
+}
+
+.arena-equity-toolbar span {
+  color: #6b7280;
+  font-size: 12px;
 }
 
 .arena-agent-row {
@@ -765,6 +952,11 @@ onMounted(() => {
 }
 
 @media (max-width: 820px) {
+  .arena-equity-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .arena-agent-main {
     padding-right: 0;
   }

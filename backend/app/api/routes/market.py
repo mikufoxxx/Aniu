@@ -625,10 +625,11 @@ def get_arena_agent(
 @router.get("/arena/agents/{agent_id}/dashboard", response_model=ArenaAgentDashboardResponse)
 def get_arena_agent_dashboard(
     agent_id: str,
+    section: str = "morning",
     db: Session = Depends(get_db),
     _user: str = Depends(get_current_user),
 ) -> ArenaAgentDashboardResponse:
-    dashboard = arena_service.agent_dashboard(db, agent_id=agent_id)
+    dashboard = arena_service.agent_dashboard(db, agent_id=agent_id, section=section)
     if dashboard is None:
         raise HTTPException(status_code=404, detail="AI 选手不存在。")
     return dashboard

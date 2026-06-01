@@ -550,8 +550,9 @@ export const api = {
   getArenaAgent(agentId: string) {
     return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}`)
   },
-  getArenaAgentDashboard(agentId: string) {
-    return request<ArenaAgentDashboardPayload>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}/dashboard`, {
+  getArenaAgentDashboard(agentId: string, section = 'morning') {
+    const params = new URLSearchParams({ section })
+    return request<ArenaAgentDashboardPayload>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}/dashboard?${params.toString()}`, {
       timeoutMs: 60000,
     })
   },

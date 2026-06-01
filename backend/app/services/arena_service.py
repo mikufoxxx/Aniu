@@ -48,7 +48,9 @@ ARENA_ORDER_FORECAST_CACHE_LIMIT = 100
 ARENA_STORED_CANDIDATE_LIMIT = 20
 ARENA_STORED_POOL_SYMBOL_LIMIT = 30
 ARENA_CANDIDATE_PAYLOAD_MAX_READ_BYTES = 2_000_000
+ARENA_DASHBOARD_INTRADAY_ORDER_LIMIT = 5
 ARENA_SCHEDULE_TIMEZONE = ZoneInfo("Asia/Shanghai")
+ARENA_DASHBOARD_SECTIONS = {"morning", "intraday", "closing", "learning"}
 ARENA_SCHEDULE_WINDOWS = (
     {
         "phase": "morning_recommendation",
@@ -1163,7 +1165,9 @@ class ArenaService:
         db: Session,
         *,
         agent_id: str,
+        section: str = "morning",
     ) -> dict[str, Any] | None:
+        normalized_section = self._normalize_dashboard_section(section)
         agent = self.get_agent(db, agent_id=agent_id)
         if agent is None:
             agent = self._default_agent(agent_id)
@@ -1176,24 +1180,65 @@ class ArenaService:
             .where(ArenaAccount.agent_id == agent_id)
         )
         summary = self._account_summary(agent=agent, account=account)
-        morning_recommendations = self._recent_agent_recommendations(
-            db,
-            agent_id=agent_id,
-            limit=10,
-        )
-        recent_orders = self._recent_orders(
+        summary_orders = self._recent_orders(
             db,
             agent_id=agent_id,
             limit=20,
-            prediction_by_symbol=self._prediction_by_symbol(morning_recommendations),
+            include_charts=False,
         )
         summary["charts"] = chart_data_service.arena_summary_charts(
-            orders=recent_orders,
+            orders=summary_orders,
             positions=list(summary.get("positions") or []),
         )
+        section_counts = self._dashboard_section_counts(db, agent_id=agent_id)
+        morning_recommendations: list[dict[str, Any]] = []
+        recent_orders: list[dict[str, Any]] = []
+        closing_reviews: list[dict[str, Any]] = []
+        learning_reviews: list[dict[str, Any]] = []
+
+        if normalized_section == "morning":
+            morning_recommendations = self._recent_agent_recommendations(
+                db,
+                agent_id=agent_id,
+                limit=10,
+                attach_actuals=True,
+            )
+        elif normalized_section == "intraday":
+            prediction_source = self._recent_agent_recommendations(
+                db,
+                agent_id=agent_id,
+                limit=1,
+                attach_actuals=False,
+            )
+            recent_orders = self._recent_orders(
+                db,
+                agent_id=agent_id,
+                limit=ARENA_DASHBOARD_INTRADAY_ORDER_LIMIT,
+                prediction_by_symbol=self._prediction_by_symbol(prediction_source),
+                include_charts=True,
+            )
+        elif normalized_section == "closing":
+            closing_reviews = self.recent_agent_memories_by_type(
+                db,
+                agent_id=agent_id,
+                memory_type="closing_review",
+                limit=10,
+                current_schedule_only=True,
+            )
+        else:
+            learning_reviews = self.recent_agent_memories_by_type(
+                db,
+                agent_id=agent_id,
+                memory_type="nightly_learning",
+                limit=10,
+                current_schedule_only=True,
+            )
+
         return {
             "agent": agent,
             "summary": summary,
+            "section": normalized_section,
+            "section_counts": section_counts,
             "morning": {
                 "recommendations": morning_recommendations
             },
@@ -1201,23 +1246,59 @@ class ArenaService:
                 "orders": recent_orders
             },
             "closing": {
-                "reviews": self.recent_agent_memories_by_type(
-                    db,
-                    agent_id=agent_id,
-                    memory_type="closing_review",
-                    limit=10,
-                    current_schedule_only=True,
-                )
+                "reviews": closing_reviews
             },
             "learning": {
-                "reviews": self.recent_agent_memories_by_type(
-                    db,
-                    agent_id=agent_id,
-                    memory_type="nightly_learning",
-                    limit=10,
-                    current_schedule_only=True,
-                )
+                "reviews": learning_reviews
             },
+        }
+
+    def _normalize_dashboard_section(self, section: str | None) -> str:
+        normalized = str(section or "morning").strip().lower()
+        return normalized if normalized in ARENA_DASHBOARD_SECTIONS else "morning"
+
+    def _dashboard_section_counts(self, db: Session, *, agent_id: str) -> dict[str, int]:
+        morning = len(
+            self._recent_agent_recommendations(
+                db,
+                agent_id=agent_id,
+                limit=10,
+                attach_actuals=False,
+            )
+        )
+        intraday = len(
+            self._recent_orders(
+                db,
+                agent_id=agent_id,
+                limit=100,
+                include_charts=False,
+            )
+        )
+        closing = len(
+            self.recent_agent_memories_by_type(
+                db,
+                agent_id=agent_id,
+                memory_type="closing_review",
+                limit=20,
+                current_schedule_only=True,
+                include_metrics=False,
+            )
+        )
+        learning = len(
+            self.recent_agent_memories_by_type(
+                db,
+                agent_id=agent_id,
+                memory_type="nightly_learning",
+                limit=20,
+                current_schedule_only=True,
+                include_metrics=False,
+            )
+        )
+        return {
+            "morning": morning,
+            "intraday": intraday,
+            "closing": closing,
+            "learning": learning,
         }
 
     def order_forecast(
@@ -1679,6 +1760,7 @@ class ArenaService:
         memory_type: str,
         limit: int = 20,
         current_schedule_only: bool = False,
+        include_metrics: bool = True,
     ) -> list[dict[str, Any]]:
         memories = db.scalars(
             select(ArenaAgentMemory)
@@ -1695,7 +1777,7 @@ class ArenaService:
                 memory for memory in memories
                 if self._is_current_phase_output(phase=phase, created_at=memory.created_at)
             ]
-        return [self._memory_payload(memory) for memory in memories]
+        return [self._memory_payload(memory, include_metrics=include_metrics) for memory in memories]
 
     def list_agents(self, db: Session) -> dict[str, Any]:
         stored = db.scalars(
@@ -2959,6 +3041,7 @@ class ArenaService:
         *,
         agent_id: str,
         limit: int,
+        attach_actuals: bool = True,
     ) -> list[dict[str, Any]]:
         runs = db.scalars(
             select(ArenaRun)
@@ -2983,7 +3066,8 @@ class ArenaService:
                     continue
                 enriched = dict(item)
                 self._enrich_recommendation_names(db, enriched)
-                self._attach_recommendation_prediction_actuals(db, enriched)
+                if attach_actuals:
+                    self._attach_recommendation_prediction_actuals(db, enriched)
                 enriched["run_id"] = run.id
                 enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
                 recommendations.append(enriched)
@@ -3098,6 +3182,7 @@ class ArenaService:
         agent_id: str,
         limit: int,
         prediction_by_symbol: dict[str, dict[str, Any]] | None = None,
+        include_charts: bool = True,
     ) -> list[dict[str, Any]]:
         orders = db.scalars(
             select(ArenaOrder)
@@ -3112,10 +3197,21 @@ class ArenaService:
                 created_at=order.created_at,
             )
         ]
-        quote_by_symbol = self._realtime_quotes_for_orders(orders)
+        quote_by_symbol = self._realtime_quotes_for_orders(orders) if include_charts else {}
         prediction_by_symbol = prediction_by_symbol or {}
-        return [
-            {
+        hourly_by_symbol: dict[str, list[dict[str, Any]]] = {}
+        if include_charts:
+            for order in orders:
+                try:
+                    symbol = normalize_symbol(order.symbol)
+                except ValueError:
+                    continue
+                if symbol not in hourly_by_symbol:
+                    hourly_by_symbol[symbol] = chart_data_service.real_hourly_series(symbol)
+
+        payloads: list[dict[str, Any]] = []
+        for order in orders:
+            item = {
                 "id": order.id,
                 "action": order.action,
                 "symbol": order.symbol,
@@ -3125,7 +3221,10 @@ class ArenaService:
                 "amount": order.amount,
                 "reason": order.reason,
                 "created_at": order.created_at.isoformat() if order.created_at else None,
-                "charts": chart_data_service.order_charts(
+            }
+            if include_charts:
+                normalized_symbol = normalize_symbol(order.symbol)
+                item["charts"] = chart_data_service.order_charts(
                     db,
                     symbol=order.symbol,
                     action=order.action,
@@ -3134,10 +3233,10 @@ class ArenaService:
                     quantity=order.quantity,
                     realtime_quote=quote_by_symbol.get(normalize_symbol(order.symbol)),
                     frozen_prediction=prediction_by_symbol.get(normalize_symbol(order.symbol)),
-                ),
-            }
-            for order in orders
-        ]
+                    hourly_series=hourly_by_symbol.get(normalized_symbol, []),
+                )
+            payloads.append(item)
+        return payloads
 
     def _prediction_by_symbol(
         self,
@@ -3368,7 +3467,12 @@ class ArenaService:
             f"收益 {return_pct:.2f}%，最大回撤 {drawdown_pct:.2f}%。"
         )
 
-    def _memory_payload(self, memory: ArenaAgentMemory) -> dict[str, Any]:
+    def _memory_payload(
+        self,
+        memory: ArenaAgentMemory,
+        *,
+        include_metrics: bool = True,
+    ) -> dict[str, Any]:
         return {
             "id": memory.id,
             "agent_id": memory.agent_id,
@@ -3376,7 +3480,7 @@ class ArenaService:
             "style": memory.style,
             "memory_type": memory.memory_type,
             "summary": memory.summary,
-            "metrics": memory.metrics_payload or {},
+            "metrics": (memory.metrics_payload or {}) if include_metrics else {},
             "created_at": memory.created_at.isoformat() if memory.created_at else None,
         }
 

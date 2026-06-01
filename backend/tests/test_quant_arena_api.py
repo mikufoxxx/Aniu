@@ -1240,8 +1240,14 @@ def test_order_charts_append_realtime_quote_after_latest_daily_bar(monkeypatch, 
             }
         ]
 
+    intraday_bar_calls: list[tuple[object, object]] = []
+
+    def fake_intraday_bars(*args, **kwargs):
+        intraday_bar_calls.append((args, kwargs))
+        return []
+
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
-    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", fake_intraday_bars)
 
     with create_test_client(monkeypatch, tmp_path):
         with session_scope() as db:
@@ -3720,8 +3726,14 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
         requested = set(symbols)
         return [item for item in quotes if item["symbol"] in requested]
 
+    intraday_bar_calls: list[tuple[object, object]] = []
+
+    def fake_intraday_bars(*args, **kwargs):
+        intraday_bar_calls.append((args, kwargs))
+        return []
+
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
-    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", fake_intraday_bars)
     monkeypatch.setattr(
         arena_service,
         "_now_shanghai",
@@ -3799,17 +3811,40 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
                     memory.created_at = datetime(2026, 6, 1, 7, 20)
                 elif memory.memory_type == "nightly_learning":
                     memory.created_at = datetime(2026, 6, 1, 12, 20)
-        dashboard_response = client.get(
-            "/api/aniu/arena/agents/detail_ai/dashboard",
+        morning_response = client.get(
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=morning",
+            headers=headers,
+        )
+        intraday_response = client.get(
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=intraday",
+            headers=headers,
+        )
+        closing_response = client.get(
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=closing",
+            headers=headers,
+        )
+        learning_response = client.get(
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=learning",
             headers=headers,
         )
 
-    assert dashboard_response.status_code == 200
-    payload = dashboard_response.json()
+    assert morning_response.status_code == 200
+    assert intraday_response.status_code == 200
+    assert closing_response.status_code == 200
+    assert learning_response.status_code == 200
+    assert intraday_bar_calls
+    assert len(intraday_bar_calls) <= 5
+    payload = morning_response.json()
     assert payload["agent"]["id"] == "detail_ai"
+    assert payload["section"] == "morning"
+    assert payload["section_counts"]["morning"] == 1
+    assert payload["section_counts"]["intraday"] >= 1
     assert payload["summary"]["playbook"]["mode"] == "ai_adaptive"
     assert payload["summary"]["total_assets"] > 0
     assert len(payload["morning"]["recommendations"]) == 1
+    assert payload["intraday"]["orders"] == []
+    assert payload["closing"]["reviews"] == []
+    assert payload["learning"]["reviews"] == []
     morning = payload["morning"]["recommendations"][0]
     assert len(morning["picks"]) == 5
     assert len(morning["picks"]) < 6
@@ -3819,16 +3854,20 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert all(pick["ai_selection_score"] > 0 for pick in morning["picks"])
     assert all("risk_flags" in pick for pick in morning["picks"])
     assert all("prediction" in pick for pick in morning["picks"])
-    assert len(payload["intraday"]["orders"]) >= 1
-    order_chart = payload["intraday"]["orders"][0]["charts"]
+    intraday_payload = intraday_response.json()
+    assert intraday_payload["section"] == "intraday"
+    assert intraday_payload["morning"]["recommendations"] == []
+    assert len(intraday_payload["intraday"]["orders"]) >= 1
+    assert len(intraday_payload["intraday"]["orders"]) <= 5
+    order_chart = intraday_payload["intraday"]["orders"][0]["charts"]
     assert order_chart["trade_markers"][0]["action"] in {"BUY", "SELL"}
     assert order_chart["price_series"]
     assert order_chart["data_summary"]["daily_points"] > 0
     assert "forecast_actual_comparison" in order_chart
     assert payload["summary"]["charts"]["action_distribution"]
     assert payload["summary"]["charts"]["symbol_exposure"]
-    assert payload["closing"]["reviews"][0]["memory_type"] == "closing_review"
-    assert payload["learning"]["reviews"][0]["memory_type"] == "nightly_learning"
+    assert closing_response.json()["closing"]["reviews"][0]["memory_type"] == "closing_review"
+    assert learning_response.json()["learning"]["reviews"][0]["memory_type"] == "nightly_learning"
 
     _reset_state()
 

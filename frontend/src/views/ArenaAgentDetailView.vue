@@ -101,6 +101,19 @@
     </section>
 
     <section v-if="dashboard" class="arena-agent-detail-layout">
+      <aside class="panel arena-agent-detail-sidebar">
+        <button
+          v-for="tab in sectionTabs"
+          :key="tab.id"
+          class="detail-nav-button"
+          :class="{ active: activeSection === tab.id }"
+          type="button"
+          @click="activeSection = tab.id"
+        >
+          <span>{{ tab.title }}</span>
+          <small>{{ tab.count }}</small>
+        </button>
+      </aside>
       <section class="panel arena-agent-detail-section">
         <div class="panel-head">
           <div class="head-main">
@@ -214,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation, ArenaOrder } from '@/types'
@@ -273,7 +286,7 @@ const sectionTabs = computed<DetailTab[]>(() => [
     id: 'morning',
     title: '早盘',
     subtitle: 'Morning',
-    count: dashboard.value?.morning.recommendations.length ?? 0,
+    count: sectionCount('morning', dashboard.value?.morning.recommendations.length ?? 0),
     phase: 'morning_recommendation',
     action: '生成推荐',
   },
@@ -281,7 +294,7 @@ const sectionTabs = computed<DetailTab[]>(() => [
     id: 'intraday',
     title: '盘中',
     subtitle: 'Intraday',
-    count: dashboard.value?.intraday.orders.length ?? 0,
+    count: sectionCount('intraday', dashboard.value?.intraday.orders.length ?? 0),
     phase: 'intraday_trade',
     action: '模拟交易',
   },
@@ -289,7 +302,7 @@ const sectionTabs = computed<DetailTab[]>(() => [
     id: 'closing',
     title: '收盘',
     subtitle: 'Closing',
-    count: dashboard.value?.closing.reviews.length ?? 0,
+    count: sectionCount('closing', dashboard.value?.closing.reviews.length ?? 0),
     phase: 'closing_review',
     action: '生成复盘',
   },
@@ -297,11 +310,17 @@ const sectionTabs = computed<DetailTab[]>(() => [
     id: 'learning',
     title: '学习',
     subtitle: 'Learning',
-    count: dashboard.value?.learning.reviews.length ?? 0,
+    count: sectionCount('learning', dashboard.value?.learning.reviews.length ?? 0),
     phase: 'nightly_learning',
     action: '夜间学习',
   },
 ])
+
+function sectionCount(section: DetailSection, fallback: number): number {
+  const counts = dashboard.value?.section_counts
+  const value = counts?.[section]
+  return typeof value === 'number' ? value : fallback
+}
 
 const activeTab = computed<DetailTab>(() => {
   return sectionTabs.value.find((tab) => tab.id === activeSection.value) ?? sectionTabs.value[0]
@@ -366,7 +385,7 @@ async function loadDashboard(silent = false): Promise<void> {
     errorMessage.value = ''
   }
   try {
-    dashboard.value = await api.getArenaAgentDashboard(agentId.value)
+    dashboard.value = await api.getArenaAgentDashboard(agentId.value, activeSection.value)
   } catch (error) {
     if (!silent) errorMessage.value = error instanceof Error ? error.message : 'AI 详情加载失败。'
   } finally {
@@ -478,7 +497,11 @@ onMounted(() => {
   loadDashboard()
   dashboardRefreshTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') void loadDashboard(true)
-  }, 30000)
+  }, 60000)
+})
+
+watch(activeSection, () => {
+  void loadDashboard()
 })
 
 onBeforeUnmount(() => {
@@ -649,7 +672,7 @@ onBeforeUnmount(() => {
 
 .arena-agent-detail-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 150px minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }

@@ -934,6 +934,8 @@ class ArenaAgentMemoriesResponse(BaseModel):
 
 class ArenaAgentDashboardResponse(BaseModel):
     agent: ArenaAgentRequest
+    section: Literal["morning", "intraday", "closing", "learning"] = "morning"
+    section_counts: dict[str, int] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
     morning: dict[str, Any] = Field(default_factory=dict)
     intraday: dict[str, Any] = Field(default_factory=dict)

@@ -944,6 +944,8 @@ export interface ArenaRunPayload {
 
 export interface ArenaAgentDashboardPayload {
   agent: ArenaAgentConfig
+  section?: 'morning' | 'intraday' | 'closing' | 'learning'
+  section_counts?: Record<'morning' | 'intraday' | 'closing' | 'learning', number>
   summary: Record<string, unknown> & {
     playbook?: {
       mode: string

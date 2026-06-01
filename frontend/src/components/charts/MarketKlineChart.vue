@@ -12,7 +12,7 @@
         <span>MA5</span>
         <span>MA20</span>
         <span>成交额</span>
-        <span v-if="forecastSeries?.length">AI未来线</span>
+        <span v-if="activeForecastSeries.length">AI未来线</span>
       </div>
     </div>
     <div class="chart-interval-controls">
@@ -74,14 +74,37 @@ const latestRealtimePoint = computed(() => {
   const point = props.priceSeries[props.priceSeries.length - 1]
   return point?.is_realtime ? point : null
 })
+const activeForecastSeries = computed(() => (
+  activeInterval.value === 'daily' ? (props.forecastSeries || []) : []
+))
 
 function resize(): void {
   chart?.resize()
 }
 
+function compactDateKey(value: string | undefined): string {
+  return String(value || '').replace(/\D/g, '').slice(0, 8)
+}
+
+function markerCoordinate(
+  marker: TradeMarker,
+  visibleSeries: PriceSeriesPoint[],
+): [string, number] | null {
+  if (!marker.trade_date) return null
+  const markerDate = String(marker.trade_date)
+  const exact = visibleSeries.find((point) => String(point.trade_date) === markerDate)
+  const markerDay = compactDateKey(markerDate)
+  const sameDay = markerDay
+    ? [...visibleSeries].reverse().find((point) => compactDateKey(point.trade_date) === markerDay)
+    : undefined
+  const target = exact || sameDay
+  if (!target?.trade_date) return null
+  return [String(target.trade_date), marker.price]
+}
+
 function buildOption(): EChartsOption {
   const visibleSeries = selectedPriceSeries.value
-  const forecast = props.forecastSeries || []
+  const forecast = activeForecastSeries.value
   const dates = [
     ...visibleSeries.map((item) => item.trade_date),
     ...forecast.map((item) => item.trade_date),
@@ -98,7 +121,12 @@ function buildOption(): EChartsOption {
     ...forecast.map(() => null),
   ]
   const amounts = [
-    ...visibleSeries.map((item) => Number(item.amount || 0)),
+    ...visibleSeries.map((item) => ({
+      value: Number(item.amount || 0),
+      itemStyle: {
+        color: Number(item.close || 0) >= Number(item.open || 0) ? '#dc2626' : '#16a34a',
+      },
+    })),
     ...forecast.map(() => 0),
   ]
   const forecastLine = [
@@ -113,15 +141,26 @@ function buildOption(): EChartsOption {
     ...visibleSeries.map(() => null),
     ...forecast.map((item) => item.lower ?? null),
   ]
-  const markerData = (props.markers || [])
-    .filter((marker): marker is TradeMarker & { trade_date: string } => Boolean(marker.trade_date))
-    .map((marker) => ({
+  const markerData: Array<{
+    name: string
+    coord: [string, number]
+    value: string
+    itemStyle: { color: string }
+    label: { color: string; formatter: string }
+  }> = []
+  for (const marker of (props.markers || []).filter(
+    (item): item is TradeMarker & { trade_date: string } => Boolean(item.trade_date),
+  )) {
+    const coord = markerCoordinate(marker, visibleSeries)
+    if (!coord) continue
+    markerData.push({
       name: marker.action,
-      coord: [marker.trade_date, marker.price],
+      coord,
       value: `${marker.action} ${marker.quantity}`,
       itemStyle: { color: marker.action === 'SELL' ? '#16a34a' : '#dc2626' },
       label: { color: '#111827', formatter: marker.action === 'SELL' ? 'S' : 'B' },
-    }))
+    })
+  }
   return {
     animation: false,
     grid: [

@@ -84,6 +84,7 @@ class ChartDataService:
         end_date: str | None = None,
         limit: int = 120,
         realtime_quote: dict[str, Any] | None = None,
+        intraday_series: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         series = self.price_series(
             db,
@@ -98,6 +99,7 @@ class ChartDataService:
             series,
             symbol=symbol,
             realtime_quote=realtime_quote,
+            intraday_series=intraday_series,
         )
 
     def strategy_charts(
@@ -140,13 +142,14 @@ class ChartDataService:
         realtime_quote: dict[str, Any] | None = None,
         hourly_series: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         series = self.price_series_with_realtime(
             db,
             symbol=symbol,
             limit=90,
             realtime_quote=realtime_quote,
+            intraday_series=hourly,
         )
-        hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         trade_date = series[-1]["trade_date"] if series else None
         marker_price = float(price or (series[-1]["close"] if series else 0))
         return {
@@ -184,13 +187,14 @@ class ChartDataService:
         realtime_quote: dict[str, Any] | None = None,
         hourly_series: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         series = self.price_series_with_realtime(
             db,
             symbol=symbol,
             limit=90,
             realtime_quote=realtime_quote,
+            intraday_series=hourly,
         )
-        hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         return {
             "price_series": series,
             "interval_series": self.interval_series(series, hourly_series=hourly),
@@ -463,6 +467,7 @@ class ChartDataService:
         *,
         symbol: str,
         realtime_quote: dict[str, Any] | None = None,
+        intraday_series: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         quote = realtime_quote
         if quote is None:
@@ -484,19 +489,90 @@ class ChartDataService:
 
         rows = [self._raw_price_row(point) for point in price_series]
         latest_date = str(rows[-1].get("trade_date") or "") if rows else ""
-        realtime_row = self._realtime_price_row(
+        realtime_row = self._intraday_daily_row(
+            quote=quote,
+            quote_date=quote_date,
+            price=price,
+            intraday_series=intraday_series or [],
+        ) or self._realtime_price_row(
             quote=quote,
             quote_date=quote_date,
             price=price,
             previous=rows[-1] if rows else None,
         )
         if latest_date == quote_date:
-            rows[-1] = {**rows[-1], **realtime_row}
+            rows[-1] = self._merge_same_day_realtime_row(rows[-1], realtime_row)
         elif not latest_date or quote_date > latest_date:
             rows.append(realtime_row)
         else:
             return price_series
         return self._enrich_price_points(rows)
+
+    def _intraday_daily_row(
+        self,
+        *,
+        quote: dict[str, Any],
+        quote_date: str,
+        price: float,
+        intraday_series: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        day_points = [
+            point
+            for point in intraday_series
+            if self._compact_trade_date(str(point.get("trade_date") or "")) == quote_date
+        ]
+        if not day_points:
+            return None
+        open_price = self._safe_float(day_points[0].get("open")) or price
+        highs = [self._safe_float(point.get("high")) for point in day_points]
+        lows = [self._safe_float(point.get("low")) for point in day_points]
+        highs = [value for value in highs if value is not None]
+        lows = [value for value in lows if value is not None]
+        high = max([open_price, price, *highs])
+        low = min([open_price, price, *lows])
+        quote_amount = self._safe_float(quote.get("amount")) or 0.0
+        intraday_amount = sum(float(point.get("amount") or 0) for point in day_points)
+        source = str(quote.get("source") or day_points[-1].get("source") or "realtime")
+        return {
+            "trade_date": quote_date,
+            "open": round(open_price, 4),
+            "high": round(high, 4),
+            "low": round(low, 4),
+            "close": round(price, 4),
+            "volume": sum(float(point.get("volume") or 0) for point in day_points),
+            "amount": max(quote_amount, intraday_amount),
+            "source": source,
+            "timestamp": str(quote.get("timestamp") or day_points[-1].get("timestamp") or ""),
+            "is_realtime": True,
+        }
+
+    def _merge_same_day_realtime_row(
+        self,
+        existing: dict[str, Any],
+        realtime: dict[str, Any],
+    ) -> dict[str, Any]:
+        realtime_close = self._safe_float(realtime.get("close"))
+        existing_high = self._safe_float(existing.get("high"))
+        existing_low = self._safe_float(existing.get("low"))
+        existing_amount = self._safe_float(existing.get("amount")) or 0.0
+        realtime_amount = self._safe_float(realtime.get("amount")) or 0.0
+        merged = dict(existing)
+        if realtime_close is not None and realtime_close > 0:
+            merged["close"] = round(realtime_close, 4)
+            merged["high"] = round(
+                max(value for value in (existing_high, realtime_close) if value is not None),
+                4,
+            )
+            merged["low"] = round(
+                min(value for value in (existing_low, realtime_close) if value is not None),
+                4,
+            )
+        if realtime_amount > 0:
+            merged["amount"] = max(existing_amount, realtime_amount)
+        merged["source"] = str(realtime.get("source") or existing.get("source") or "realtime")
+        merged["timestamp"] = str(realtime.get("timestamp") or existing.get("timestamp") or "")
+        merged["is_realtime"] = True
+        return merged
 
     def _realtime_price_row(
         self,
@@ -550,6 +626,9 @@ class ChartDataService:
         if len(digits) >= 8:
             return digits[:8]
         return datetime.now(MARKET_TIMEZONE).strftime("%Y%m%d")
+
+    def _compact_trade_date(self, value: str) -> str:
+        return "".join(char for char in value if char.isdigit())[:8]
 
     def _safe_float(self, value: Any) -> float | None:
         if value in (None, ""):

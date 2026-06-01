@@ -2739,12 +2739,83 @@ def test_stock_analysis_chart_refresh_updates_charts_without_new_report(monkeypa
     assert response.status_code == 200
     payload = response.json()
     assert payload["latest_price"] == 12.4
-    assert payload["charts"]["price_series"][-1]["trade_date"] == "20260601"
-    assert payload["charts"]["price_series"][-1]["is_realtime"] is True
-    assert payload["charts"]["price_series"][-1]["source"] == "tencent"
+    latest = payload["charts"]["price_series"][-1]
+    assert latest["trade_date"] == "20260601"
+    assert latest["open"] == 12.0
+    assert latest["high"] == 12.5
+    assert latest["low"] == 11.9
+    assert latest["close"] == 12.4
+    assert latest["volume"] == 1000
+    assert latest["amount"] == 2_000_000_000
+    assert latest["is_realtime"] is True
+    assert latest["source"] == "tencent"
     assert payload["charts"]["interval_series"]["hourly"][0]["source"] == "eastmoney_intraday"
     assert payload["charts"]["factor_radar"]
     assert report_count == 0
+
+    _reset_state()
+
+
+def test_stock_analysis_chart_refresh_preserves_today_daily_ohlc(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.4,
+                "change_pct": 3.33,
+                "amount": 2_000_000_000,
+                "source": "tencent",
+                "timestamp": "2026-06-01 10:31:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(
+                DailyBar(
+                    symbol="000001.SZ",
+                    trade_date="20260601",
+                    open=12.0,
+                    high=12.3,
+                    low=11.7,
+                    close=12.2,
+                    vol=900,
+                    amount=1_500_000_000,
+                )
+            )
+        response = client.post(
+            "/api/aniu/stocks/charts/refresh",
+            headers=headers,
+            json={
+                "symbol": "000001.SZ",
+                "action": "BUY",
+                "price": 12.2,
+                "quantity": 1000,
+                "factor_scores": {"technical": 70},
+            },
+        )
+
+    assert response.status_code == 200
+    latest = response.json()["charts"]["price_series"][-1]
+    assert latest["trade_date"] == "20260601"
+    assert latest["open"] == 12.0
+    assert latest["high"] == 12.4
+    assert latest["low"] == 11.7
+    assert latest["close"] == 12.4
+    assert latest["volume"] == 900
+    assert latest["amount"] == 2_000_000_000
+    assert latest["source"] == "tencent"
+    assert latest["is_realtime"] is True
 
     _reset_state()
 

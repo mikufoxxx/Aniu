@@ -506,7 +506,9 @@ export const api = {
     return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}`)
   },
   getArenaAgentDashboard(agentId: string) {
-    return request<ArenaAgentDashboardPayload>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}/dashboard`)
+    return request<ArenaAgentDashboardPayload>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}/dashboard`, {
+      timeoutMs: 60000,
+    })
   },
   getArenaOrderForecast(orderId: number, options: { refresh?: boolean } = {}) {
     const params = new URLSearchParams()

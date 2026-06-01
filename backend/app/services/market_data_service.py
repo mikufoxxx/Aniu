@@ -97,6 +97,8 @@ class MarketDataService:
         self._quote_cache: dict[str, Any] | None = None
         self._quote_cache_key = ""
         self._quote_cache_expires_at = 0.0
+        self._intraday_cache: dict[str, list[dict[str, Any]]] = {}
+        self._intraday_cache_expires_at: dict[str, float] = {}
 
     def source_health(self) -> dict[str, Any]:
         settings = get_settings()
@@ -127,7 +129,7 @@ class MarketDataService:
                 "name": "东方财富 push2",
                 "tier": "low_frequency",
                 "status": "available",
-                "cadence": "30-60 秒快照/备用交叉校验",
+                "cadence": "30-60 秒快照/60 分钟 K 线",
                 "risk": "免费接口，需要限频和缓存。",
             },
             {
@@ -135,8 +137,8 @@ class MarketDataService:
                 "name": "easy-tdx",
                 "tier": "quasi_high_frequency",
                 "status": "available" if easy_tdx_available else "optional_missing",
-                "cadence": "候选池 1-5 秒轮询，支持 quote/分时/逐笔",
-                "risk": "通达信公开服务器，禁止全市场高压轮询。",
+                "cadence": "候选池 1-5 秒 quote 轮询",
+                "risk": "通达信公开服务器，分时/逐笔待独立接入，禁止全市场高压轮询。",
             },
             {
                 "id": "miaoxiang",
@@ -163,7 +165,8 @@ class MarketDataService:
         prefer_realtime: bool = True,
     ) -> list[dict[str, Any]]:
         normalized_symbols = [normalize_symbol(symbol) for symbol in symbols]
-        cache_key = ",".join(normalized_symbols)
+        cache_prefix = "realtime" if prefer_realtime else "low_frequency"
+        cache_key = f"{cache_prefix}:" + ",".join(normalized_symbols)
         now = time.time()
         if (
             self._quote_cache is not None
@@ -219,6 +222,114 @@ class MarketDataService:
             1, int(get_settings().realtime_quote_cache_ttl_seconds)
         )
         return quotes
+
+    def get_intraday_bars(
+        self,
+        symbol: str,
+        *,
+        interval: str = "60m",
+        limit: int = 120,
+    ) -> list[dict[str, Any]]:
+        normalized_symbol = normalize_symbol(symbol)
+        klt = self._normalize_intraday_interval(interval)
+        normalized_limit = max(1, min(int(limit or 120), 300))
+        cache_key = f"{normalized_symbol}:{klt}:{normalized_limit}"
+        now = time.time()
+        if self._intraday_cache_expires_at.get(cache_key, 0) > now:
+            return [dict(item) for item in self._intraday_cache.get(cache_key, [])]
+
+        results = self._get_eastmoney_intraday_bars(
+            normalized_symbol,
+            klt=klt,
+            limit=normalized_limit,
+        )
+        self._intraday_cache[cache_key] = [dict(item) for item in results]
+        self._intraday_cache_expires_at[cache_key] = now + max(
+            1,
+            int(get_settings().realtime_quote_cache_ttl_seconds),
+        )
+        return results
+
+    def _normalize_intraday_interval(self, interval: str) -> str:
+        value = str(interval or "60m").strip().lower()
+        mapping = {
+            "1": "1",
+            "1m": "1",
+            "5": "5",
+            "5m": "5",
+            "15": "15",
+            "15m": "15",
+            "30": "30",
+            "30m": "30",
+            "60": "60",
+            "60m": "60",
+            "hour": "60",
+            "hourly": "60",
+        }
+        if value not in mapping:
+            raise ValueError("分时 K 线周期必须是 1m、5m、15m、30m 或 60m。")
+        return mapping[value]
+
+    def _get_eastmoney_intraday_bars(
+        self,
+        symbol: str,
+        *,
+        klt: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        params = {
+            "secid": symbol_to_eastmoney_secid(symbol),
+            "fields1": "f1,f2,f3,f4,f5,f6",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+            "klt": klt,
+            "fqt": "1",
+            "end": "20500101",
+            "lmt": str(limit),
+        }
+        try:
+            response = httpx.get(
+                "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+                params=params,
+                timeout=8.0,
+                follow_redirects=True,
+                headers={"User-Agent": "Aniu/1.0"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return []
+
+        data = payload.get("data") if isinstance(payload, dict) else None
+        klines = data.get("klines") if isinstance(data, dict) else None
+        if not isinstance(klines, list):
+            return []
+
+        rows: list[dict[str, Any]] = []
+        for line in klines:
+            fields = str(line or "").split(",")
+            if len(fields) < 7:
+                continue
+            open_price = _parse_float(fields[1])
+            close_price = _parse_float(fields[2])
+            high_price = _parse_float(fields[3])
+            low_price = _parse_float(fields[4])
+            if close_price is None:
+                continue
+            rows.append(
+                {
+                    "trade_date": fields[0],
+                    "open": round(open_price if open_price is not None else close_price, 4),
+                    "high": round(high_price if high_price is not None else close_price, 4),
+                    "low": round(low_price if low_price is not None else close_price, 4),
+                    "close": round(close_price, 4),
+                    "volume": float(_parse_float(fields[5]) or 0),
+                    "amount": float(_parse_float(fields[6]) or 0),
+                    "source": "eastmoney_intraday",
+                    "timestamp": fields[0],
+                    "is_realtime": False,
+                }
+            )
+        return rows
 
     def _get_easy_tdx_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         if not shutil.which("easy-tdx"):

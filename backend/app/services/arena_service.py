@@ -244,6 +244,7 @@ class ArenaService:
                 agents=active_agents,
                 agent_candidate_contexts=agent_candidate_contexts,
                 snapshot_id=snapshot_id,
+                app_settings=app_settings,
             )
             candidate_payload = {
                 **candidate_payload,
@@ -452,6 +453,12 @@ class ArenaService:
             history_end_date = db.scalar(
                 select(DailyBar.trade_date)
                 .where(DailyBar.trade_date < today)
+                .order_by(DailyBar.trade_date.desc())
+                .limit(1)
+            )
+        elif not policy.get("prefer_realtime"):
+            history_end_date = db.scalar(
+                select(DailyBar.trade_date)
                 .order_by(DailyBar.trade_date.desc())
                 .limit(1)
             )
@@ -846,6 +853,7 @@ class ArenaService:
         agents: list[dict[str, Any]],
         agent_candidate_contexts: dict[str, dict[str, Any]],
         snapshot_id: str,
+        app_settings: AppSettings,
     ) -> list[dict[str, Any]]:
         recommendations: list[dict[str, Any]] = []
         for index, agent in enumerate(agents):
@@ -857,7 +865,17 @@ class ArenaService:
             phase_context = candidate_context.get("phase_context") or {}
             ai_data_request = candidate_context.get("ai_data_request")
             style = str(agent.get("style") or "auto")
-            picks = self._morning_picks(
+            llm_config = self._resolve_llm_config(agent=agent, app_settings=app_settings)
+            llm_result = self._llm_morning_recommendation(
+                agent=agent,
+                candidates=candidates,
+                snapshot_id=snapshot_id,
+                data_sources=data_sources,
+                ai_data_request=ai_data_request,
+                phase_context=phase_context,
+                llm_config=llm_config,
+            )
+            picks = (llm_result or {}).get("picks") or self._morning_picks(
                 candidates=candidates,
                 style=style,
                 agent=agent,
@@ -879,7 +897,7 @@ class ArenaService:
                     "name": candidate.get("name") or candidate.get("symbol"),
                     "score": candidate.get("score"),
                     "price": candidate.get("price"),
-                    "reason": (
+                    "reason": (llm_result or {}).get("reason") or (
                         f"{playbook['label']} 早盘精选 {len(picks)} 只，"
                         f"首选 {candidate.get('symbol')}，评分 "
                         f"{float(candidate.get('score') or 0):.2f}；"
@@ -893,11 +911,119 @@ class ArenaService:
                         ai_data_request=ai_data_request,
                         candidate=candidate,
                         action="WATCH",
-                        llm_decision=None,
+                        llm_decision=(llm_result or {}).get("llm_decision"),
                     ),
                 }
             )
         return recommendations
+
+    def _llm_morning_recommendation(
+        self,
+        *,
+        agent: dict[str, Any],
+        candidates: list[dict[str, Any]],
+        snapshot_id: str,
+        data_sources: list[str],
+        ai_data_request: dict[str, Any] | None,
+        phase_context: dict[str, Any],
+        llm_config: dict[str, str] | None,
+    ) -> dict[str, Any] | None:
+        if llm_config is None or not candidates:
+            return None
+        payload = {
+            "model": llm_config["model"],
+            "temperature": 0.2,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是A股模拟交易竞技场的早盘选股AI。"
+                        "只能基于今天以前的历史数据、盘前新闻和公告生成1到5只观察名单，"
+                        "不得输出买卖指令。只返回JSON，不要输出Markdown。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "snapshot_id": snapshot_id,
+                            "phase_context": phase_context,
+                            "agent": {
+                                "id": agent.get("id"),
+                                "name": agent.get("name"),
+                                "style": agent.get("style"),
+                                "provider": agent.get("provider"),
+                                "model": agent.get("model"),
+                                "prompt": agent.get("prompt"),
+                            },
+                            "data_sources": data_sources,
+                            "ai_data_request": ai_data_request or {},
+                            "candidates": candidates[:12],
+                            "output_schema": {
+                                "picks": "1到5个候选股票代码，按优先级排序",
+                                "reason": "说明如何综合历史数据、新闻和公告",
+                            },
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                },
+            ],
+        }
+        try:
+            response = llm_service._call_llm(
+                base_url=llm_config["base_url"],
+                api_key=llm_config["api_key"],
+                payload=payload,
+                timeout_seconds=60,
+            )
+            raw = self._extract_llm_json(response)
+        except Exception:
+            return None
+
+        picks = self._morning_picks_from_llm(raw=raw, candidates=candidates)
+        if not picks:
+            return None
+        return {
+            "picks": picks,
+            "reason": str(raw.get("reason") or "").strip(),
+            "llm_decision": {
+                "used": True,
+                "provider": llm_config["provider"],
+                "model": llm_config["model"],
+                "raw_decision": raw,
+            },
+        }
+
+    def _morning_picks_from_llm(
+        self,
+        *,
+        raw: dict[str, Any],
+        candidates: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        raw_picks = raw.get("picks") or raw.get("symbols") or raw.get("watchlist") or []
+        if not isinstance(raw_picks, list):
+            return []
+        candidates_by_symbol = {
+            str(candidate.get("symbol") or "").strip().upper(): candidate
+            for candidate in candidates
+            if candidate.get("symbol")
+        }
+        picks: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in raw_picks:
+            symbol = (
+                str(item.get("symbol") or "")
+                if isinstance(item, dict)
+                else str(item or "")
+            ).strip().upper()
+            if not symbol or symbol in seen or symbol not in candidates_by_symbol:
+                continue
+            seen.add(symbol)
+            picks.append(self._pick_payload(candidates_by_symbol[symbol]))
+            if len(picks) >= 5:
+                break
+        return picks
 
     def agent_dashboard(
         self,

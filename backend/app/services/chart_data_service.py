@@ -138,6 +138,7 @@ class ChartDataService:
         quantity: int,
         factor_scores: dict[str, Any],
         realtime_quote: dict[str, Any] | None = None,
+        hourly_series: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         series = self.price_series_with_realtime(
             db,
@@ -145,11 +146,12 @@ class ChartDataService:
             limit=90,
             realtime_quote=realtime_quote,
         )
+        hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         trade_date = series[-1]["trade_date"] if series else None
         marker_price = float(price or (series[-1]["close"] if series else 0))
         return {
             "price_series": series,
-            "interval_series": self.interval_series(series),
+            "interval_series": self.interval_series(series, hourly_series=hourly),
             "forecast_series": self.forecast_series(series),
             "signal_markers": [
                 {
@@ -180,6 +182,7 @@ class ChartDataService:
         price: float,
         quantity: int,
         realtime_quote: dict[str, Any] | None = None,
+        hourly_series: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         series = self.price_series_with_realtime(
             db,
@@ -187,9 +190,10 @@ class ChartDataService:
             limit=90,
             realtime_quote=realtime_quote,
         )
+        hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         return {
             "price_series": series,
-            "interval_series": self.interval_series(series),
+            "interval_series": self.interval_series(series, hourly_series=hourly),
             "forecast_series": self.forecast_series(series),
             "trade_markers": [
                 {
@@ -247,13 +251,24 @@ class ChartDataService:
             "calmar": round(calmar, 6),
         }
 
-    def interval_series(self, price_series: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    def interval_series(
+        self,
+        price_series: list[dict[str, Any]],
+        *,
+        hourly_series: list[dict[str, Any]] | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
         return {
             "daily": price_series,
             "weekly": self._aggregate_price_series(price_series, "week"),
             "monthly": self._aggregate_price_series(price_series, "month"),
-            "hourly": self._synthetic_hourly_series(price_series),
+            "hourly": self._enrich_price_points(hourly_series or []),
         }
+
+    def real_hourly_series(self, symbol: str) -> list[dict[str, Any]]:
+        try:
+            return market_data_service.get_intraday_bars(symbol, interval="60m", limit=120)
+        except Exception:
+            return []
 
     def forecast_series(
         self,
@@ -593,36 +608,6 @@ class ChartDataService:
                     "ma20": None,
                 }
             )
-        return self._enrich_price_points(rows)
-
-    def _synthetic_hourly_series(self, price_series: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        for point in price_series[-20:]:
-            trade_date = str(point.get("trade_date") or "")[:8]
-            open_price = float(point.get("open") or point.get("close") or 0)
-            high_price = float(point.get("high") or point.get("close") or open_price)
-            low_price = float(point.get("low") or point.get("close") or open_price)
-            close_price = float(point.get("close") or open_price)
-            amount = float(point.get("amount") or 0) / 4
-            volume = float(point.get("volume") or 0) / 4
-            path = [
-                ("10:30", open_price, max(open_price, high_price), min(open_price, high_price), high_price),
-                ("11:30", high_price, high_price, min(low_price, high_price), (high_price + close_price) / 2),
-                ("14:00", (high_price + close_price) / 2, max(high_price, close_price), low_price, low_price),
-                ("15:00", low_price, max(low_price, close_price), min(low_price, close_price), close_price),
-            ]
-            for time_label, open_value, high_value, low_value, close_value in path:
-                rows.append(
-                    {
-                        "trade_date": f"{trade_date} {time_label}",
-                        "open": round(open_value, 4),
-                        "high": round(high_value, 4),
-                        "low": round(low_value, 4),
-                        "close": round(close_value, 4),
-                        "volume": volume,
-                        "amount": amount,
-                    }
-                )
         return self._enrich_price_points(rows)
 
     def _enrich_price_points(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

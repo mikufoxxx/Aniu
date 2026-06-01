@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -48,7 +48,13 @@ class QuantService:
         end_date: str | None = None,
     ) -> dict[str, Any]:
         universe = self._resolve_universe(db, symbols, limit=limit, end_date=end_date)
-        quotes = market_data_service.get_quotes(universe, prefer_realtime=prefer_realtime)
+        quotes = (
+            self._daily_quotes_by_symbol(db, universe, end_date=end_date)
+            if not prefer_realtime and db is not None
+            else []
+        )
+        if not quotes:
+            quotes = market_data_service.get_quotes(universe, prefer_realtime=prefer_realtime)
         daily_factors = self._daily_factors_by_symbol(
             db,
             symbols=universe,
@@ -211,6 +217,67 @@ class QuantService:
             "coverage": coverage,
             "items": items,
         }
+
+    def _daily_quotes_by_symbol(
+        self,
+        db: Session,
+        symbols: list[str],
+        *,
+        end_date: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not symbols:
+            return []
+        latest_dates = (
+            select(
+                DailyBar.symbol.label("symbol"),
+                func.max(DailyBar.trade_date).label("trade_date"),
+            )
+            .where(DailyBar.symbol.in_(symbols), DailyBar.close.is_not(None))
+            .group_by(DailyBar.symbol)
+        )
+        if end_date:
+            latest_dates = latest_dates.where(DailyBar.trade_date <= end_date)
+        latest_dates_subquery = latest_dates.subquery()
+        rows = db.scalars(
+            select(DailyBar)
+            .join(
+                latest_dates_subquery,
+                and_(
+                    DailyBar.symbol == latest_dates_subquery.c.symbol,
+                    DailyBar.trade_date == latest_dates_subquery.c.trade_date,
+                ),
+            )
+            .order_by(DailyBar.symbol)
+        ).all()
+        rows_by_symbol = {row.symbol: row for row in rows}
+        quotes: list[dict[str, Any]] = []
+        for symbol in symbols:
+            row = rows_by_symbol.get(symbol)
+            if row is None or row.close is None:
+                continue
+            change_pct = row.pct_chg
+            if change_pct is None and row.pre_close not in (None, 0):
+                change_pct = (
+                    (float(row.close) - float(row.pre_close))
+                    / float(row.pre_close)
+                    * 100
+                )
+            quotes.append(
+                {
+                    "symbol": row.symbol,
+                    "name": row.symbol,
+                    "price": float(row.close),
+                    "change_pct": _number(change_pct),
+                    "amount": _number(row.amount),
+                    "turnover": _number(row.turnover_rate),
+                    "volume_ratio": _number(row.volume_ratio, 1.0) or 1.0,
+                    "source": "tushare_daily_snapshot",
+                    "timestamp": row.trade_date,
+                    "trade_date": row.trade_date,
+                    "is_realtime": False,
+                }
+            )
+        return quotes
 
     def _score_quote(
         self,

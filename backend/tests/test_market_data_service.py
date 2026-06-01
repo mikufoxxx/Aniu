@@ -47,6 +47,67 @@ def test_easy_tdx_quote_timestamp_uses_shanghai_time(monkeypatch) -> None:
     assert quote["timestamp"] == "2026-06-01 12:30:32"
 
 
+def test_eastmoney_intraday_bars_are_parsed_as_real_hourly_data(monkeypatch) -> None:
+    from app.services import market_data_service as module
+    from app.services.market_data_service import market_data_service
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": {
+                    "klines": [
+                        "2026-06-01 10:30,10.90,10.93,10.95,10.81,428850,466594440.00,1.28,0.00,0.00,0.22",
+                        "2026-06-01 11:30,10.93,10.91,10.96,10.91,163695,179043839.00,0.46,-0.18,-0.02,0.08",
+                    ]
+                }
+            }
+
+    def fake_get(url: str, **kwargs):
+        captured["url"] = url
+        captured["params"] = kwargs.get("params")
+        return FakeResponse()
+
+    monkeypatch.setattr(module.httpx, "get", fake_get)
+    market_data_service._intraday_cache = {}
+    market_data_service._intraday_cache_expires_at = {}
+
+    bars = market_data_service.get_intraday_bars("000001.SZ", interval="hourly", limit=2)
+
+    assert captured["params"]["secid"] == "0.000001"
+    assert captured["params"]["klt"] == "60"
+    assert bars == [
+        {
+            "trade_date": "2026-06-01 10:30",
+            "open": 10.9,
+            "high": 10.95,
+            "low": 10.81,
+            "close": 10.93,
+            "volume": 428850.0,
+            "amount": 466594440.0,
+            "source": "eastmoney_intraday",
+            "timestamp": "2026-06-01 10:30",
+            "is_realtime": False,
+        },
+        {
+            "trade_date": "2026-06-01 11:30",
+            "open": 10.93,
+            "high": 10.96,
+            "low": 10.91,
+            "close": 10.91,
+            "volume": 163695.0,
+            "amount": 179043839.0,
+            "source": "eastmoney_intraday",
+            "timestamp": "2026-06-01 11:30",
+            "is_realtime": False,
+        },
+    ]
+
+
 def test_tencent_quotes_are_requested_in_batches(monkeypatch) -> None:
     from app.services import market_data_service as module
     from app.services.market_data_service import market_data_service
@@ -137,6 +198,59 @@ def test_realtime_quotes_fill_easy_tdx_gaps_with_tencent(monkeypatch) -> None:
     assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
     assert [item["source"] for item in quotes] == ["easy_tdx", "tencent", "tencent"]
     assert captured["missing"] == ["000002.SZ", "000003.SZ"]
+
+
+def test_quote_cache_separates_realtime_and_low_frequency_modes(monkeypatch) -> None:
+    from app.services.market_data_service import market_data_service
+
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_easy_tdx(symbols: list[str]):
+        calls.append(("easy_tdx", tuple(symbols)))
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 1000,
+                "turnover": 1.0,
+                "volume_ratio": 1.0,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:00",
+            }
+        ]
+
+    def fake_tencent(symbols: list[str]):
+        calls.append(("tencent", tuple(symbols)))
+        return [
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "price": 9.0,
+                "change_pct": 0.5,
+                "amount": 900,
+                "turnover": 0.8,
+                "volume_ratio": 1.0,
+                "source": "tencent",
+                "timestamp": "2026-05-29 15:00:00",
+            }
+            for symbol in symbols
+        ]
+
+    monkeypatch.setattr(market_data_service, "_get_easy_tdx_quotes", fake_easy_tdx)
+    monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
+    market_data_service._quote_cache = None
+
+    realtime = market_data_service.get_quotes(["000001.SZ"], prefer_realtime=True)
+    low_frequency = market_data_service.get_quotes(["000001.SZ"], prefer_realtime=False)
+
+    assert realtime[0]["source"] == "easy_tdx"
+    assert low_frequency[0]["source"] == "tencent"
+    assert calls == [
+        ("easy_tdx", ("000001.SZ",)),
+        ("tencent", ("000001.SZ",)),
+    ]
 
 
 def test_tencent_quotes_fill_partial_batch_gaps_with_fallback(monkeypatch) -> None:

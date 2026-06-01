@@ -137,6 +137,61 @@ def test_quant_candidates_rank_symbols_from_shared_snapshots(monkeypatch, tmp_pa
     _reset_state()
 
 
+def test_quant_dataset_non_realtime_uses_daily_snapshot_before_live_quotes(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+    from app.services.quant_service import quant_service
+
+    def fail_get_quotes(symbols: list[str], prefer_realtime: bool = True):
+        raise AssertionError("non-realtime dataset must not request live quotes")
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fail_get_quotes)
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(
+                        symbol="000001.SZ",
+                        trade_date="20260528",
+                        close=10.0,
+                        pre_close=9.8,
+                        pct_chg=2.04,
+                        amount=500,
+                    ),
+                    DailyBar(
+                        symbol="000001.SZ",
+                        trade_date="20260529",
+                        close=11.0,
+                        pre_close=10.0,
+                        pct_chg=10.0,
+                        amount=900,
+                    ),
+                ]
+            )
+        with session_scope() as db:
+            dataset = quant_service.build_dataset(
+                db,
+                symbols=["000001.SZ"],
+                limit=1,
+                prefer_realtime=False,
+                lookback_days=30,
+                end_date="20260528",
+            )
+
+    item = dataset["items"][0]
+    assert item["price"] == 10.0
+    assert item["timestamp"] == "20260528"
+    assert item["source"] == "tushare_daily_snapshot"
+    assert item["daily_factors"]["bars_used"] == 1
+    assert "tushare_daily_snapshot" in dataset["data_sources"]
+    assert "tushare_daily" in dataset["data_sources"]
+
+    _reset_state()
+
+
 def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 
@@ -1001,7 +1056,7 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
     assert {"daily", "weekly", "monthly", "hourly"} <= set(charts["interval_series"])
     assert charts["interval_series"]["daily"] == charts["price_series"]
     assert charts["interval_series"]["monthly"][-1]["close"] == 12.0
-    assert charts["interval_series"]["hourly"]
+    assert charts["interval_series"]["hourly"] == []
     assert len(charts["forecast_series"]) >= 5
     assert charts["forecast_series"][0]["trade_date"] > charts["price_series"][-1]["trade_date"]
     assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(charts["price_series"][-1])
@@ -1038,6 +1093,7 @@ def test_order_charts_append_realtime_quote_after_latest_daily_bar(monkeypatch, 
         ]
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
 
     with create_test_client(monkeypatch, tmp_path):
         with session_scope() as db:
@@ -1901,8 +1957,10 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     from app.services.market_data_service import market_data_service
 
     requests: list[dict[str, object]] = []
+    quote_calls: list[dict[str, object]] = []
 
     def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        quote_calls.append({"symbols": symbols, "prefer_realtime": prefer_realtime})
         return [
             {
                 "symbol": "600519.SH",
@@ -2012,6 +2070,7 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
         "long_defensive",
     }
     assert payload["agent_recommendations"][0]["decision_context"]["action"] == "WATCH"
+    assert quote_calls == []
     assert requests[0]["dimensions"][:3] == ["daily_history", "news", "announcement"]
     assert requests[0]["prefer_realtime"] is False
     assert requests[0]["end_date"] == "20260528"
@@ -2024,6 +2083,116 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     assert "资讯" in payload["agent_recommendations"][0]["reason"]
     assert stored_run.phase == "morning_recommendation"
     assert stored_run.candidate_payload["agent_recommendations"][0]["agent_id"] == "momentum_ai"
+
+    _reset_state()
+
+
+def test_arena_morning_phase_uses_llm_with_history_and_news_context(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.ai_data_request_service import ai_data_request_service
+    from app.services.arena_service import ARENA_SCHEDULE_TIMEZONE, arena_service
+    from app.services.llm_service import llm_service
+    from app.services.market_data_service import market_data_service
+
+    llm_payloads: list[dict[str, object]] = []
+
+    def fail_get_quotes(symbols: list[str], prefer_realtime: bool = True):
+        raise AssertionError("morning phase must use historical daily snapshots")
+
+    def fake_execute(
+        db,
+        *,
+        symbols,
+        dimensions,
+        limit,
+        lookback_days,
+        prefer_realtime,
+        refresh,
+        end_date=None,
+        news_query=None,
+    ):
+        return {
+            "requested_symbols": symbols,
+            "requested_dimensions": dimensions,
+            "actions": [],
+            "refresh": None,
+            "dataset": {"item_count": len(symbols), "data_sources": [], "coverage": {}},
+            "context": "历史日线截至20260528；新闻：政策利好银行板块。",
+            "context_length": 24,
+        }
+
+    def fake_call_llm(*, base_url, api_key, payload, timeout_seconds):
+        llm_payloads.append(payload)
+        prompt = json.loads(payload["messages"][1]["content"])
+        assert prompt["phase_context"]["phase"] == "morning_recommendation"
+        assert prompt["phase_context"]["history_end_date"] == "20260528"
+        assert prompt["ai_data_request"]["context"] == "历史日线截至20260528；新闻：政策利好银行板块。"
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "picks": ["000001.SZ"],
+                                "reason": "综合昨日以前日线和盘前新闻，银行板块更匹配。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        arena_service,
+        "_now_shanghai",
+        lambda: datetime(2026, 5, 29, 8, 20, tzinfo=ARENA_SCHEDULE_TIMEZONE),
+    )
+    monkeypatch.setattr(market_data_service, "get_quotes", fail_get_quotes)
+    monkeypatch.setattr(ai_data_request_service, "execute", fake_execute)
+    monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            settings = db.query(AppSettings).first()
+            assert settings is not None
+            settings.llm_base_url = "https://llm.example/v1"
+            settings.llm_api_key = "llm-key"
+            settings.llm_model = "model-a"
+            db.add_all(
+                [
+                    DailyBar(symbol="600519.SH", trade_date="20260528", close=100, amount=900),
+                    DailyBar(symbol="000001.SZ", trade_date="20260528", close=10, amount=500),
+                ]
+            )
+        response = client.post(
+            "/api/aniu/arena/run",
+            headers=headers,
+            json={
+                "phase": "morning_recommendation",
+                "initial_cash": 200000,
+                "agents": [
+                    {
+                        "id": "news_ai",
+                        "name": "新闻 AI",
+                        "style": "auto",
+                        "provider": "openai-compatible",
+                        "model": "model-a",
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    recommendation = response.json()["agent_recommendations"][0]
+    assert recommendation["picks"][0]["symbol"] == "000001.SZ"
+    assert "盘前新闻" in recommendation["reason"]
+    assert recommendation["decision_context"]["llm_decision"]["used"] is True
+    assert recommendation["decision_context"]["llm_decision"]["model"] == "model-a"
+    assert len(llm_payloads) == 1
 
     _reset_state()
 
@@ -2211,6 +2380,7 @@ def test_arena_closing_phase_records_agent_memory_and_reuses_it_in_prompt(
         }
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
     monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
 
     with create_test_client(monkeypatch, tmp_path) as client:
@@ -2279,7 +2449,10 @@ def test_arena_nightly_phase_records_backtest_learning_memory(
     from app.db.models import ArenaAgentMemory
     from app.services.market_data_service import market_data_service
 
+    quote_calls: list[dict[str, object]] = []
+
     def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        quote_calls.append({"symbols": symbols, "prefer_realtime": prefer_realtime})
         return [
             {
                 "symbol": "000001.SZ",
@@ -2343,7 +2516,9 @@ def test_arena_nightly_phase_records_backtest_learning_memory(
     assert payload["orders"] == []
     assert payload["agent_reviews"][0]["memory_type"] == "nightly_learning"
     assert "回测" in payload["agent_reviews"][0]["summary"]
+    assert quote_calls == []
     assert payload["agent_reviews"][0]["metrics"]["phase_context"]["phase"] == "nightly_learning"
+    assert payload["agent_reviews"][0]["metrics"]["phase_context"]["history_end_date"] == "20260528"
     assert "backtest" in payload["agent_reviews"][0]["metrics"]["phase_context"]["required_inputs"]
     assert payload["agent_reviews"][0]["metrics"]["backtest"]["selected_symbol"] == "000001.SZ"
     assert payload["agent_reviews"][0]["metrics"]["backtest"]["return_ratio"] > 0
@@ -2374,7 +2549,24 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
             }
         ]
 
+    def fake_intraday(symbol: str, *, interval: str = "60m", limit: int = 120):
+        return [
+            {
+                "trade_date": "2026-05-29 10:30",
+                "open": 12.0,
+                "high": 12.2,
+                "low": 11.9,
+                "close": 12.1,
+                "volume": 1000,
+                "amount": 12000000,
+                "source": "eastmoney_intraday",
+                "timestamp": "2026-05-29 10:30",
+                "is_realtime": False,
+            }
+        ]
+
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", fake_intraday)
 
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
@@ -2422,7 +2614,7 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert {"daily", "weekly", "monthly", "hourly"} <= set(payload["charts"]["interval_series"])
     assert payload["charts"]["interval_series"]["daily"] == payload["charts"]["price_series"]
     assert payload["charts"]["interval_series"]["weekly"][-1]["close"] == 12.0
-    assert payload["charts"]["interval_series"]["hourly"]
+    assert payload["charts"]["interval_series"]["hourly"][0]["source"] == "eastmoney_intraday"
     assert len(payload["charts"]["forecast_series"]) >= 5
     assert payload["charts"]["forecast_series"][0]["trade_date"] > payload["charts"]["price_series"][-1]["trade_date"]
     assert payload["charts"]["forecast_series"][0]["source"] == "quant_regime_projection"
@@ -2451,7 +2643,24 @@ def test_stock_analysis_chart_refresh_updates_charts_without_new_report(monkeypa
             }
         ]
 
+    def fake_intraday(symbol: str, *, interval: str = "60m", limit: int = 120):
+        return [
+            {
+                "trade_date": "2026-06-01 10:30",
+                "open": 12.0,
+                "high": 12.5,
+                "low": 11.9,
+                "close": 12.4,
+                "volume": 1000,
+                "amount": 12400000,
+                "source": "eastmoney_intraday",
+                "timestamp": "2026-06-01 10:30",
+                "is_realtime": False,
+            }
+        ]
+
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", fake_intraday)
 
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
@@ -2477,6 +2686,7 @@ def test_stock_analysis_chart_refresh_updates_charts_without_new_report(monkeypa
     assert payload["charts"]["price_series"][-1]["trade_date"] == "20260601"
     assert payload["charts"]["price_series"][-1]["is_realtime"] is True
     assert payload["charts"]["price_series"][-1]["source"] == "tencent"
+    assert payload["charts"]["interval_series"]["hourly"][0]["source"] == "eastmoney_intraday"
     assert payload["charts"]["factor_radar"]
     assert report_count == 0
 
@@ -2503,6 +2713,7 @@ def test_stock_analysis_chart_refresh_reports_shanghai_refresh_time(monkeypatch,
         ]
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
 
     with create_test_client(monkeypatch, tmp_path):
         with session_scope() as db:
@@ -2578,6 +2789,7 @@ def test_stock_analysis_uses_selected_forecast_model_and_skill(
         }
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
     monkeypatch.setattr(llm_service, "_call_llm", fake_call_llm)
 
     with create_test_client(monkeypatch, tmp_path) as client:
@@ -3142,6 +3354,7 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
         return [item for item in quotes if item["symbol"] in requested]
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(market_data_service, "get_intraday_bars", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         arena_service,
         "_now_shanghai",

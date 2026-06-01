@@ -52,12 +52,18 @@ const activeInterval = ref<ChartInterval>('daily')
 let chart: ECharts | null = null
 
 const subtitle = computed(() => props.subtitle || `${props.priceSeries.length} 根日线`)
-const intervalOptions: Array<{ key: ChartInterval; label: string }> = [
+const baseIntervalOptions: Array<{ key: ChartInterval; label: string }> = [
   { key: 'daily', label: '日' },
   { key: 'weekly', label: '周' },
   { key: 'monthly', label: '月' },
-  { key: 'hourly', label: '小时' },
 ]
+const intervalOptions = computed(() => {
+  const options = [...baseIntervalOptions]
+  if (props.intervalSeries?.hourly?.length) {
+    options.push({ key: 'hourly' as const, label: '小时' })
+  }
+  return options
+})
 
 const selectedPriceSeries = computed(() => {
   return props.intervalSeries?.[activeInterval.value]?.length
@@ -201,4 +207,9 @@ onBeforeUnmount(() => {
 })
 
 watch(() => [props.priceSeries, props.intervalSeries, props.forecastSeries, props.markers, activeInterval.value], render, { deep: true })
+watch(intervalOptions, (options) => {
+  if (!options.some((option) => option.key === activeInterval.value)) {
+    activeInterval.value = 'daily'
+  }
+})
 </script>

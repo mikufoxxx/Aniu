@@ -2706,12 +2706,13 @@ class ArenaService:
         ).all()
         recommendations: list[dict[str, Any]] = []
         for run in runs:
+            payload = run.candidate_payload or {}
             if not self._is_current_phase_output(
                 phase="morning_recommendation",
                 created_at=run.created_at,
+                schedule_context=payload.get("schedule_context"),
             ):
                 continue
-            payload = run.candidate_payload or {}
             for item in payload.get("agent_recommendations") or []:
                 if item.get("agent_id") != agent_id:
                     continue
@@ -2747,12 +2748,13 @@ class ArenaService:
         for run in runs:
             if all(len(items) >= per_agent_limit for items in recommendations.values()):
                 break
+            payload = run.candidate_payload or {}
             if not self._is_current_phase_output(
                 phase="morning_recommendation",
                 created_at=run.created_at,
+                schedule_context=payload.get("schedule_context"),
             ):
                 continue
-            payload = run.candidate_payload or {}
             for item in payload.get("agent_recommendations") or []:
                 agent_id = str(item.get("agent_id") or "")
                 if agent_id not in requested_ids:
@@ -2890,11 +2892,21 @@ class ArenaService:
             return f"{year}-W{week:02d}"
         return value.strftime("%Y-%m-%d")
 
-    def _is_current_phase_output(self, *, phase: str, created_at: datetime | None) -> bool:
-        if created_at is None:
+    def _is_current_phase_output(
+        self,
+        *,
+        phase: str,
+        created_at: datetime | None,
+        schedule_context: dict[str, Any] | None = None,
+    ) -> bool:
+        reference_at = self._phase_output_reference_time(
+            created_at=created_at,
+            schedule_context=schedule_context,
+        )
+        if reference_at is None:
             return False
         now = self._now_shanghai()
-        created_local = self._local_time(created_at)
+        created_local = self._local_time(reference_at)
         if created_local.date() != now.date():
             return False
         return any(
@@ -2904,6 +2916,33 @@ class ArenaService:
                 now=now,
             )
         )
+
+    def _phase_output_reference_time(
+        self,
+        *,
+        created_at: datetime | None,
+        schedule_context: dict[str, Any] | None,
+    ) -> datetime | None:
+        if isinstance(schedule_context, dict):
+            scheduled_at = self._parse_datetime(schedule_context.get("scheduled_at"))
+            if scheduled_at is not None:
+                return scheduled_at
+        return created_at
+
+    def _parse_datetime(self, value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if normalized.endswith("Z"):
+            normalized = f"{normalized[:-1]}+00:00"
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
 
     def _phase_start_for_day(self, *, phase: str, now: datetime) -> datetime | None:
         windows = self._phase_windows_for_day(phase=phase, now=now)

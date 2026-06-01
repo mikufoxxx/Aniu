@@ -1335,6 +1335,62 @@ def test_arena_hides_pre_schedule_morning_outputs(
     _reset_state()
 
 
+def test_arena_leaderboard_uses_schedule_time_for_delayed_morning_output(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.db.models import ArenaRun
+    from app.services.arena_service import arena_service
+
+    monkeypatch.setattr(
+        arena_service,
+        "_now_shanghai",
+        lambda: datetime(2026, 6, 1, 13, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(
+                ArenaRun(
+                    phase="morning_recommendation",
+                    initial_cash=200000,
+                    created_at=datetime(2026, 6, 1, 1, 29),
+                    candidate_payload={
+                        "schedule_context": {
+                            "slot_key": "2026-06-01:morning_recommendation:0800:model_gpt_5_5",
+                            "phase": "morning_recommendation",
+                            "agent_id": "model_gpt_5_5",
+                            "scheduled_at": "2026-06-01T08:24:00+08:00",
+                            "window_start": "2026-06-01T08:00:00+08:00",
+                        },
+                        "agent_recommendations": [
+                            {
+                                "agent_id": "model_gpt_5_5",
+                                "agent_name": "GPT-5.5",
+                                "style": "auto",
+                                "action": "WATCH",
+                                "symbol": "603629.SH",
+                                "name": "利通电子",
+                                "score": 91,
+                                "price": 18.5,
+                                "reason": "按计划早盘时间归属展示。",
+                                "picks": [{"symbol": "603629.SH", "name": "利通电子"}],
+                            }
+                        ],
+                    },
+                )
+            )
+        response = client.get("/api/aniu/arena/leaderboard", headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    item = next(entry for entry in items if entry["agent_id"] == "model_gpt_5_5")
+    assert item["latest_recommendation"]["picks"][0]["symbol"] == "603629.SH"
+
+    _reset_state()
+
+
 def test_arena_equity_curves_support_hourly_weekly_and_current_live_point(
     monkeypatch,
     tmp_path,

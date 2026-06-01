@@ -4,12 +4,15 @@ from datetime import datetime, timedelta
 import math
 from statistics import mean, pstdev
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import DailyBar
 from app.services.market_data_service import market_data_service, normalize_symbol
+
+MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 class ChartDataService:
@@ -531,7 +534,7 @@ class ChartDataService:
         digits = "".join(char for char in timestamp if char.isdigit())
         if len(digits) >= 8:
             return digits[:8]
-        return datetime.now().strftime("%Y%m%d")
+        return datetime.now(MARKET_TIMEZONE).strftime("%Y%m%d")
 
     def _safe_float(self, value: Any) -> float | None:
         if value in (None, ""):

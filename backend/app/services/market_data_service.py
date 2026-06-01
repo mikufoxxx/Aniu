@@ -7,6 +7,7 @@ import subprocess
 import time
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -29,6 +30,7 @@ DEFAULT_UNIVERSE = [
 _TENCENT_QUOTE_BATCH_SIZE = 60
 _EASTMONEY_QUOTE_BATCH_SIZE = 80
 _SINA_QUOTE_BATCH_SIZE = 220
+MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -80,6 +82,14 @@ def _parse_float(value: Any) -> float | None:
     if math.isnan(numeric):
         return None
     return numeric
+
+
+def _market_now_text() -> str:
+    return datetime.now(MARKET_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _market_timestamp_text(value: float | int) -> str:
+    return datetime.fromtimestamp(value, tz=MARKET_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class MarketDataService:
@@ -263,7 +273,7 @@ class MarketDataService:
                     "turnover": _parse_float(item.get("turnover")),
                     "volume_ratio": _parse_float(item.get("vol_ratio")),
                     "source": "easy_tdx",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "timestamp": _market_now_text(),
                 }
             )
         return results
@@ -377,9 +387,9 @@ class MarketDataService:
             turnover = _parse_float(item.get("f8"))
             timestamp_value = _parse_float(item.get("f124"))
             timestamp = (
-                datetime.fromtimestamp(timestamp_value).strftime("%Y-%m-%d %H:%M:%S")
+                _market_timestamp_text(timestamp_value)
                 if timestamp_value
-                else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                else _market_now_text()
             )
             results.append(
                 {
@@ -448,7 +458,7 @@ class MarketDataService:
                     "turnover": None,
                     "volume_ratio": None,
                     "source": "sina",
-                    "timestamp": f"{date_text} {time_text}".strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "timestamp": f"{date_text} {time_text}".strip() or _market_now_text(),
                 }
             )
         return results
@@ -464,7 +474,7 @@ class MarketDataService:
                 "turnover": 0.0,
                 "volume_ratio": 1.0,
                 "source": "fallback",
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": _market_now_text(),
             }
             for symbol in symbols
         ]

@@ -1,7 +1,50 @@
 from pathlib import Path
+from datetime import datetime, timezone
+import json
 import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+
+def test_easy_tdx_quote_timestamp_uses_shanghai_time(monkeypatch) -> None:
+    from app.services import market_data_service as module
+    from app.services.market_data_service import market_data_service
+
+    class FakeDateTime:
+        @staticmethod
+        def now(tz=None):
+            value = datetime(2026, 6, 1, 4, 30, 32, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
+
+        @staticmethod
+        def fromtimestamp(value, tz=None):
+            result = datetime.fromtimestamp(value, tz=timezone.utc)
+            return result.astimezone(tz) if tz is not None else result.replace(tzinfo=None)
+
+    class FakeCompleted:
+        returncode = 0
+        stdout = json.dumps(
+            [
+                {
+                    "code": "000001",
+                    "market": 0,
+                    "name": "平安银行",
+                    "close": 10.91,
+                    "pre_close": 10.93,
+                    "amount": 645638272,
+                    "turnover": 1.0,
+                    "vol_ratio": 1.1,
+                }
+            ]
+        )
+
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/local/bin/easy-tdx")
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: FakeCompleted())
+    monkeypatch.setattr(module, "datetime", FakeDateTime)
+
+    quote = market_data_service._get_easy_tdx_quotes(["000001.SZ"])[0]
+
+    assert quote["timestamp"] == "2026-06-01 12:30:32"
 
 
 def test_tencent_quotes_are_requested_in_batches(monkeypatch) -> None:
@@ -162,6 +205,7 @@ def test_realtime_quotes_fill_tencent_gaps_with_eastmoney_before_fallback(monkey
     monkeypatch.setattr(market_data_service, "_get_easy_tdx_quotes", fake_easy_tdx)
     monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
     monkeypatch.setattr(market_data_service, "_get_eastmoney_quotes", fake_eastmoney)
+    monkeypatch.setattr(market_data_service, "_get_sina_quotes", lambda symbols: [])
     market_data_service._quote_cache = None
 
     quotes = market_data_service.get_quotes(["000001.SZ", "000002.SZ", "000003.SZ"])

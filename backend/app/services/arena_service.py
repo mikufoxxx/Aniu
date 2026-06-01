@@ -86,7 +86,8 @@ ARENA_SCHEDULE_WINDOWS = (
 ARENA_PHASE_DATA_POLICIES = {
     "morning_recommendation": {
         "label": "早盘推荐",
-        "data_focus": "今天以前的历史数据、隔夜资讯和公告",
+        "data_focus": "截至上一交易日的历史数据、盘前资讯和公告",
+        "news_query": "今日A股盘前要闻 重要公告 政策行业消息",
         "ai_data_dimensions": [
             "daily_history",
             "news",
@@ -106,6 +107,7 @@ ARENA_PHASE_DATA_POLICIES = {
     "intraday_trade": {
         "label": "盘中模拟",
         "data_focus": "实时行情、盘中新闻和已有历史结构",
+        "news_query": "今日A股盘中实时新闻 板块异动 个股公告",
         "ai_data_dimensions": [
             "quote",
             "news",
@@ -124,6 +126,7 @@ ARENA_PHASE_DATA_POLICIES = {
     "closing_review": {
         "label": "收盘复盘",
         "data_focus": "今日操作、收益、走势和历史日线",
+        "news_query": "今日A股收盘新闻 盘后公告 板块复盘",
         "ai_data_dimensions": [
             "quote",
             "daily_history",
@@ -143,6 +146,7 @@ ARENA_PHASE_DATA_POLICIES = {
     "nightly_learning": {
         "label": "夜间学习",
         "data_focus": "历史数据和回测结果",
+        "news_query": "A股历史策略复盘 市场结构变化",
         "ai_data_dimensions": [
             "daily_history",
             "moneyflow",
@@ -455,6 +459,7 @@ class ArenaService:
             "phase": normalized_phase,
             "label": policy["label"],
             "data_focus": policy["data_focus"],
+            "news_query": policy["news_query"],
             "ai_data_dimensions": list(policy["ai_data_dimensions"]),
             "required_inputs": list(policy["required_inputs"]),
             "prefer_realtime": bool(policy["prefer_realtime"]),
@@ -876,7 +881,8 @@ class ArenaService:
                     "reason": (
                         f"{playbook['label']} 早盘精选 {len(picks)} 只，"
                         f"首选 {candidate.get('symbol')}，评分 "
-                        f"{float(candidate.get('score') or 0):.2f}。"
+                        f"{float(candidate.get('score') or 0):.2f}；"
+                        f"依据 {self._phase_basis_text(phase_context)}。"
                     ),
                     "decision_context": self._decision_context(
                         snapshot_id=snapshot_id,
@@ -1537,6 +1543,7 @@ class ArenaService:
                 candidates=candidates,
                 snapshot_id=snapshot_id,
                 base_dimensions=base_dimensions,
+                phase_context=phase_context,
                 llm_config=llm_config,
             )
             if dimension_request:
@@ -1564,6 +1571,7 @@ class ArenaService:
             data_sources=data_sources,
             ai_data_request=ai_data_request,
             dimension_request=dimension_request,
+            phase_context=phase_context,
             llm_config=llm_config,
             app_settings=app_settings,
             recent_memories=recent_memories,
@@ -1743,6 +1751,7 @@ class ArenaService:
         data_sources: list[str],
         ai_data_request: dict[str, Any] | None,
         dimension_request: dict[str, Any] | None,
+        phase_context: dict[str, Any],
         llm_config: dict[str, str] | None,
         app_settings: AppSettings,
         recent_memories: list[dict[str, Any]],
@@ -1759,7 +1768,7 @@ class ArenaService:
                     "role": "system",
                     "content": (
                         "你是A股模拟交易竞技场里的独立AI选手。"
-                        "只能基于用户给出的同一份候选快照做低频模拟交易决策。"
+                        "必须先读取phase_context，再结合该阶段要求的数据输入做低频模拟交易决策。"
                         "只返回JSON，不要输出Markdown。"
                     ),
                 },
@@ -1772,6 +1781,7 @@ class ArenaService:
                         snapshot_id=snapshot_id,
                         data_sources=data_sources,
                         ai_data_request=ai_data_request,
+                        phase_context=phase_context,
                         recent_memories=recent_memories,
                     ),
                 },
@@ -1855,6 +1865,7 @@ class ArenaService:
         candidates: list[dict[str, Any]],
         snapshot_id: str,
         base_dimensions: list[str],
+        phase_context: dict[str, Any],
         llm_config: dict[str, str],
     ) -> dict[str, Any] | None:
         allowed_dimensions = [
@@ -1879,6 +1890,7 @@ class ArenaService:
                 "prompt": agent.get("prompt"),
             },
             "base_dimensions": base_dimensions,
+            "phase_context": phase_context,
             "allowed_dimensions": allowed_dimensions,
             "candidates": [
                 {
@@ -1903,7 +1915,7 @@ class ArenaService:
                     "role": "system",
                     "content": (
                         "你是A股竞技场AI的数据研究员。"
-                        "只判断交易前还需要补充哪些数据维度，只返回JSON。"
+                        "先读取phase_context确认当前阶段，再判断还需要补充哪些数据维度，只返回JSON。"
                     ),
                 },
                 {
@@ -1998,10 +2010,12 @@ class ArenaService:
         snapshot_id: str,
         data_sources: list[str],
         ai_data_request: dict[str, Any] | None,
+        phase_context: dict[str, Any],
         recent_memories: list[dict[str, Any]],
     ) -> str:
         prompt_payload = {
             "snapshot_id": snapshot_id,
+            "phase_context": phase_context,
             "agent": {
                 "id": agent.get("id"),
                 "name": agent.get("name"),
@@ -2821,6 +2835,19 @@ class ArenaService:
             change_pct = (prices[-1] - prices[0]) / prices[0] * 100
             return f"走势 {change_pct:+.2f}%"
         return "走势暂无足够成交图表"
+
+    def _phase_basis_text(self, phase_context: dict[str, Any]) -> str:
+        focus = str(phase_context.get("data_focus") or "").strip()
+        history_end_date = str(phase_context.get("history_end_date") or "").strip()
+        news_query = str(phase_context.get("news_query") or "").strip()
+        parts: list[str] = []
+        if history_end_date:
+            parts.append(f"历史截至 {history_end_date}")
+        if focus:
+            parts.append(focus)
+        if news_query:
+            parts.append(f"资讯查询 {news_query}")
+        return "，".join(parts) or "阶段数据策略"
 
     def _backtest_window(
         self,

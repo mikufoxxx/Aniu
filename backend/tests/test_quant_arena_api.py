@@ -2006,6 +2006,9 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     request_context = payload["agent_recommendations"][0]["decision_context"]["ai_data_request"]
     assert request_context["phase_context"]["phase"] == "morning_recommendation"
     assert request_context["phase_context"]["history_end_date"] == "20260528"
+    assert "news_query" in request_context["phase_context"]
+    assert "历史" in payload["agent_recommendations"][0]["reason"]
+    assert "资讯" in payload["agent_recommendations"][0]["reason"]
     assert stored_run.phase == "morning_recommendation"
     assert stored_run.candidate_payload["agent_recommendations"][0]["agent_id"] == "momentum_ai"
 
@@ -2863,6 +2866,7 @@ def test_arena_decision_uses_agent_on_demand_data_request(monkeypatch, tmp_path)
     context = response.json()["orders"][0]["decision_context"]
     assert context["ai_data_request"]["phase_context"]["phase"] == "intraday_trade"
     assert "realtime_quote" in context["ai_data_request"]["phase_context"]["required_inputs"]
+    assert "news_query" in context["ai_data_request"]["phase_context"]
     assert context["ai_data_request"]["requested_symbols"] == ["000001.SZ"]
     assert context["ai_data_request"]["context_length"] == 18
     assert context["ai_data_request"]["actions"][0]["source"] == "tushare_moneyflow"
@@ -2929,6 +2933,8 @@ def test_arena_llm_can_request_extra_data_dimensions_before_decision(
         llm_payloads.append(payload)
         prompt = json.loads(payload["messages"][1]["content"])
         if "allowed_dimensions" in prompt:
+            assert prompt["phase_context"]["phase"] == "intraday_trade"
+            assert "realtime_quote" in prompt["phase_context"]["required_inputs"]
             return {
                 "choices": [
                     {
@@ -2944,6 +2950,8 @@ def test_arena_llm_can_request_extra_data_dimensions_before_decision(
                     }
                 ]
             }
+        assert prompt["phase_context"]["phase"] == "intraday_trade"
+        assert "news" in prompt["phase_context"]["required_inputs"]
         assert "financial_indicator" in prompt["ai_data_request"]["requested_dimensions"]
         assert "pledge_stat" in prompt["ai_data_request"]["requested_dimensions"]
         return {

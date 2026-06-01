@@ -1450,6 +1450,21 @@ def test_arena_equity_curves_support_hourly_weekly_and_current_live_point(
                     created_at=datetime(2026, 5, 29, 10, 15),
                 )
             )
+            db.add(
+                ArenaRun(
+                    phase="intraday_trade",
+                    initial_cash=200000,
+                    leaderboard_payload=[
+                        {
+                            "agent_id": "legacy_ai",
+                            "agent_name": "旧模型",
+                            "total_assets": 240000,
+                            "return_ratio": 0.2,
+                        }
+                    ],
+                    created_at=datetime(2026, 5, 29, 11, 15),
+                )
+            )
         hourly_response = client.get(
             "/api/aniu/arena/equity-curves?interval=hourly&refresh_quotes=true",
             headers=headers,
@@ -1466,6 +1481,7 @@ def test_arena_equity_curves_support_hourly_weekly_and_current_live_point(
     assert curve["points"][-1]["value"] == 202000
     assert curve["points"][-1]["return_ratio"] == 0.01
     assert ":00" in curve["points"][-1]["trade_date"]
+    assert "legacy_ai" not in {item["agent_id"] for item in hourly_payload["curves"]}
 
     assert weekly_response.status_code == 200
     weekly_curve = next(item for item in weekly_response.json()["curves"] if item["agent_id"] == "curve_ai")

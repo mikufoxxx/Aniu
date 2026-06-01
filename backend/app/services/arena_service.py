@@ -1276,6 +1276,7 @@ class ArenaService:
             }
             for item in current_items
         }
+        active_agent_ids = set(curve_map)
 
         runs = db.scalars(
             select(ArenaRun)
@@ -1289,6 +1290,8 @@ class ArenaService:
                 if not isinstance(item, dict) or not item.get("agent_id"):
                     continue
                 agent_id = str(item["agent_id"])
+                if agent_id not in active_agent_ids:
+                    continue
                 agent = agent_by_id.get(agent_id, {})
                 curve = curve_map.setdefault(
                     agent_id,

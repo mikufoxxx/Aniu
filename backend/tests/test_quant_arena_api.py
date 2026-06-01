@@ -1539,6 +1539,61 @@ def test_arena_leaderboard_uses_schedule_time_for_delayed_morning_output(
     _reset_state()
 
 
+def test_arena_leaderboard_skips_oversized_morning_payloads(monkeypatch, tmp_path) -> None:
+    from app.db.models import ArenaRun
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(
+                ArenaAgentConfig(
+                    agent_id="oversized_ai",
+                    agent_name="Oversized AI",
+                    style="auto",
+                    provider="forecast-ai",
+                    model="gpt-5.5",
+                    enabled=True,
+                )
+            )
+            db.add(
+                ArenaAccount(
+                    agent_id="oversized_ai",
+                    agent_name="Oversized AI",
+                    style="auto",
+                    initial_cash=200000,
+                    cash=200000,
+                )
+            )
+            db.add(
+                ArenaRun(
+                    phase="morning_recommendation",
+                    initial_cash=200000,
+                    candidate_payload={
+                        "schedule_context": {
+                            "scheduled_at": "2026-06-01T08:00:00+08:00",
+                        },
+                        "agent_recommendations": [
+                            {
+                                "agent_id": "oversized_ai",
+                                "symbol": "000001.SZ",
+                                "picks": [{"symbol": "000001.SZ"}],
+                            }
+                        ],
+                        "candidates": ["X" * 2_100_000],
+                    },
+                    leaderboard_payload=[],
+                )
+            )
+        response = client.get("/api/aniu/arena/leaderboard", headers=headers)
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["agent_id"] == "oversized_ai"
+    assert item["latest_recommendation"] is None
+
+    _reset_state()
+
+
 def test_arena_equity_curves_support_hourly_weekly_and_current_live_point(
     monkeypatch,
     tmp_path,
@@ -2307,6 +2362,10 @@ def test_arena_morning_phase_records_agent_recommendations_without_orders(
     assert "资讯" in payload["agent_recommendations"][0]["reason"]
     assert stored_run.phase == "morning_recommendation"
     assert stored_run.candidate_payload["agent_recommendations"][0]["agent_id"] == "momentum_ai"
+    assert stored_run.candidate_payload["stock_pick_snapshot"] is None
+    assert "dataset" in stored_run.candidate_payload["agent_stock_pick_snapshots"]["momentum_ai"]
+    assert "context" not in stored_run.candidate_payload["agent_stock_pick_snapshots"]["momentum_ai"]
+    assert len(json.dumps(stored_run.candidate_payload, ensure_ascii=False)) < 30000
 
     _reset_state()
 

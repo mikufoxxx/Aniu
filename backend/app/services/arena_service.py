@@ -11,7 +11,7 @@ from threading import RLock
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
@@ -45,6 +45,9 @@ ARENA_LIVE_CACHE_TTL_SECONDS = 60
 ARENA_LIVE_REFRESH_CACHE_TTL_SECONDS = 10
 ARENA_EQUITY_RUN_LIMIT = 500
 ARENA_ORDER_FORECAST_CACHE_LIMIT = 100
+ARENA_STORED_CANDIDATE_LIMIT = 20
+ARENA_STORED_POOL_SYMBOL_LIMIT = 30
+ARENA_CANDIDATE_PAYLOAD_MAX_READ_BYTES = 2_000_000
 ARENA_SCHEDULE_TIMEZONE = ZoneInfo("Asia/Shanghai")
 ARENA_SCHEDULE_WINDOWS = (
     {
@@ -224,22 +227,16 @@ class ArenaService:
         data_sources = self._combined_data_sources(agent_candidate_contexts)
         candidate_pool_scope = self._candidate_pool_scope(agent_candidate_contexts)
         agent_candidate_pools = self._agent_candidate_pools(agent_candidate_contexts)
-        candidate_payload = {
-            "universe_size": len(candidates),
-            "candidate_count": len(candidates),
-            "data_sources": data_sources,
-            "candidates": candidates,
-            "candidate_pool_scope": candidate_pool_scope,
-            "agent_candidate_pools": agent_candidate_pools,
-            "stock_pick_snapshot": None,
-            "agent_stock_pick_snapshots": {
-                agent_id: context["stock_pick_snapshot"]
-                for agent_id, context in agent_candidate_contexts.items()
-            },
-            "agent_recommendations": [],
-            "schedule_context": schedule_context or {},
-            "phase_context": phase_context,
-        }
+        candidate_payload = self._stored_run_candidate_payload(
+            candidates=candidates,
+            data_sources=data_sources,
+            candidate_pool_scope=candidate_pool_scope,
+            agent_candidate_pools=agent_candidate_pools,
+            agent_candidate_contexts=agent_candidate_contexts,
+            schedule_context=schedule_context or {},
+            phase_context=phase_context,
+            agent_recommendations=[],
+        )
         arena_run = ArenaRun(
             phase=normalized_phase,
             initial_cash=effective_initial_cash,
@@ -644,18 +641,17 @@ class ArenaService:
 
     def _schedule_slot_completed(self, db: Session, *, slot_key: str) -> bool:
         since = self._utcnow() - timedelta(days=2)
-        runs = db.scalars(
-            select(ArenaRun)
-            .where(ArenaRun.created_at >= since)
+        matched_id = db.scalar(
+            select(ArenaRun.id)
+            .where(
+                ArenaRun.created_at >= since,
+                func.json_extract(ArenaRun.candidate_payload, "$.schedule_context.slot_key")
+                == slot_key,
+            )
             .order_by(ArenaRun.id.desc())
-            .limit(200)
-        ).all()
-        for run in runs:
-            payload = run.candidate_payload or {}
-            context = payload.get("schedule_context") or {}
-            if context.get("slot_key") == slot_key:
-                return True
-        return False
+            .limit(1)
+        )
+        return matched_id is not None
 
     def _build_agent_candidate_contexts(
         self,
@@ -863,6 +859,85 @@ class ArenaService:
                 seen.add(source)
                 sources.append(source)
         return sources
+
+    def _stored_run_candidate_payload(
+        self,
+        *,
+        candidates: list[dict[str, Any]],
+        data_sources: list[str],
+        candidate_pool_scope: dict[str, Any],
+        agent_candidate_pools: list[dict[str, Any]],
+        agent_candidate_contexts: dict[str, dict[str, Any]],
+        schedule_context: dict[str, Any],
+        phase_context: dict[str, Any],
+        agent_recommendations: list[dict[str, Any]],
+        agent_reviews: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "universe_size": len(candidates),
+            "candidate_count": len(candidates),
+            "data_sources": list(data_sources),
+            "candidates": [
+                self._compact_candidate_for_storage(candidate)
+                for candidate in candidates[:ARENA_STORED_CANDIDATE_LIMIT]
+            ],
+            "candidate_pool_scope": dict(candidate_pool_scope),
+            "agent_candidate_pools": self._compact_agent_candidate_pools(agent_candidate_pools),
+            "stock_pick_snapshot": None,
+            "agent_stock_pick_snapshots": {
+                agent_id: self._compact_stock_pick_snapshot(context.get("stock_pick_snapshot") or {})
+                for agent_id, context in agent_candidate_contexts.items()
+            },
+            "agent_recommendations": list(agent_recommendations),
+            "agent_reviews": list(agent_reviews or []),
+            "schedule_context": dict(schedule_context),
+            "phase_context": dict(phase_context),
+        }
+
+    def _compact_candidate_for_storage(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        payload = self._pick_payload(candidate)
+        payload["source"] = candidate.get("source")
+        payload["amount"] = candidate.get("amount")
+        payload["turnover"] = candidate.get("turnover")
+        payload["volume_ratio"] = candidate.get("volume_ratio")
+        return payload
+
+    def _compact_stock_pick_snapshot(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        dataset = snapshot.get("dataset") or {}
+        return {
+            "snapshot_id": snapshot.get("snapshot_id"),
+            "selection_mode": snapshot.get("selection_mode"),
+            "data_sources": list(snapshot.get("data_sources") or []),
+            "context_length": int(snapshot.get("context_length") or 0),
+            "recommendation_count": len(snapshot.get("recommendations") or []),
+            "dataset": {
+                "universe_size": int(dataset.get("universe_size") or 0),
+                "item_count": int(dataset.get("item_count") or 0),
+                "lookback_days": int(dataset.get("lookback_days") or 0),
+                "data_sources": list(dataset.get("data_sources") or []),
+                "coverage": dict(dataset.get("coverage") or {}),
+            },
+            "selection_plan": dict(snapshot.get("selection_plan") or {}),
+        }
+
+    def _compact_agent_candidate_pools(
+        self,
+        pools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        compact: list[dict[str, Any]] = []
+        for pool in pools:
+            symbols = [str(symbol) for symbol in pool.get("symbols") or [] if symbol]
+            compact.append(
+                {
+                    "agent_id": pool.get("agent_id"),
+                    "selection_mode": pool.get("selection_mode"),
+                    "snapshot_id": pool.get("snapshot_id"),
+                    "candidate_count": int(pool.get("candidate_count") or len(symbols)),
+                    "symbols": symbols[:ARENA_STORED_POOL_SYMBOL_LIMIT],
+                    "symbol_preview_count": min(len(symbols), ARENA_STORED_POOL_SYMBOL_LIMIT),
+                }
+            )
+        return compact
 
     def _morning_recommendations(
         self,
@@ -2887,7 +2962,10 @@ class ArenaService:
     ) -> list[dict[str, Any]]:
         runs = db.scalars(
             select(ArenaRun)
-            .where(ArenaRun.phase == "morning_recommendation")
+            .where(
+                ArenaRun.phase == "morning_recommendation",
+                func.length(ArenaRun.candidate_payload) <= ARENA_CANDIDATE_PAYLOAD_MAX_READ_BYTES,
+            )
             .order_by(ArenaRun.id.desc())
             .limit(max(1, min(limit * 5, 100)))
         ).all()
@@ -2929,7 +3007,10 @@ class ArenaService:
         recommendations = {agent_id: [] for agent_id in normalized_ids}
         runs = db.scalars(
             select(ArenaRun)
-            .where(ArenaRun.phase == "morning_recommendation")
+            .where(
+                ArenaRun.phase == "morning_recommendation",
+                func.length(ArenaRun.candidate_payload) <= ARENA_CANDIDATE_PAYLOAD_MAX_READ_BYTES,
+            )
             .order_by(ArenaRun.id.desc())
             .limit(max(10, min(len(normalized_ids) * per_agent_limit * 5, 100)))
         ).all()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
+import logging
 from pathlib import Path
 
 from sqlalchemy import create_engine, event, inspect, text
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 from app.db.models import Base
+
+logger = logging.getLogger(__name__)
 
 _engine = None
 _session_local = None
@@ -62,6 +65,7 @@ def init_db() -> None:
     _ensure_strategy_run_columns(engine)
     _ensure_run_event_columns(engine)
     _ensure_arena_run_columns(engine)
+    _compact_oversized_arena_run_payloads(engine)
     _ensure_arena_order_columns(engine)
     _ensure_daily_bar_columns(engine)
     _ensure_chat_session_indexes(engine)
@@ -499,6 +503,40 @@ def _ensure_arena_run_columns(engine) -> None:
                 "WHERE phase IS NULL OR trim(phase) = ''"
             )
         )
+
+
+def _compact_oversized_arena_run_payloads(engine) -> None:
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if "arena_runs" not in table_names:
+        return
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    UPDATE arena_runs
+                    SET candidate_payload = json_object(
+                        'universe_size', json_extract(candidate_payload, '$.universe_size'),
+                        'candidate_count', json_extract(candidate_payload, '$.candidate_count'),
+                        'data_sources', json(json_extract(candidate_payload, '$.data_sources')),
+                        'candidate_pool_scope', json(json_extract(candidate_payload, '$.candidate_pool_scope')),
+                        'agent_candidate_pools', json(json_extract(candidate_payload, '$.agent_candidate_pools')),
+                        'stock_pick_snapshot', NULL,
+                        'agent_stock_pick_snapshots', NULL,
+                        'agent_recommendations', json(json_extract(candidate_payload, '$.agent_recommendations')),
+                        'agent_reviews', json(json_extract(candidate_payload, '$.agent_reviews')),
+                        'schedule_context', json(json_extract(candidate_payload, '$.schedule_context')),
+                        'phase_context', json(json_extract(candidate_payload, '$.phase_context'))
+                    )
+                    WHERE candidate_payload IS NOT NULL
+                      AND length(candidate_payload) > 2000000
+                    """
+                )
+            )
+    except Exception as exc:
+        logger.warning("arena payload compaction skipped: %s", exc)
 
 
 def _ensure_run_event_indexes(engine) -> None:

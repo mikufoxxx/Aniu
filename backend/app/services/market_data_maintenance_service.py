@@ -70,6 +70,8 @@ class MarketDataMaintenanceService:
         symbols: list[str] | None = None,
         dataset_limit: int | None = None,
         report_type: str | None = None,
+        build_dataset: bool = False,
+        refresh_financials: bool = False,
         progress_callback=None,
     ) -> dict[str, Any]:
         settings = get_settings()
@@ -108,12 +110,14 @@ class MarketDataMaintenanceService:
             symbols=normalized_symbols,
             progress_callback=progress_callback,
         )
-        financial_symbols = normalized_symbols or self._full_market_financial_symbols(db)
-        financial_refresh = self._refresh_financial_indicators(
-            db,
-            financial_symbols,
-            progress_callback,
-        )
+        financial_refresh: dict[str, Any] | None = None
+        if refresh_financials:
+            financial_symbols = normalized_symbols or self._full_market_financial_symbols(db)
+            financial_refresh = self._refresh_financial_indicators(
+                db,
+                financial_symbols,
+                progress_callback,
+            )
         if progress_callback:
             progress_callback(
                 {
@@ -128,13 +132,24 @@ class MarketDataMaintenanceService:
                     ),
                 }
             )
-        dataset = quant_service.build_dataset(
-            db,
-            symbols=normalized_symbols,
-            limit=normalized_limit,
-            prefer_realtime=True,
-            lookback_days=normalized_lookback,
-        )
+        if build_dataset:
+            dataset = quant_service.build_dataset(
+                db,
+                symbols=normalized_symbols,
+                limit=normalized_limit,
+                prefer_realtime=True,
+                lookback_days=normalized_lookback,
+            )
+        else:
+            dataset = {
+                "status": "skipped",
+                "reason": "dataset_build_disabled_for_incremental_refresh",
+                "universe_size": 0,
+                "item_count": 0,
+                "items": [],
+                "coverage": {},
+                "data_sources": [],
+            }
         result: dict[str, Any] = {
             "status": "completed",
             "profile_refresh": profile_refresh,
@@ -142,7 +157,7 @@ class MarketDataMaintenanceService:
             "refresh": refresh,
             "dataset": dataset,
         }
-        if report_type:
+        if report_type and build_dataset:
             result["report"] = market_report_service.generate_report(
                 db,
                 report_type=report_type,
@@ -246,6 +261,8 @@ class MarketDataMaintenanceService:
         symbols: list[str] | None = None,
         dataset_limit: int | None = None,
         report_type: str | None = None,
+        build_dataset: bool = False,
+        refresh_financials: bool = False,
     ) -> dict[str, Any]:
         with self._job_lock:
             running = self._running_job_locked()
@@ -273,6 +290,8 @@ class MarketDataMaintenanceService:
                 "symbols": list(symbols) if symbols else None,
                 "dataset_limit": dataset_limit,
                 "report_type": report_type,
+                "build_dataset": build_dataset,
+                "refresh_financials": refresh_financials,
             },
             daemon=True,
         )
@@ -301,6 +320,8 @@ class MarketDataMaintenanceService:
         symbols: list[str] | None,
         dataset_limit: int | None,
         report_type: str | None,
+        build_dataset: bool,
+        refresh_financials: bool,
     ) -> None:
         with self._job_lock:
             if job_id in self._jobs:
@@ -314,6 +335,8 @@ class MarketDataMaintenanceService:
                     symbols=symbols,
                     dataset_limit=dataset_limit,
                     report_type=report_type,
+                    build_dataset=build_dataset,
+                    refresh_financials=refresh_financials,
                     progress_callback=lambda progress: self._update_job_progress(
                         job_id,
                         progress,

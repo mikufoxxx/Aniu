@@ -155,7 +155,8 @@ def test_market_data_maintenance_initial_backfill_uses_full_configured_window(
     ).strftime("%Y%m%d")
     assert response.status_code == 200
     assert captured["range"] == (expected_start, "20260528", None)
-    assert captured["dataset"] == (None, 1000, True, 1825)
+    assert "dataset" not in captured
+    assert response.json()["dataset"]["status"] == "skipped"
 
     _reset_state()
 
@@ -231,7 +232,8 @@ def test_market_data_maintenance_catches_up_after_latest_complete_date(
 
     assert response.status_code == 200
     assert captured["range"] == ("20260527", "20260528", None)
-    assert captured["dataset"] == (None, 1000, True, 1825)
+    assert "dataset" not in captured
+    assert response.json()["dataset"]["status"] == "skipped"
 
     _reset_state()
 
@@ -350,6 +352,8 @@ def test_market_data_maintenance_endpoint_refreshes_recent_range_and_dataset(
                 "symbols": ["000001.SZ", "600519.SH"],
                 "dataset_limit": 20,
                 "report_type": "closing",
+                "build_dataset": True,
+                "refresh_financials": True,
             },
         )
 
@@ -486,6 +490,8 @@ def test_market_data_maintenance_uses_coverage_gap_when_symbols_are_omitted(
                 "lookback_days": 120,
                 "dataset_limit": 50,
                 "report_type": "morning",
+                "build_dataset": True,
+                "refresh_financials": True,
             },
         )
 
@@ -581,6 +587,7 @@ def test_market_data_maintenance_history_records_quality_snapshot(
                 "lookback_days": 2,
                 "symbols": ["000001.SZ"],
                 "dataset_limit": 5,
+                "build_dataset": True,
             },
         )
         history_response = client.get(

@@ -301,6 +301,8 @@ def run_market_data_maintenance(
             symbols=payload.symbols,
             dataset_limit=payload.dataset_limit,
             report_type=payload.report_type,
+            build_dataset=payload.build_dataset,
+            refresh_financials=payload.refresh_financials,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -320,6 +322,8 @@ def start_market_data_maintenance_job(
             symbols=payload.symbols,
             dataset_limit=payload.dataset_limit,
             report_type=payload.report_type,
+            build_dataset=payload.build_dataset,
+            refresh_financials=payload.refresh_financials,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

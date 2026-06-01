@@ -34,6 +34,8 @@ _EASTMONEY_QUOTE_BATCH_SIZE = 80
 _SINA_QUOTE_BATCH_SIZE = 220
 _TENCENT_QUOTE_TIMEOUT_SECONDS = 3.0
 _EASY_TDX_TIMEOUT_SECONDS = 4.0
+_MAX_QUOTE_CACHE_KEYS = 64
+_MAX_INTRADAY_CACHE_KEYS = 160
 MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
@@ -264,10 +266,12 @@ class MarketDataService:
             ]
 
             with self._quote_cache_lock:
+                self._prune_quote_cache_locked()
                 self._quote_cache[cache_key] = [dict(item) for item in quotes]
                 self._quote_cache_expires_at[cache_key] = time.time() + max(
                     1, int(get_settings().realtime_quote_cache_ttl_seconds)
                 )
+                self._prune_quote_cache_locked()
             return [
                 dict(quote_by_symbol[symbol])
                 for symbol in requested_symbols
@@ -372,6 +376,9 @@ class MarketDataService:
             if not isinstance(self._quote_inflight_locks, dict):
                 self._quote_inflight_locks = {}
             if self._quote_cache_expires_at.get(cache_key, 0) <= now:
+                self._quote_cache.pop(cache_key, None)
+                self._quote_cache_expires_at.pop(cache_key, None)
+                self._quote_inflight_locks.pop(cache_key, None)
                 return None
             quote_by_symbol = {
                 normalize_symbol(str(item.get("symbol") or "")): dict(item)
@@ -438,17 +445,22 @@ class MarketDataService:
                 if self._is_newer_intraday_series(tencent_results, results):
                     results = tencent_results
             with self._intraday_cache_lock:
+                self._prune_intraday_cache_locked()
                 self._intraday_cache[cache_key] = [dict(item) for item in results]
                 self._intraday_cache_expires_at[cache_key] = time.time() + max(
                     1,
                     int(get_settings().realtime_quote_cache_ttl_seconds),
                 )
+                self._prune_intraday_cache_locked()
             return results
 
     def _cached_intraday_bars(self, cache_key: str) -> list[dict[str, Any]] | None:
         now = time.time()
         with self._intraday_cache_lock:
             if self._intraday_cache_expires_at.get(cache_key, 0) <= now:
+                self._intraday_cache.pop(cache_key, None)
+                self._intraday_cache_expires_at.pop(cache_key, None)
+                self._intraday_inflight_locks.pop(cache_key, None)
                 return None
             return [dict(item) for item in self._intraday_cache.get(cache_key, [])]
 
@@ -459,6 +471,56 @@ class MarketDataService:
                 lock = RLock()
                 self._intraday_inflight_locks[cache_key] = lock
             return lock
+
+    def _prune_quote_cache_locked(self) -> None:
+        now = time.time()
+        expired = [
+            key for key, expires_at in self._quote_cache_expires_at.items()
+            if expires_at <= now
+        ]
+        for key in expired:
+            self._quote_cache.pop(key, None)
+            self._quote_cache_expires_at.pop(key, None)
+            self._quote_inflight_locks.pop(key, None)
+        self._prune_cache_size_locked(
+            cache=self._quote_cache,
+            expires_at=self._quote_cache_expires_at,
+            locks=self._quote_inflight_locks,
+            max_keys=_MAX_QUOTE_CACHE_KEYS,
+        )
+
+    def _prune_intraday_cache_locked(self) -> None:
+        now = time.time()
+        expired = [
+            key for key, expires_at in self._intraday_cache_expires_at.items()
+            if expires_at <= now
+        ]
+        for key in expired:
+            self._intraday_cache.pop(key, None)
+            self._intraday_cache_expires_at.pop(key, None)
+            self._intraday_inflight_locks.pop(key, None)
+        self._prune_cache_size_locked(
+            cache=self._intraday_cache,
+            expires_at=self._intraday_cache_expires_at,
+            locks=self._intraday_inflight_locks,
+            max_keys=_MAX_INTRADAY_CACHE_KEYS,
+        )
+
+    def _prune_cache_size_locked(
+        self,
+        *,
+        cache: dict[str, list[dict[str, Any]]],
+        expires_at: dict[str, float],
+        locks: dict[str, RLock],
+        max_keys: int,
+    ) -> None:
+        overflow = len(cache) - max_keys
+        if overflow <= 0:
+            return
+        for key, _expires_at in sorted(expires_at.items(), key=lambda item: item[1])[:overflow]:
+            cache.pop(key, None)
+            expires_at.pop(key, None)
+            locks.pop(key, None)
 
     def _normalize_intraday_interval(self, interval: str) -> str:
         value = str(interval or "60m").strip().lower()

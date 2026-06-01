@@ -41,6 +41,10 @@ from app.services.settings_service import settings_service
 logger = logging.getLogger(__name__)
 
 ARENA_DEFAULT_INITIAL_CASH = 200000.0
+ARENA_LIVE_CACHE_TTL_SECONDS = 60
+ARENA_LIVE_REFRESH_CACHE_TTL_SECONDS = 10
+ARENA_EQUITY_RUN_LIMIT = 500
+ARENA_ORDER_FORECAST_CACHE_LIMIT = 100
 ARENA_SCHEDULE_TIMEZONE = ZoneInfo("Asia/Shanghai")
 ARENA_SCHEDULE_WINDOWS = (
     {
@@ -182,6 +186,7 @@ class ArenaService:
     def __init__(self) -> None:
         self._live_payload_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._live_payload_cache_lock = RLock()
+        self._live_payload_inflight_locks: dict[str, RLock] = {}
 
     def _utcnow(self) -> datetime:
         return datetime.now(UTC).replace(tzinfo=None)
@@ -1172,6 +1177,8 @@ class ArenaService:
             price_series=charts["price_series"],
         )
         self._order_forecast_cache[cache_key] = forecast
+        while len(self._order_forecast_cache) > ARENA_ORDER_FORECAST_CACHE_LIMIT:
+            self._order_forecast_cache.pop(next(iter(self._order_forecast_cache)))
         return forecast
 
     def _order_forecast_cache_key(self, order_id: int) -> str:
@@ -1303,13 +1310,22 @@ class ArenaService:
         cached = self._cached_live_payload(cache_key)
         if cached is not None:
             return cached
-        items = self._leaderboard_items(
-            db,
-            include_latest_recommendation=True,
-            refresh_quotes=refresh_quotes,
-        )
-        items.sort(key=lambda item: item["total_assets"], reverse=True)
-        return self._store_live_payload(cache_key, {"items": items})
+        lock = self._live_payload_inflight_lock(cache_key)
+        with lock:
+            cached = self._cached_live_payload(cache_key)
+            if cached is not None:
+                return cached
+            items = self._leaderboard_items(
+                db,
+                include_latest_recommendation=True,
+                refresh_quotes=refresh_quotes,
+            )
+            items.sort(key=lambda item: item["total_assets"], reverse=True)
+            return self._store_live_payload(
+                cache_key,
+                {"items": items},
+                ttl_seconds=self._live_payload_ttl(refresh_quotes=refresh_quotes),
+            )
 
     def equity_curves(
         self,
@@ -1326,6 +1342,28 @@ class ArenaService:
         cached = self._cached_live_payload(cache_key)
         if cached is not None:
             return cached
+        lock = self._live_payload_inflight_lock(cache_key)
+        with lock:
+            cached = self._cached_live_payload(cache_key)
+            if cached is not None:
+                return cached
+            return self._build_equity_curves_payload(
+                db,
+                interval=normalized_interval,
+                refresh_quotes=refresh_quotes,
+                current_items=current_items,
+                cache_key=cache_key,
+            )
+
+    def _build_equity_curves_payload(
+        self,
+        db: Session,
+        *,
+        interval: str,
+        refresh_quotes: bool,
+        current_items: list[dict[str, Any]] | None,
+        cache_key: str,
+    ) -> dict[str, Any]:
 
         now = datetime.now(ARENA_SCHEDULE_TIMEZONE)
         agents = self.list_agents(db)["agents"]
@@ -1353,11 +1391,12 @@ class ArenaService:
         runs = db.scalars(
             select(ArenaRun)
             .where(ArenaRun.leaderboard_payload.is_not(None))
-            .order_by(ArenaRun.id)
+            .order_by(ArenaRun.id.desc())
+            .limit(ARENA_EQUITY_RUN_LIMIT)
         ).all()
-        for run in runs:
+        for run in reversed(runs):
             created_at = self._local_time(run.created_at)
-            bucket = self._equity_bucket(created_at, normalized_interval)
+            bucket = self._equity_bucket(created_at, interval)
             for item in run.leaderboard_payload or []:
                 if not isinstance(item, dict) or not item.get("agent_id"):
                     continue
@@ -1380,7 +1419,7 @@ class ArenaService:
                     "return_ratio": round(self._number(item.get("return_ratio")), 6),
                 }
 
-        current_bucket = self._equity_bucket(now, normalized_interval)
+        current_bucket = self._equity_bucket(now, interval)
         for item in current_items:
             agent_id = str(item["agent_id"])
             curve = curve_map.setdefault(
@@ -1416,10 +1455,10 @@ class ArenaService:
             )
         curves.sort(key=lambda curve: current_order.get(str(curve["agent_id"]), 10_000))
         return self._store_live_payload(cache_key, {
-            "interval": normalized_interval,
+            "interval": interval,
             "refreshed_at": now.isoformat(),
             "curves": curves,
-        })
+        }, ttl_seconds=self._live_payload_ttl(refresh_quotes=refresh_quotes))
 
     def _cached_live_payload(self, cache_key: str) -> dict[str, Any] | None:
         now = time.time()
@@ -1430,6 +1469,7 @@ class ArenaService:
             expires_at, payload = cached
             if expires_at <= now:
                 self._live_payload_cache.pop(cache_key, None)
+                self._live_payload_inflight_locks.pop(cache_key, None)
                 return None
             return deepcopy(payload)
 
@@ -1437,11 +1477,14 @@ class ArenaService:
         self,
         cache_key: str,
         payload: dict[str, Any],
+        *,
+        ttl_seconds: int | None = None,
     ) -> dict[str, Any]:
-        ttl_seconds = max(1, int(get_settings().realtime_quote_cache_ttl_seconds))
+        ttl = max(1, int(ttl_seconds or get_settings().realtime_quote_cache_ttl_seconds))
         with self._live_payload_cache_lock:
+            self._prune_live_payload_cache_locked()
             self._live_payload_cache[cache_key] = (
-                time.time() + ttl_seconds,
+                time.time() + ttl,
                 deepcopy(payload),
             )
         return payload
@@ -1449,6 +1492,33 @@ class ArenaService:
     def _invalidate_live_payload_cache(self) -> None:
         with self._live_payload_cache_lock:
             self._live_payload_cache.clear()
+            self._live_payload_inflight_locks.clear()
+
+    def _live_payload_ttl(self, *, refresh_quotes: bool) -> int:
+        if refresh_quotes:
+            return max(
+                ARENA_LIVE_REFRESH_CACHE_TTL_SECONDS,
+                int(get_settings().realtime_quote_cache_ttl_seconds),
+            )
+        return ARENA_LIVE_CACHE_TTL_SECONDS
+
+    def _live_payload_inflight_lock(self, cache_key: str) -> RLock:
+        with self._live_payload_cache_lock:
+            lock = self._live_payload_inflight_locks.get(cache_key)
+            if lock is None:
+                lock = RLock()
+                self._live_payload_inflight_locks[cache_key] = lock
+            return lock
+
+    def _prune_live_payload_cache_locked(self) -> None:
+        now = time.time()
+        expired = [
+            key for key, (expires_at, _payload) in self._live_payload_cache.items()
+            if expires_at <= now
+        ]
+        for key in expired:
+            self._live_payload_cache.pop(key, None)
+            self._live_payload_inflight_locks.pop(key, None)
 
     def _leaderboard_items(
         self,

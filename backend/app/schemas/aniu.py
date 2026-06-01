@@ -562,6 +562,8 @@ class MarketDataMaintenanceRunRequest(BaseModel):
     symbols: list[str] | None = None
     dataset_limit: int = Field(default=1000, ge=1, le=1000)
     report_type: Literal["morning", "closing"] | None = None
+    build_dataset: bool = False
+    refresh_financials: bool = False
 
 
 class MarketDataMaintenanceRunResponse(BaseModel):
@@ -569,7 +571,7 @@ class MarketDataMaintenanceRunResponse(BaseModel):
     profile_refresh: dict[str, Any] | None = None
     financial_refresh: dict[str, Any] | None = None
     refresh: DailyRangeRefreshResponse
-    dataset: QuantDatasetResponse
+    dataset: QuantDatasetResponse | dict[str, Any]
     report: MarketReportRead | None = None
 
 

@@ -83,17 +83,59 @@ def test_market_source_health_exposes_all_data_tiers(monkeypatch, tmp_path) -> N
     tiers = {item["tier"] for item in payload["sources"]}
     assert {"daily", "low_frequency", "quasi_high_frequency", "supplemental"} <= tiers
     assert payload["recommended_usage"]["daily"] == "Tushare"
-    assert payload["recommended_usage"]["quasi_high_frequency"] == "easy-tdx"
+    assert payload["recommended_usage"]["quasi_high_frequency"] == "easy-tdx quote/kline"
 
     _reset_state()
 
 
 def test_page_overview_endpoints_collapse_initial_requests(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+
+    calls: list[tuple[tuple[str, ...], bool]] = []
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        calls.append((tuple(symbols), prefer_realtime))
+        return []
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
+        with session_scope() as db:
+            db.add(
+                ArenaAgentConfig(
+                    agent_id="overview_ai",
+                    agent_name="Overview AI",
+                    style="auto",
+                    provider="forecast-ai",
+                    model="gpt-5.5",
+                    enabled=True,
+                )
+            )
+            account = ArenaAccount(
+                agent_id="overview_ai",
+                agent_name="Overview AI",
+                style="auto",
+                initial_cash=200000,
+                cash=100000,
+            )
+            account.positions.append(
+                ArenaPosition(
+                    symbol="000001.SZ",
+                    name="平安银行",
+                    quantity=1000,
+                    avg_cost=10,
+                    last_price=10,
+                )
+            )
+            db.add(account)
         data_response = client.get("/api/aniu/data-lab/overview", headers=headers)
         arena_response = client.get(
             "/api/aniu/arena/overview?interval=daily&refresh_quotes=false",
+            headers=headers,
+        )
+        refresh_response = client.get(
+            "/api/aniu/arena/overview?interval=daily&refresh_quotes=true",
             headers=headers,
         )
 
@@ -106,6 +148,8 @@ def test_page_overview_endpoints_collapse_initial_requests(monkeypatch, tmp_path
     arena_payload = arena_response.json()
     assert {"agents", "ai_config", "leaderboard", "equity_curves", "arena_initial_cash"} <= set(arena_payload)
     assert arena_payload["equity_curves"]["interval"] == "daily"
+    assert refresh_response.status_code == 200
+    assert calls == [(("000001.SZ",), False)]
 
     _reset_state()
 

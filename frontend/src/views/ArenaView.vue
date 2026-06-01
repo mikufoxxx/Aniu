@@ -14,7 +14,7 @@
               <span class="material-symbols-rounded" aria-hidden="true">person_add</span>
               新增 AI
             </button>
-            <button class="button ghost small" :disabled="loading" @click="loadArenaState()">
+            <button class="button ghost small" :disabled="loading" @click="loadArenaState(false, true)">
               <span class="material-symbols-rounded" aria-hidden="true">sync</span>
               刷新
             </button>
@@ -316,7 +316,7 @@ const equityChartCurves = computed(() => {
   }))
 })
 
-async function loadArenaState(silent = false): Promise<void> {
+async function loadArenaState(silent = false, refreshQuotes = false): Promise<void> {
   if (arenaLoading) return
   arenaLoading = true
   if (!silent) {
@@ -324,7 +324,7 @@ async function loadArenaState(silent = false): Promise<void> {
     errorMessage.value = ''
   }
   try {
-    const payload = await api.getArenaOverview(equityInterval.value, true)
+    const payload = await api.getArenaOverview(equityInterval.value, refreshQuotes)
     agents.value = payload.agents.map(normalizeAgent)
     leaderboard.value = payload.leaderboard
     aiConfig.value = payload.ai_config
@@ -365,7 +365,7 @@ async function saveAgents(): Promise<void> {
   try {
     const payload = await api.updateArenaAgents({ agents: agents.value })
     agents.value = payload.agents.map(normalizeAgent)
-    await loadArenaState()
+    await loadArenaState(false, true)
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'AI 配置保存失败。'
   } finally {
@@ -476,7 +476,7 @@ onMounted(() => {
   loadArenaState()
   arenaRefreshTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') void loadArenaState(true)
-  }, 30000)
+  }, 60000)
 })
 
 onBeforeUnmount(() => {

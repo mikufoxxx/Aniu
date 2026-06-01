@@ -140,6 +140,53 @@ def test_eastmoney_intraday_current_bar_time_is_not_displayed_as_future(monkeypa
     assert bars[0]["timestamp"] == "2026-06-01 13:06"
 
 
+def test_intraday_bars_fall_back_to_tencent_minutes_when_eastmoney_fails(monkeypatch) -> None:
+    import httpx
+
+    from app.services import market_data_service as module
+    from app.services.market_data_service import market_data_service
+
+    class FakeTencentResponse:
+        text = (
+            'm5_today={"code":0,"msg":"","data":{"sz000001":{"m5":['
+            '["202606011305","10.91","10.91","10.93","10.90","15460.00",{},"0.80"],'
+            '["202606011310","10.91","10.91","10.92","10.90","6324.00",{},"0.33"],'
+            '["202606011315","10.91","10.92","10.93","10.91","17435.00",{},"0.90"]'
+            ']}}}'
+        )
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(url: str, **kwargs):
+        if "push2his.eastmoney.com" in url:
+            raise httpx.RemoteProtocolError("disconnect")
+        assert url == "http://ifzq.gtimg.cn/appstock/app/kline/mkline"
+        assert kwargs["params"]["param"] == "sz000001,m5,,24"
+        return FakeTencentResponse()
+
+    monkeypatch.setattr(module.httpx, "get", fake_get)
+    market_data_service._intraday_cache = {}
+    market_data_service._intraday_cache_expires_at = {}
+
+    bars = market_data_service.get_intraday_bars("000001.SZ", interval="hourly", limit=2)
+
+    assert bars == [
+        {
+            "trade_date": "2026-06-01 13:15",
+            "open": 10.91,
+            "high": 10.93,
+            "low": 10.9,
+            "close": 10.92,
+            "volume": 39219.0,
+            "amount": 0.0,
+            "source": "tencent_m5_aggregated",
+            "timestamp": "2026-06-01 13:15",
+            "is_realtime": False,
+        }
+    ]
+
+
 def test_tencent_quotes_are_requested_in_batches(monkeypatch) -> None:
     from app.services import market_data_service as module
     from app.services.market_data_service import market_data_service

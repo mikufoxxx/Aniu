@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import math
 import shutil
 import subprocess
@@ -146,7 +147,7 @@ class MarketDataService:
                 "tier": "low_frequency",
                 "status": "available",
                 "cadence": "30-60 秒快照/60 分钟 K 线",
-                "risk": "免费接口，需要限频和缓存。",
+                "risk": "免费接口，需要限频和缓存；小时线会用腾讯分钟线兜底。",
             },
             {
                 "id": "easy_tdx",
@@ -259,6 +260,12 @@ class MarketDataService:
             klt=klt,
             limit=normalized_limit,
         )
+        if not results:
+            results = self._get_tencent_intraday_bars(
+                normalized_symbol,
+                klt=klt,
+                limit=normalized_limit,
+            )
         self._intraday_cache[cache_key] = [dict(item) for item in results]
         self._intraday_cache_expires_at[cache_key] = now + max(
             1,
@@ -347,6 +354,114 @@ class MarketDataService:
                 }
             )
         return rows
+
+    def _get_tencent_intraday_bars(
+        self,
+        symbol: str,
+        *,
+        klt: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if klt == "60":
+            minute_type = "m5"
+            raw_limit = min(max(limit * 12, 12), 640)
+        elif klt in {"1", "5", "15", "30"}:
+            minute_type = f"m{klt}"
+            raw_limit = min(max(limit, 1), 640)
+        else:
+            return []
+        tencent_symbol = symbol_to_tencent(symbol)
+        params = {
+            "param": f"{tencent_symbol},{minute_type},,{raw_limit}",
+            "_var": f"{minute_type}_today",
+            "r": str(time.time()),
+        }
+        try:
+            response = httpx.get(
+                "http://ifzq.gtimg.cn/appstock/app/kline/mkline",
+                params=params,
+                timeout=8.0,
+                follow_redirects=True,
+                headers={"User-Agent": "Aniu/1.0"},
+            )
+            response.raise_for_status()
+            text = response.text
+            payload = json.loads(text.split("=", 1)[1] if "=" in text else text)
+        except Exception:
+            return []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        symbol_data = data.get(tencent_symbol) if isinstance(data, dict) else None
+        rows = symbol_data.get(minute_type) if isinstance(symbol_data, dict) else None
+        if not isinstance(rows, list):
+            return []
+        minute_rows = self._parse_tencent_minute_rows(rows)
+        if klt == "60":
+            return self._aggregate_tencent_minutes_to_hourly(minute_rows)[-limit:]
+        return minute_rows[-limit:]
+
+    def _parse_tencent_minute_rows(self, rows: list[Any]) -> list[dict[str, Any]]:
+        parsed: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, list) or len(row) < 6:
+                continue
+            try:
+                trade_time = datetime.strptime(str(row[0]), "%Y%m%d%H%M")
+            except ValueError:
+                continue
+            open_price = _parse_float(row[1])
+            close_price = _parse_float(row[2])
+            high_price = _parse_float(row[3])
+            low_price = _parse_float(row[4])
+            if close_price is None:
+                continue
+            display_time = trade_time.strftime("%Y-%m-%d %H:%M")
+            parsed.append(
+                {
+                    "trade_date": display_time,
+                    "open": round(open_price if open_price is not None else close_price, 4),
+                    "high": round(high_price if high_price is not None else close_price, 4),
+                    "low": round(low_price if low_price is not None else close_price, 4),
+                    "close": round(close_price, 4),
+                    "volume": float(_parse_float(row[5]) or 0),
+                    "amount": 0.0,
+                    "source": "tencent_minute",
+                    "timestamp": display_time,
+                    "is_realtime": False,
+                }
+            )
+        return parsed
+
+    def _aggregate_tencent_minutes_to_hourly(
+        self,
+        minute_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        buckets: dict[str, dict[str, Any]] = {}
+        for row in minute_rows:
+            trade_date = str(row.get("trade_date") or "")
+            bucket_key = trade_date[:13]
+            current = buckets.get(bucket_key)
+            if current is None:
+                buckets[bucket_key] = {
+                    "trade_date": trade_date,
+                    "open": row["open"],
+                    "high": row["high"],
+                    "low": row["low"],
+                    "close": row["close"],
+                    "volume": row["volume"],
+                    "amount": row["amount"],
+                    "source": "tencent_m5_aggregated",
+                    "timestamp": trade_date,
+                    "is_realtime": False,
+                }
+                continue
+            current["trade_date"] = trade_date
+            current["high"] = max(float(current["high"]), float(row["high"]))
+            current["low"] = min(float(current["low"]), float(row["low"]))
+            current["close"] = row["close"]
+            current["volume"] = float(current["volume"]) + float(row["volume"])
+            current["amount"] = float(current["amount"]) + float(row["amount"])
+            current["timestamp"] = trade_date
+        return list(buckets.values())
 
     def _get_easy_tdx_quotes(self, symbols: list[str]) -> list[dict[str, Any]]:
         if not shutil.which("easy-tdx"):

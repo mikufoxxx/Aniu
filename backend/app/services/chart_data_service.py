@@ -192,6 +192,7 @@ class ChartDataService:
             "forecast_actual_comparison": self.forecast_actual_comparison(
                 price_series=series,
                 forecast_series=forecast,
+                frozen=False,
             ),
         }
 
@@ -248,6 +249,7 @@ class ChartDataService:
             "forecast_actual_comparison": self.forecast_actual_comparison(
                 price_series=series,
                 forecast_series=forecast,
+                frozen=bool(frozen_snapshot),
             ),
             "data_summary": self.chart_data_summary(
                 price_series=series,
@@ -304,6 +306,7 @@ class ChartDataService:
         *,
         price_series: list[dict[str, Any]],
         forecast_series: list[dict[str, Any]],
+        frozen: bool = False,
     ) -> dict[str, Any]:
         if not price_series or not forecast_series:
             return {"matched_points": [], "latest_error_pct": None, "summary": "暂无可对照数据。"}
@@ -334,9 +337,11 @@ class ChartDataService:
         latest = matched[-1] if matched else None
         if latest is None:
             latest_actual = price_series[-1]
+            label = "冻结预测" if frozen else "预测线"
+            suffix = "尚未命中预测日期" if frozen else "从下一交易日开始，尚无实际收盘点可对照"
             summary = (
-                f"预测已冻结，当前最新实际点为 {latest_actual.get('trade_date')} "
-                f"{latest_actual.get('close')}，尚未命中预测日期。"
+                f"{label}当前最新实际点为 {latest_actual.get('trade_date')} "
+                f"{latest_actual.get('close')}，{suffix}。"
             )
         else:
             summary = (

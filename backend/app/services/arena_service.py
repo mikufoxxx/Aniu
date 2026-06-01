@@ -3175,6 +3175,7 @@ class ArenaService:
                 prediction["actual_comparison"] = chart_data_service.forecast_actual_comparison(
                     price_series=series,
                     forecast_series=forecast,
+                    frozen=bool(prediction.get("frozen")),
                 )
             except Exception as exc:
                 prediction["actual_comparison"] = {

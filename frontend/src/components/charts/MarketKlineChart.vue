@@ -6,6 +6,9 @@
         <span>{{ subtitle }}</span>
       </div>
       <div class="chart-legend">
+        <span v-if="latestRealtimePoint" class="chart-live-pill">
+          实时 {{ latestRealtimePoint.source || 'quote' }} {{ latestRealtimePoint.trade_date }}
+        </span>
         <span>MA5</span>
         <span>MA20</span>
         <span>成交额</span>
@@ -60,6 +63,10 @@ const selectedPriceSeries = computed(() => {
   return props.intervalSeries?.[activeInterval.value]?.length
     ? props.intervalSeries[activeInterval.value]
     : props.priceSeries
+})
+const latestRealtimePoint = computed(() => {
+  const point = props.priceSeries[props.priceSeries.length - 1]
+  return point?.is_realtime ? point : null
 })
 
 function resize(): void {

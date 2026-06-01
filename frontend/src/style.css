@@ -117,6 +117,15 @@ textarea {
   flex: 0 0 auto;
 }
 
+.chart-legend .chart-live-pill {
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  background: #f0fdf4;
+  color: #15803d;
+  padding: 2px 7px;
+  font-weight: 700;
+}
+
 .chart-interval-controls {
   display: inline-flex;
   gap: 4px;

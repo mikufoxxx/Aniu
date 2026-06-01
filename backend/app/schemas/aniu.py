@@ -625,6 +625,9 @@ class PriceSeriesPointRead(BaseModel):
     close: float
     volume: float = 0.0
     amount: float = 0.0
+    source: str | None = None
+    timestamp: str | None = None
+    is_realtime: bool = False
     ma5: float | None = None
     ma20: float | None = None
     rsi14: float | None = None

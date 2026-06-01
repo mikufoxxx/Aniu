@@ -1017,6 +1017,56 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
     _reset_state()
 
 
+def test_order_charts_append_realtime_quote_after_latest_daily_bar(monkeypatch, tmp_path) -> None:
+    from app.services.chart_data_service import chart_data_service
+    from app.services.market_data_service import market_data_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        assert symbols == ["601138.SH"]
+        assert prefer_realtime is True
+        return [
+            {
+                "symbol": "601138.SH",
+                "name": "工业富联",
+                "price": 74.55,
+                "change_pct": 1.56,
+                "amount": 11_264_904_192,
+                "source": "easy_tdx",
+                "timestamp": "2026-06-01 10:31:22",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            db.add(DailyBar(symbol="601138.SH", trade_date="20260528", open=70, high=72, low=69, close=71, amount=800))
+            db.add(DailyBar(symbol="601138.SH", trade_date="20260529", open=72, high=74, low=71, close=73.4, amount=900))
+        with session_scope() as db:
+            charts = chart_data_service.order_charts(
+                db,
+                symbol="601138.SH",
+                action="BUY",
+                trade_date="20260601",
+                price=74.4,
+                quantity=800,
+            )
+
+    assert [point["trade_date"] for point in charts["price_series"]] == [
+        "20260528",
+        "20260529",
+        "20260601",
+    ]
+    latest = charts["price_series"][-1]
+    assert latest["close"] == 74.55
+    assert latest["is_realtime"] is True
+    assert latest["source"] == "easy_tdx"
+    assert charts["interval_series"]["daily"] == charts["price_series"]
+    assert charts["forecast_series"][0]["trade_date"] > "20260601"
+
+    _reset_state()
+
+
 def test_quant_dataset_uses_most_complete_stored_trade_date(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 
@@ -1180,10 +1230,11 @@ def test_arena_run_reuses_autonomous_stock_pick_snapshot(
         ["600519.SH", "000001.SZ", "300750.SZ"],
         ["600519.SH", "000001.SZ", "300750.SZ"],
     ]
-    assert captured_calls[2:] == [
+    assert captured_calls[2:4] == [
         ["600519.SH", "000001.SZ", "300750.SZ"],
         ["600519.SH", "000001.SZ", "300750.SZ"],
     ]
+    assert all(len(call) == 1 for call in captured_calls[4:])
     assert payload["candidate_count"] == 3
     for order in payload["orders"]:
         context = order["decision_context"]
@@ -1999,7 +2050,10 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
         "20260526",
         "20260527",
         "20260528",
+        "20260529",
     ]
+    assert payload["charts"]["price_series"][-1]["is_realtime"] is True
+    assert payload["charts"]["price_series"][-1]["source"] == "easy_tdx"
     assert payload["charts"]["signal_markers"][0]["action"] == payload["action"]
     assert payload["charts"]["signal_markers"][0]["symbol"] == "000001.SZ"
     assert payload["charts"]["factor_radar"]

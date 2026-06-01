@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import DailyBar
-from app.services.market_data_service import normalize_symbol
+from app.services.market_data_service import market_data_service, normalize_symbol
 
 
 class ChartDataService:
@@ -72,6 +72,26 @@ class ChartDataService:
             )
         return points
 
+    def price_series_with_realtime(
+        self,
+        db: Session,
+        *,
+        symbol: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 120,
+    ) -> list[dict[str, Any]]:
+        series = self.price_series(
+            db,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+        if end_date:
+            return series
+        return self._merge_realtime_quote(series, symbol=symbol)
+
     def strategy_charts(
         self,
         *,
@@ -110,7 +130,7 @@ class ChartDataService:
         quantity: int,
         factor_scores: dict[str, Any],
     ) -> dict[str, Any]:
-        series = self.price_series(db, symbol=symbol, limit=90)
+        series = self.price_series_with_realtime(db, symbol=symbol, limit=90)
         trade_date = series[-1]["trade_date"] if series else None
         marker_price = float(price or (series[-1]["close"] if series else 0))
         return {
@@ -146,7 +166,7 @@ class ChartDataService:
         price: float,
         quantity: int,
     ) -> dict[str, Any]:
-        series = self.price_series(db, symbol=symbol, limit=90)
+        series = self.price_series_with_realtime(db, symbol=symbol, limit=90)
         return {
             "price_series": series,
             "interval_series": self.interval_series(series),
@@ -401,6 +421,108 @@ class ChartDataService:
             }
             for trade_date, value in zip(trade_dates, values)
         ]
+
+    def _merge_realtime_quote(
+        self,
+        price_series: list[dict[str, Any]],
+        *,
+        symbol: str,
+    ) -> list[dict[str, Any]]:
+        try:
+            quotes = market_data_service.get_quotes([normalize_symbol(symbol)], prefer_realtime=True)
+        except Exception:
+            return price_series
+        if not quotes:
+            return price_series
+        quote = quotes[0]
+        if str(quote.get("source") or "") == "fallback":
+            return price_series
+        price = self._safe_float(quote.get("price"))
+        if price is None or price <= 0:
+            return price_series
+        quote_date = self._quote_trade_date(quote)
+        if not quote_date:
+            return price_series
+
+        rows = [self._raw_price_row(point) for point in price_series]
+        latest_date = str(rows[-1].get("trade_date") or "") if rows else ""
+        realtime_row = self._realtime_price_row(
+            quote=quote,
+            quote_date=quote_date,
+            price=price,
+            previous=rows[-1] if rows else None,
+        )
+        if latest_date == quote_date:
+            rows[-1] = {**rows[-1], **realtime_row}
+        elif not latest_date or quote_date > latest_date:
+            rows.append(realtime_row)
+        else:
+            return price_series
+        return self._enrich_price_points(rows)
+
+    def _realtime_price_row(
+        self,
+        *,
+        quote: dict[str, Any],
+        quote_date: str,
+        price: float,
+        previous: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        previous_close = self._safe_float(previous.get("close")) if previous else None
+        change_pct = self._safe_float(quote.get("change_pct"))
+        estimated_prev_close = None
+        if change_pct is not None and change_pct > -99.0:
+            estimated_prev_close = price / (1 + change_pct / 100)
+        open_price = estimated_prev_close or previous_close or price
+        high_candidates = [open_price, price]
+        low_candidates = [open_price, price]
+        if previous_close is not None:
+            high_candidates.append(previous_close)
+            low_candidates.append(previous_close)
+        return {
+            "trade_date": quote_date,
+            "open": round(open_price, 4),
+            "high": round(max(high_candidates), 4),
+            "low": round(min(low_candidates), 4),
+            "close": round(price, 4),
+            "volume": 0.0,
+            "amount": float(self._safe_float(quote.get("amount")) or 0),
+            "source": str(quote.get("source") or "realtime"),
+            "timestamp": str(quote.get("timestamp") or ""),
+            "is_realtime": True,
+        }
+
+    def _raw_price_row(self, point: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "trade_date": str(point.get("trade_date") or ""),
+            "open": float(point.get("open") or point.get("close") or 0),
+            "high": float(point.get("high") or point.get("close") or 0),
+            "low": float(point.get("low") or point.get("close") or 0),
+            "close": float(point.get("close") or 0),
+            "volume": float(point.get("volume") or 0),
+            "amount": float(point.get("amount") or 0),
+            "source": point.get("source"),
+            "timestamp": point.get("timestamp"),
+            "is_realtime": bool(point.get("is_realtime")),
+        }
+
+    def _quote_trade_date(self, quote: dict[str, Any]) -> str | None:
+        timestamp = str(quote.get("timestamp") or "").strip()
+        digits = "".join(char for char in timestamp if char.isdigit())
+        if len(digits) >= 8:
+            return digits[:8]
+        return datetime.now().strftime("%Y%m%d")
+
+    def _safe_float(self, value: Any) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(numeric):
+            return None
+        return numeric
 
     def drawdown_curve_from_values(
         self,

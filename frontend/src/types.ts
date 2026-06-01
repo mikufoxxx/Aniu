@@ -567,6 +567,9 @@ export interface PriceSeriesPoint {
   close: number
   volume: number
   amount: number
+  source?: string | null
+  timestamp?: string | null
+  is_realtime?: boolean
   ma5?: number | null
   ma20?: number | null
   rsi14?: number | null

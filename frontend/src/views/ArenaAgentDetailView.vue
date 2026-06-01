@@ -109,95 +109,6 @@
                 :forecast-series="order.charts.forecast_series"
                 :markers="order.charts.trade_markers"
               />
-              <section class="ai-forecast-panel">
-                <div class="ai-forecast-head">
-                  <div>
-                    <strong>多模型专业预测</strong>
-                    <span>趋势、关键价位、买卖区间和失效条件</span>
-                  </div>
-                  <button
-                    class="button ghost small soft-header-button"
-                    :disabled="isForecastLoading(order.id)"
-                    @click.stop="loadOrderForecast(order.id, true)"
-                  >
-                    <span class="material-symbols-rounded" aria-hidden="true">psychology</span>
-                    {{ isForecastLoading(order.id) ? '分析中…' : '刷新预测' }}
-                  </button>
-                </div>
-                <p v-if="orderForecasts[order.id]" class="ai-forecast-summary">
-                  {{ orderForecasts[order.id].quantitative_summary }}
-                </p>
-                <div v-if="orderForecasts[order.id]" class="ai-forecast-config">
-                  <span>接口 {{ orderForecasts[order.id].ai_config.base_url || '--' }}</span>
-                  <span>Key {{ apiKeyStatus(orderForecasts[order.id].ai_config.api_key_configured, orderForecasts[order.id].ai_config.api_key_masked) }}</span>
-                  <span>模型 {{ modelConfigText(orderForecasts[order.id].ai_config.models) }}</span>
-                  <span>生成 {{ generatedAtText(orderForecasts[order.id].generated_at) }}</span>
-                </div>
-                <div v-if="isForecastLoading(order.id)" class="ai-forecast-loading">
-                  正在让 5 个模型基于同一份量化底稿独立预测…
-                </div>
-                <div v-else-if="orderForecastErrors[order.id]" class="ai-forecast-error">
-                  {{ orderForecastErrors[order.id] }}
-                </div>
-                <template v-else-if="orderForecasts[order.id]">
-                  <div class="ai-forecast-context">
-                    <span>置信 {{ technicalText(orderForecasts[order.id].technical_context.confidence) }}</span>
-                    <span>支撑 {{ technicalPrice(orderForecasts[order.id].technical_context.support) }}</span>
-                    <span>压力 {{ technicalPrice(orderForecasts[order.id].technical_context.resistance) }}</span>
-                    <span>波动 {{ technicalText(orderForecasts[order.id].technical_context.volatility_20d_pct, '%') }}</span>
-                  </div>
-                  <div class="ai-forecast-model-grid">
-                    <article
-                      v-for="forecast in orderForecasts[order.id].model_forecasts"
-                      :key="forecast.model"
-                      class="ai-forecast-card"
-                    >
-                      <div class="ai-forecast-card-head">
-                        <strong>{{ forecast.model }}</strong>
-                        <span :class="['ai-direction-pill', directionClass(forecast.direction)]">
-                          {{ forecast.direction_label }} · {{ forecast.confidence.toFixed(0) }}
-                        </span>
-                      </div>
-                      <div class="ai-forecast-card-config">
-                        <span>接口 {{ orderForecasts[order.id].ai_config.base_url || '--' }}</span>
-                        <span>Key {{ apiKeyStatus(orderForecasts[order.id].ai_config.api_key_configured, orderForecasts[order.id].ai_config.api_key_masked) }}</span>
-                        <span>生成 {{ generatedAtText(orderForecasts[order.id].generated_at) }}</span>
-                      </div>
-                      <div class="ai-forecast-price-grid">
-                        <div>
-                          <span>目标</span>
-                          <strong>{{ formatPrice(forecast.target_price) }}</strong>
-                        </div>
-                        <div>
-                          <span>止损</span>
-                          <strong>{{ formatPrice(forecast.stop_loss) }}</strong>
-                        </div>
-                        <div>
-                          <span>买入区</span>
-                          <strong>{{ zoneText(forecast.buy_zone) }}</strong>
-                        </div>
-                        <div>
-                          <span>卖出区</span>
-                          <strong>{{ zoneText(forecast.sell_zone) }}</strong>
-                        </div>
-                      </div>
-                      <p>{{ forecast.analysis }}</p>
-                      <ul class="ai-forecast-points">
-                        <li v-for="point in forecast.key_points" :key="`${forecast.model}-key-${point}`">
-                          {{ point }}
-                        </li>
-                      </ul>
-                      <div class="ai-forecast-risk">
-                        <span v-for="risk in forecast.risk_points" :key="`${forecast.model}-risk-${risk}`">
-                          {{ risk }}
-                        </span>
-                      </div>
-                      <small>{{ forecastStatusText(forecast.status) }}</small>
-                    </article>
-                  </div>
-                </template>
-              </section>
-              <small>决策 {{ latencyText(order.decision_latency_ms) }} / 写入 {{ latencyText(order.record_latency_ms) }}</small>
             </article>
           </div>
           <div v-else class="empty-state"><p>暂无盘中模拟记录。</p></div>
@@ -234,10 +145,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
-import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation, ArenaOrderForecastPayload } from '@/types'
+import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation } from '@/types'
 import BreakdownChart from '@/components/charts/BreakdownChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 
@@ -260,9 +171,6 @@ const dashboard = ref<ArenaAgentDashboardPayload | null>(null)
 const loading = ref(false)
 const runningPhase = ref<ArenaPhase | null>(null)
 const errorMessage = ref('')
-const orderForecasts = ref<Record<number, ArenaOrderForecastPayload>>({})
-const orderForecastLoading = ref<Record<number, boolean>>({})
-const orderForecastErrors = ref<Record<number, string>>({})
 const detailSections: DetailSection[] = ['morning', 'intraday', 'closing', 'learning']
 const activeSection = computed<DetailSection>({
   get() {
@@ -333,7 +241,6 @@ async function loadDashboard(): Promise<void> {
   errorMessage.value = ''
   try {
     dashboard.value = await api.getArenaAgentDashboard(agentId.value)
-    void loadPrimaryOrderForecast()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'AI 详情加载失败。'
   } finally {
@@ -358,38 +265,6 @@ async function runPhase(phase: ArenaPhase): Promise<void> {
   }
 }
 
-async function loadPrimaryOrderForecast(): Promise<void> {
-  if (activeSection.value !== 'intraday') return
-  const order = dashboard.value?.intraday.orders[0]
-  if (!order || orderForecasts.value[order.id] || orderForecastLoading.value[order.id]) return
-  await loadOrderForecast(order.id)
-}
-
-async function loadOrderForecast(orderId: number, refresh = false): Promise<void> {
-  orderForecastLoading.value = { ...orderForecastLoading.value, [orderId]: true }
-  orderForecastErrors.value = { ...orderForecastErrors.value, [orderId]: '' }
-  if (refresh) {
-    const nextForecasts = { ...orderForecasts.value }
-    delete nextForecasts[orderId]
-    orderForecasts.value = nextForecasts
-  }
-  try {
-    const forecast = await api.getArenaOrderForecast(orderId, { refresh })
-    orderForecasts.value = { ...orderForecasts.value, [orderId]: forecast }
-  } catch (error) {
-    orderForecastErrors.value = {
-      ...orderForecastErrors.value,
-      [orderId]: error instanceof Error ? error.message : '多模型预测生成失败。',
-    }
-  } finally {
-    orderForecastLoading.value = { ...orderForecastLoading.value, [orderId]: false }
-  }
-}
-
-function isForecastLoading(orderId: number): boolean {
-  return Boolean(orderForecastLoading.value[orderId])
-}
-
 function numberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
@@ -398,62 +273,9 @@ function scoreText(value: unknown): string {
   return typeof value === 'number' ? value.toFixed(1) : '--'
 }
 
-function latencyText(value: number | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
-  return `${Math.max(0, Math.round(value))}ms`
-}
-
 function formatPrice(value: number | null | undefined): string {
   if (typeof value !== 'number') return '--'
   return value.toFixed(value >= 100 ? 2 : 3)
-}
-
-function technicalPrice(value: unknown): string {
-  return typeof value === 'number' ? formatPrice(value) : '--'
-}
-
-function technicalText(value: unknown, suffix = ''): string {
-  return typeof value === 'number' && Number.isFinite(value) ? `${value.toFixed(2)}${suffix}` : '--'
-}
-
-function zoneText(values: number[] | undefined): string {
-  if (!Array.isArray(values) || values.length < 2) return '--'
-  return `${formatPrice(values[0])} - ${formatPrice(values[1])}`
-}
-
-function directionClass(direction: string): string {
-  if (direction === 'bullish') return 'is-bullish'
-  if (direction === 'bearish') return 'is-bearish'
-  return 'is-neutral'
-}
-
-function forecastStatusText(status: string): string {
-  if (status === 'live_ai') return 'AI 实时生成'
-  if (status === 'model_error_fallback') return '模型异常，使用量化底稿'
-  return '量化底稿'
-}
-
-function apiKeyStatus(configured: boolean | undefined, masked: string | undefined): string {
-  return configured ? masked || '已配置' : '未配置'
-}
-
-function modelConfigText(models: string[] | undefined): string {
-  if (!Array.isArray(models) || !models.length) return '--'
-  return models.join(' / ')
-}
-
-function generatedAtText(value: string | undefined): string {
-  if (!value) return '--'
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
-  return parsed.toLocaleString('zh-CN', {
-    hour12: false,
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
 }
 
 function formatAmount(value: number | null | undefined): string {
@@ -470,10 +292,6 @@ function formatPercent(value: number | null | undefined): string {
 
 onMounted(() => {
   loadDashboard()
-})
-
-watch(activeSection, () => {
-  void loadPrimaryOrderForecast()
 })
 </script>
 
@@ -595,163 +413,6 @@ watch(activeSection, () => {
   font-size: 12px;
 }
 
-.ai-forecast-panel {
-  display: grid;
-  gap: 10px;
-  margin-top: 12px;
-  border-top: 1px solid #eef0f4;
-  padding-top: 12px;
-}
-
-.ai-forecast-head,
-.ai-forecast-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.ai-forecast-head div {
-  display: grid;
-  gap: 2px;
-}
-
-.ai-forecast-head span,
-.ai-forecast-card span,
-.ai-forecast-loading,
-.ai-forecast-error {
-  color: #6b7280;
-  font-size: 12px;
-}
-
-.ai-forecast-summary {
-  border-left: 3px solid #2563eb;
-  background: #f8fbff;
-  padding: 8px 10px;
-}
-
-.ai-forecast-context,
-.ai-forecast-config,
-.ai-forecast-risk {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ai-forecast-context span,
-.ai-forecast-config span,
-.ai-forecast-risk span {
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  background: #f9fafb;
-  padding: 5px 8px;
-}
-
-.ai-forecast-config {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 8px;
-}
-
-.ai-forecast-config span {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
-.ai-forecast-model-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.ai-forecast-model-grid .ai-forecast-card {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #fcfcfd;
-  padding: 10px;
-}
-
-.ai-forecast-card-head strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ai-forecast-card-config {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 4px;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 7px 8px;
-}
-
-.ai-forecast-card-config span {
-  overflow-wrap: anywhere;
-}
-
-.ai-direction-pill {
-  flex: 0 0 auto;
-  border-radius: 999px;
-  padding: 4px 7px;
-  font-weight: 700;
-}
-
-.ai-direction-pill.is-bullish {
-  background: #ecfdf3;
-  color: #027a48;
-}
-
-.ai-direction-pill.is-bearish {
-  background: #fff1f3;
-  color: #c01048;
-}
-
-.ai-direction-pill.is-neutral {
-  background: #eff4ff;
-  color: #175cd3;
-}
-
-.ai-forecast-price-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.ai-forecast-price-grid div {
-  display: grid;
-  gap: 2px;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 8px;
-}
-
-.ai-forecast-price-grid strong {
-  font-size: 13px;
-}
-
-.ai-forecast-points {
-  display: grid;
-  gap: 5px;
-  margin: 0;
-  padding-left: 16px;
-  color: #374151;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.ai-forecast-error {
-  border: 1px solid #fed7aa;
-  border-radius: 8px;
-  background: #fff7ed;
-  color: #9a3412;
-  padding: 9px 10px;
-}
-
 @media (max-width: 900px) {
   .arena-agent-detail-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -768,10 +429,6 @@ watch(activeSection, () => {
   .arena-agent-detail-sidebar {
     position: static;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .ai-forecast-model-grid {
-    grid-template-columns: 1fr;
   }
 }
 </style>

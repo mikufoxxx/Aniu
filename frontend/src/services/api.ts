@@ -1,4 +1,4 @@
-import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload, ArenaOrderForecastPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload, StockAnalysisReportPayload } from '../types.ts'
+import type { AccountOverview, AIMarketContextPayload, AIStockPicksPayload, AppSettings, ArenaAgentConfig, ArenaAgentDashboardPayload, ArenaAgentsPayload, ArenaAIConfigPayload, ArenaLeaderboardPayload, ArenaRunPayload, BacktestPayload, ChatAttachment, ChatRequest, ChatResponse, ChatSession, ChatSessionMessagesPayload, DailyRangeRefreshPayload, DailyRefreshPayload, LoginRequest, LoginResponse, MarketDataCoveragePayload, MarketDataMaintenanceJobPayload, MarketDataMaintenancePayload, MarketDataMaintenanceRunListPayload, MarketReport, MarketReportListPayload, MarketReportPerformancePayload, MarketSourceHealthPayload, PersistentSession, PersistentSessionMessagesPayload, QuantCandidatesPayload, QuantDatasetPayload, QuantResearchPayload, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, ScheduleConfig, SkillInfo, SkillListItem, StockAnalysisPayload, StockAnalysisReportPayload } from '../types.ts'
 import {
   LOGIN_NOTICE_STORAGE_KEY,
   LOGIN_REDIRECT_STORAGE_KEY,
@@ -509,15 +509,6 @@ export const api = {
     return request<ArenaAgentDashboardPayload>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}/dashboard`, {
       timeoutMs: 60000,
     })
-  },
-  getArenaOrderForecast(orderId: number, options: { refresh?: boolean } = {}) {
-    const params = new URLSearchParams()
-    if (options.refresh) params.set('refresh', 'true')
-    const query = params.toString()
-    return request<ArenaOrderForecastPayload>(
-      `${API_PREFIX}/arena/orders/${encodeURIComponent(String(orderId))}/forecast${query ? `?${query}` : ''}`,
-      { timeoutMs: 90000 },
-    )
   },
   updateArenaAgent(agentId: string, payload: ArenaAgentConfig) {
     return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}`, {

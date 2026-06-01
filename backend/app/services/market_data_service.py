@@ -32,6 +32,7 @@ DEFAULT_UNIVERSE = [
 _TENCENT_QUOTE_BATCH_SIZE = 60
 _EASTMONEY_QUOTE_BATCH_SIZE = 80
 _SINA_QUOTE_BATCH_SIZE = 220
+_TENCENT_QUOTE_TIMEOUT_SECONDS = 3.0
 MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
@@ -114,9 +115,12 @@ class MarketDataService:
     def __init__(self) -> None:
         self._quote_cache: dict[str, list[dict[str, Any]]] = {}
         self._quote_cache_expires_at: dict[str, float] = {}
+        self._quote_inflight_locks: dict[str, RLock] = {}
         self._quote_cache_lock = RLock()
         self._intraday_cache: dict[str, list[dict[str, Any]]] = {}
         self._intraday_cache_expires_at: dict[str, float] = {}
+        self._intraday_inflight_locks: dict[str, RLock] = {}
+        self._intraday_cache_lock = RLock()
 
     def source_health(self) -> dict[str, Any]:
         settings = get_settings()
@@ -183,6 +187,7 @@ class MarketDataService:
             "quote_cache_ttl_seconds": ttl,
             "intraday_cache_ttl_seconds": ttl,
             "live_quote_primary": "tencent",
+            "live_quote_cross_check": "easy_tdx",
             "live_quote_fallbacks": ["easy_tdx", "eastmoney", "sina", "local_fallback"],
             "intraday_primary": "eastmoney",
             "intraday_fallback": "tencent_m5",
@@ -199,62 +204,188 @@ class MarketDataService:
         symbols: list[str],
         prefer_realtime: bool = True,
     ) -> list[dict[str, Any]]:
-        normalized_symbols = [normalize_symbol(symbol) for symbol in symbols]
+        requested_symbols = [normalize_symbol(symbol) for symbol in symbols]
+        normalized_symbols = list(dict.fromkeys(requested_symbols))
         cache_prefix = "realtime" if prefer_realtime else "low_frequency"
         cache_key = f"{cache_prefix}:" + ",".join(normalized_symbols)
+        cached = self._cached_quotes(cache_key, requested_symbols)
+        if cached is not None:
+            return cached
+
+        lock = self._quote_inflight_lock(cache_key)
+        with lock:
+            cached = self._cached_quotes(cache_key, requested_symbols)
+            if cached is not None:
+                return cached
+
+            tencent_quotes = self._get_tencent_quotes(normalized_symbols)
+            easy_tdx_quotes = (
+                self._get_easy_tdx_quotes(normalized_symbols)
+                if prefer_realtime
+                else []
+            )
+            quote_by_symbol = self._merge_quote_sources(
+                primary_quotes=tencent_quotes,
+                secondary_quotes=easy_tdx_quotes,
+            )
+            missing_symbols = [
+                symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
+            ]
+            if missing_symbols:
+                for quote in self._get_eastmoney_quotes(missing_symbols):
+                    symbol = normalize_symbol(str(quote.get("symbol") or ""))
+                    quote_by_symbol[symbol] = quote
+
+            missing_symbols = [
+                symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
+            ]
+            if missing_symbols:
+                for quote in self._get_sina_quotes(missing_symbols):
+                    symbol = normalize_symbol(str(quote.get("symbol") or ""))
+                    quote_by_symbol[symbol] = quote
+
+            missing_symbols = [
+                symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
+            ]
+            for quote in self._fallback_quotes(missing_symbols):
+                quote_by_symbol[quote["symbol"]] = quote
+
+            quotes = [
+                quote_by_symbol[symbol]
+                for symbol in normalized_symbols
+                if symbol in quote_by_symbol
+            ]
+
+            with self._quote_cache_lock:
+                self._quote_cache[cache_key] = [dict(item) for item in quotes]
+                self._quote_cache_expires_at[cache_key] = time.time() + max(
+                    1, int(get_settings().realtime_quote_cache_ttl_seconds)
+                )
+            return [
+                dict(quote_by_symbol[symbol])
+                for symbol in requested_symbols
+                if symbol in quote_by_symbol
+            ]
+
+    def _merge_quote_sources(
+        self,
+        *,
+        primary_quotes: list[dict[str, Any]],
+        secondary_quotes: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        primary_by_symbol = self._quotes_by_symbol(primary_quotes)
+        secondary_by_symbol = self._quotes_by_symbol(secondary_quotes)
+        symbols = sorted(set(primary_by_symbol) | set(secondary_by_symbol))
+        merged: dict[str, dict[str, Any]] = {}
+        for symbol in symbols:
+            primary = primary_by_symbol.get(symbol)
+            secondary = secondary_by_symbol.get(symbol)
+            selected = primary if self._has_price(primary) else secondary
+            if selected is None:
+                continue
+            item = dict(selected)
+            source_quotes = [
+                quote
+                for quote in (primary, secondary)
+                if quote is not None and quote.get("source")
+            ]
+            item["source_candidates"] = [
+                str(quote.get("source"))
+                for quote in source_quotes
+                if quote.get("source")
+            ]
+            item["source_snapshot"] = [
+                {
+                    "source": quote.get("source"),
+                    "price": quote.get("price"),
+                    "change_pct": quote.get("change_pct"),
+                    "timestamp": quote.get("timestamp"),
+                }
+                for quote in source_quotes
+            ]
+            if primary is not None and secondary is not None:
+                item["source_agreement"] = self._quote_source_agreement(
+                    primary,
+                    secondary,
+                )
+            merged[symbol] = item
+        return merged
+
+    def _quotes_by_symbol(self, quotes: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        by_symbol: dict[str, dict[str, Any]] = {}
+        for quote in quotes:
+            symbol = quote.get("symbol")
+            if not symbol:
+                continue
+            try:
+                by_symbol[normalize_symbol(str(symbol))] = quote
+            except ValueError:
+                continue
+        return by_symbol
+
+    def _has_price(self, quote: dict[str, Any] | None) -> bool:
+        if quote is None:
+            return False
+        price = _parse_float(quote.get("price"))
+        return price is not None and price > 0
+
+    def _quote_source_agreement(
+        self,
+        primary: dict[str, Any],
+        secondary: dict[str, Any],
+    ) -> dict[str, Any]:
+        primary_price = _parse_float(primary.get("price"))
+        secondary_price = _parse_float(secondary.get("price"))
+        price_diff_pct = None
+        if primary_price not in (None, 0) and secondary_price is not None:
+            price_diff_pct = (secondary_price - primary_price) / primary_price * 100
+        primary_change = _parse_float(primary.get("change_pct"))
+        secondary_change = _parse_float(secondary.get("change_pct"))
+        change_pct_diff = None
+        if primary_change is not None and secondary_change is not None:
+            change_pct_diff = secondary_change - primary_change
+        return {
+            "primary": primary.get("source"),
+            "secondary": secondary.get("source"),
+            "price_diff_pct": round(price_diff_pct, 4) if price_diff_pct is not None else None,
+            "change_pct_diff": round(change_pct_diff, 4) if change_pct_diff is not None else None,
+        }
+
+    def _cached_quotes(
+        self,
+        cache_key: str,
+        requested_symbols: list[str],
+    ) -> list[dict[str, Any]] | None:
         now = time.time()
         with self._quote_cache_lock:
             if not isinstance(self._quote_cache, dict):
                 self._quote_cache = {}
                 self._quote_cache_expires_at = {}
-            if self._quote_cache_expires_at.get(cache_key, 0) > now:
-                return [dict(item) for item in self._quote_cache.get(cache_key, [])]
+                self._quote_inflight_locks = {}
+            if not isinstance(self._quote_inflight_locks, dict):
+                self._quote_inflight_locks = {}
+            if self._quote_cache_expires_at.get(cache_key, 0) <= now:
+                return None
+            quote_by_symbol = {
+                normalize_symbol(str(item.get("symbol") or "")): dict(item)
+                for item in self._quote_cache.get(cache_key, [])
+                if item.get("symbol")
+            }
+            return [
+                dict(quote_by_symbol[symbol])
+                for symbol in requested_symbols
+                if symbol in quote_by_symbol
+            ]
 
-        quote_by_symbol: dict[str, dict[str, Any]] = {}
-        for quote in self._get_tencent_quotes(normalized_symbols):
-            symbol = normalize_symbol(str(quote.get("symbol") or ""))
-            quote_by_symbol[symbol] = quote
-        missing_symbols = [
-            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
-        ]
-        if prefer_realtime and missing_symbols:
-            for quote in self._get_easy_tdx_quotes(missing_symbols):
-                symbol = normalize_symbol(str(quote.get("symbol") or ""))
-                quote_by_symbol[symbol] = quote
-        missing_symbols = [
-            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
-        ]
-        if missing_symbols:
-            for quote in self._get_eastmoney_quotes(missing_symbols):
-                symbol = normalize_symbol(str(quote.get("symbol") or ""))
-                quote_by_symbol[symbol] = quote
-
-        missing_symbols = [
-            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
-        ]
-        if missing_symbols:
-            for quote in self._get_sina_quotes(missing_symbols):
-                symbol = normalize_symbol(str(quote.get("symbol") or ""))
-                quote_by_symbol[symbol] = quote
-
-        missing_symbols = [
-            symbol for symbol in normalized_symbols if symbol not in quote_by_symbol
-        ]
-        for quote in self._fallback_quotes(missing_symbols):
-            quote_by_symbol[quote["symbol"]] = quote
-
-        quotes = [
-            quote_by_symbol[symbol]
-            for symbol in normalized_symbols
-            if symbol in quote_by_symbol
-        ]
-
+    def _quote_inflight_lock(self, cache_key: str) -> RLock:
         with self._quote_cache_lock:
-            self._quote_cache[cache_key] = [dict(item) for item in quotes]
-            self._quote_cache_expires_at[cache_key] = time.time() + max(
-                1, int(get_settings().realtime_quote_cache_ttl_seconds)
-            )
-        return quotes
+            if not isinstance(self._quote_inflight_locks, dict):
+                self._quote_inflight_locks = {}
+            lock = self._quote_inflight_locks.get(cache_key)
+            if lock is None:
+                lock = RLock()
+                self._quote_inflight_locks[cache_key] = lock
+            return lock
 
     def get_intraday_bars(
         self,
@@ -267,27 +398,49 @@ class MarketDataService:
         klt = self._normalize_intraday_interval(interval)
         normalized_limit = max(1, min(int(limit or 120), 300))
         cache_key = f"{normalized_symbol}:{klt}:{normalized_limit}"
-        now = time.time()
-        if self._intraday_cache_expires_at.get(cache_key, 0) > now:
-            return [dict(item) for item in self._intraday_cache.get(cache_key, [])]
+        cached = self._cached_intraday_bars(cache_key)
+        if cached is not None:
+            return cached
 
-        results = self._get_eastmoney_intraday_bars(
-            normalized_symbol,
-            klt=klt,
-            limit=normalized_limit,
-        )
-        if not results:
-            results = self._get_tencent_intraday_bars(
+        lock = self._intraday_inflight_lock(cache_key)
+        with lock:
+            cached = self._cached_intraday_bars(cache_key)
+            if cached is not None:
+                return cached
+
+            results = self._get_eastmoney_intraday_bars(
                 normalized_symbol,
                 klt=klt,
                 limit=normalized_limit,
             )
-        self._intraday_cache[cache_key] = [dict(item) for item in results]
-        self._intraday_cache_expires_at[cache_key] = now + max(
-            1,
-            int(get_settings().realtime_quote_cache_ttl_seconds),
-        )
-        return results
+            if not results:
+                results = self._get_tencent_intraday_bars(
+                    normalized_symbol,
+                    klt=klt,
+                    limit=normalized_limit,
+                )
+            with self._intraday_cache_lock:
+                self._intraday_cache[cache_key] = [dict(item) for item in results]
+                self._intraday_cache_expires_at[cache_key] = time.time() + max(
+                    1,
+                    int(get_settings().realtime_quote_cache_ttl_seconds),
+                )
+            return results
+
+    def _cached_intraday_bars(self, cache_key: str) -> list[dict[str, Any]] | None:
+        now = time.time()
+        with self._intraday_cache_lock:
+            if self._intraday_cache_expires_at.get(cache_key, 0) <= now:
+                return None
+            return [dict(item) for item in self._intraday_cache.get(cache_key, [])]
+
+    def _intraday_inflight_lock(self, cache_key: str) -> RLock:
+        with self._intraday_cache_lock:
+            lock = self._intraday_inflight_locks.get(cache_key)
+            if lock is None:
+                lock = RLock()
+                self._intraday_inflight_locks[cache_key] = lock
+            return lock
 
     def _normalize_intraday_interval(self, interval: str) -> str:
         value = str(interval or "60m").strip().lower()
@@ -543,18 +696,7 @@ class MarketDataService:
         results: list[dict[str, Any]] = []
         for start in range(0, len(symbols), _TENCENT_QUOTE_BATCH_SIZE):
             batch = symbols[start : start + _TENCENT_QUOTE_BATCH_SIZE]
-            batch_results = self._request_tencent_quote_batch(batch)
-            batch_by_symbol = {
-                normalize_symbol(str(item.get("symbol") or "")): item
-                for item in batch_results
-                if item.get("symbol")
-            }
-            fallback_by_symbol = {
-                item["symbol"]: item for item in self._fallback_quotes(batch)
-            }
-            for symbol in batch:
-                normalized = normalize_symbol(symbol)
-                results.append(batch_by_symbol.get(normalized) or fallback_by_symbol[normalized])
+            results.extend(self._request_tencent_quote_batch(batch))
         return results
 
     def _request_tencent_quote_batch(self, symbols: list[str]) -> list[dict[str, Any]]:
@@ -562,7 +704,7 @@ class MarketDataService:
         try:
             response = httpx.get(
                 "https://qt.gtimg.cn/q=" + query,
-                timeout=8.0,
+                timeout=_TENCENT_QUOTE_TIMEOUT_SECONDS,
                 headers={"User-Agent": "Aniu/1.0"},
             )
             response.raise_for_status()

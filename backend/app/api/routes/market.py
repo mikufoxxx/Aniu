@@ -515,15 +515,18 @@ def get_arena_overview(
 ) -> ArenaOverviewResponse:
     try:
         settings = settings_service.get_or_create_settings(db)
+        agents = arena_service.list_agents(db)["agents"]
+        leaderboard = arena_service.leaderboard(db, refresh_quotes=refresh_quotes)
         return {
-            "agents": arena_service.list_agents(db)["agents"],
+            "agents": agents,
             "ai_config": ai_forecast_service.public_config(),
             "arena_initial_cash": settings.arena_initial_cash,
-            "leaderboard": arena_service.leaderboard(db, refresh_quotes=refresh_quotes),
+            "leaderboard": leaderboard,
             "equity_curves": arena_service.equity_curves(
                 db,
                 interval=interval,
                 refresh_quotes=refresh_quotes,
+                current_items=leaderboard["items"],
             ),
             "cache_policy": market_data_service.cache_policy(),
         }

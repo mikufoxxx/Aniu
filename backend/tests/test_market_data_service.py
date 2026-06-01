@@ -283,7 +283,53 @@ def test_realtime_quotes_use_tencent_first_and_fill_gaps_with_easy_tdx(monkeypat
     assert [item["symbol"] for item in quotes] == ["000001.SZ", "000002.SZ", "000003.SZ"]
     assert [item["source"] for item in quotes] == ["easy_tdx", "tencent", "easy_tdx"]
     assert captured["tencent"] == ["000001.SZ", "000002.SZ", "000003.SZ"]
-    assert captured["easy_tdx"] == ["000001.SZ", "000003.SZ"]
+    assert captured["easy_tdx"] == ["000001.SZ", "000002.SZ", "000003.SZ"]
+    assert quotes[1]["source_candidates"] == ["tencent", "easy_tdx"]
+
+
+def test_realtime_quotes_pull_tencent_and_easy_tdx_for_cross_check(monkeypatch) -> None:
+    from app.services.market_data_service import market_data_service
+
+    def fake_tencent(symbols: list[str]):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 1000,
+                "turnover": 1.0,
+                "volume_ratio": 1.0,
+                "source": "tencent",
+                "timestamp": "2026-05-29 15:00:00",
+            }
+        ]
+
+    def fake_easy_tdx(symbols: list[str]):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 10.02,
+                "change_pct": 1.2,
+                "amount": 980,
+                "turnover": 0.9,
+                "volume_ratio": 1.1,
+                "source": "easy_tdx",
+                "timestamp": "2026-05-29 15:00:01",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "_get_tencent_quotes", fake_tencent)
+    monkeypatch.setattr(market_data_service, "_get_easy_tdx_quotes", fake_easy_tdx)
+    market_data_service._quote_cache = None
+
+    quotes = market_data_service.get_quotes(["000001.SZ"], prefer_realtime=True)
+
+    assert quotes[0]["source"] == "tencent"
+    assert quotes[0]["source_candidates"] == ["tencent", "easy_tdx"]
+    assert quotes[0]["source_snapshot"][1]["source"] == "easy_tdx"
+    assert quotes[0]["source_agreement"]["secondary"] == "easy_tdx"
 
 
 def test_quote_cache_separates_realtime_and_low_frequency_modes(monkeypatch) -> None:

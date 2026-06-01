@@ -246,6 +246,9 @@ export interface QuantCandidate {
   volume_ratio: number
   source: string | null
   timestamp: string | null
+  source_candidates?: string[]
+  source_snapshot?: Array<Record<string, unknown>>
+  source_agreement?: Record<string, unknown>
   score: number
   factor_scores: Record<string, number>
   profile: {

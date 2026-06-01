@@ -373,6 +373,9 @@ class QuantCandidateRead(BaseModel):
     volume_ratio: float
     source: str | None = None
     timestamp: str | None = None
+    source_candidates: list[str] = Field(default_factory=list)
+    source_snapshot: list[dict[str, Any]] = Field(default_factory=list)
+    source_agreement: dict[str, Any] = Field(default_factory=dict)
     score: float
     factor_scores: dict[str, float]
     profile: dict[str, Any] = Field(default_factory=dict)

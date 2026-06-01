@@ -36,6 +36,8 @@ def _number(value: Any, default: float = 0.0) -> float:
 
 class QuantService:
     _AUTO_UNIVERSE_LIMIT = 1000
+    _AUTO_REALTIME_UNIVERSE_LIMIT = 120
+    _AUTO_REALTIME_REFINE_MAX = 80
 
     def generate_candidates(
         self,
@@ -48,13 +50,6 @@ class QuantService:
         end_date: str | None = None,
     ) -> dict[str, Any]:
         universe = self._resolve_universe(db, symbols, limit=limit, end_date=end_date)
-        quotes = (
-            self._daily_quotes_by_symbol(db, universe, end_date=end_date)
-            if not prefer_realtime and db is not None
-            else []
-        )
-        if not quotes:
-            quotes = market_data_service.get_quotes(universe, prefer_realtime=prefer_realtime)
         daily_factors = self._daily_factors_by_symbol(
             db,
             symbols=universe,
@@ -63,6 +58,16 @@ class QuantService:
         )
         profiles = self._profiles_by_symbol(db, universe)
         financials = self._financial_indicators_by_symbol(db, universe)
+        quotes = self._candidate_quotes(
+            db,
+            universe=universe,
+            prefer_realtime=prefer_realtime,
+            end_date=end_date,
+            daily_factors=daily_factors,
+            profiles=profiles,
+            financials=financials,
+            limit=limit,
+        )
         candidates = [
             self._score_quote(
                 item,
@@ -74,9 +79,16 @@ class QuantService:
         ]
         candidates.sort(key=lambda item: item["score"], reverse=True)
         selected = candidates[: max(1, min(limit, len(candidates)))]
-        data_sources = sorted(
-            {str(item.get("source")) for item in selected if item.get("source")}
-        )
+        data_source_names: set[str] = set()
+        for item in selected:
+            if item.get("source"):
+                data_source_names.add(str(item["source"]))
+            data_source_names.update(
+                str(source)
+                for source in item.get("source_candidates", [])
+                if source
+            )
+        data_sources = sorted(data_source_names)
         if any(item.get("daily_factors", {}).get("bars_used", 0) > 0 for item in selected):
             data_sources.append("tushare_daily")
         if any(
@@ -110,6 +122,73 @@ class QuantService:
             "data_sources": data_sources,
             "candidates": selected,
         }
+
+    def _candidate_quotes(
+        self,
+        db: Session | None,
+        *,
+        universe: list[str],
+        prefer_realtime: bool,
+        end_date: str | None,
+        daily_factors: dict[str, Any],
+        profiles: dict[str, Any],
+        financials: dict[str, Any],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if (
+            prefer_realtime
+            and db is not None
+            and len(universe) > self._AUTO_REALTIME_UNIVERSE_LIMIT
+        ):
+            daily_quotes = self._daily_quotes_by_symbol(db, universe, end_date=end_date)
+            if daily_quotes:
+                seed_candidates = [
+                    self._score_quote(
+                        item,
+                        daily_factors.get(normalize_symbol(str(item.get("symbol") or ""))),
+                        profiles.get(normalize_symbol(str(item.get("symbol") or ""))),
+                        financials.get(normalize_symbol(str(item.get("symbol") or ""))),
+                    )
+                    for item in daily_quotes
+                ]
+                seed_candidates.sort(key=lambda item: item["score"], reverse=True)
+                realtime_limit = min(
+                    self._AUTO_REALTIME_REFINE_MAX,
+                    max(20, max(1, int(limit or 20)) * 8),
+                )
+                realtime_symbols = [
+                    str(item["symbol"])
+                    for item in seed_candidates[:realtime_limit]
+                    if item.get("symbol")
+                ]
+                realtime_quotes = market_data_service.get_quotes(
+                    realtime_symbols,
+                    prefer_realtime=True,
+                ) if realtime_symbols else []
+                realtime_by_symbol = {
+                    normalize_symbol(str(item.get("symbol") or "")): item
+                    for item in realtime_quotes
+                    if item.get("symbol")
+                }
+                daily_by_symbol = {
+                    normalize_symbol(str(item.get("symbol") or "")): item
+                    for item in daily_quotes
+                    if item.get("symbol")
+                }
+                return [
+                    realtime_by_symbol.get(symbol) or daily_by_symbol[symbol]
+                    for symbol in realtime_symbols
+                    if symbol in daily_by_symbol
+                ]
+
+        quotes = (
+            self._daily_quotes_by_symbol(db, universe, end_date=end_date)
+            if not prefer_realtime and db is not None
+            else []
+        )
+        if not quotes:
+            quotes = market_data_service.get_quotes(universe, prefer_realtime=prefer_realtime)
+        return quotes
 
     def _resolve_universe(
         self,
@@ -338,6 +417,9 @@ class QuantService:
             "volume_ratio": volume_ratio,
             "source": quote.get("source"),
             "timestamp": quote.get("timestamp"),
+            "source_candidates": list(quote.get("source_candidates") or []),
+            "source_snapshot": list(quote.get("source_snapshot") or []),
+            "source_agreement": dict(quote.get("source_agreement") or {}),
             "score": round(score, 4),
             "factor_scores": {
                 key: round(value, 4) for key, value in factor_scores.items()

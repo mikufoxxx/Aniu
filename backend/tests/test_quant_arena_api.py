@@ -218,6 +218,68 @@ def test_quant_dataset_non_realtime_uses_daily_snapshot_before_live_quotes(
     _reset_state()
 
 
+def test_auto_universe_realtime_refines_prefiltered_symbols_only(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.market_data_service import market_data_service
+    from app.services.quant_service import quant_service
+
+    live_calls: list[list[str]] = []
+
+    def fake_get_quotes(symbols: list[str], prefer_realtime: bool = True):
+        live_calls.append(symbols)
+        return [
+            {
+                "symbol": symbol,
+                "name": symbol,
+                "price": 10.0,
+                "change_pct": 1.0,
+                "amount": 1_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.0,
+                "source": "tencent",
+                "source_candidates": ["tencent", "easy_tdx"],
+                "timestamp": "2026-05-29 10:30:00",
+            }
+            for symbol in symbols
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_get_quotes)
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            db.add_all(
+                [
+                    DailyBar(
+                        symbol=f"{index:06d}.SZ",
+                        trade_date="20260529",
+                        close=10.0 + index / 100,
+                        pre_close=10.0,
+                        pct_chg=1.0 + index / 100,
+                        amount=1_000_000_000 - index,
+                    )
+                    for index in range(1, 151)
+                ]
+            )
+        with session_scope() as db:
+            payload = quant_service.generate_candidates(
+                db=db,
+                symbols=None,
+                limit=5,
+                prefer_realtime=True,
+                lookback_days=20,
+            )
+
+    assert len(live_calls) == 1
+    assert len(live_calls[0]) == 40
+    assert payload["universe_size"] == 150
+    assert payload["candidate_count"] == 5
+    assert {"tencent", "easy_tdx"} <= set(payload["data_sources"])
+
+    _reset_state()
+
+
 def test_quant_dataset_combines_realtime_quotes_and_daily_history(monkeypatch, tmp_path) -> None:
     from app.services.market_data_service import market_data_service
 

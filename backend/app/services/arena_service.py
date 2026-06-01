@@ -1269,6 +1269,7 @@ class ArenaService:
         *,
         interval: str = "daily",
         refresh_quotes: bool = False,
+        current_items: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         normalized_interval = str(interval or "daily").strip().lower()
         if normalized_interval not in {"daily", "weekly", "hourly"}:
@@ -1281,10 +1282,14 @@ class ArenaService:
         now = datetime.now(ARENA_SCHEDULE_TIMEZONE)
         agents = self.list_agents(db)["agents"]
         agent_by_id = {str(agent.get("id")): agent for agent in agents}
-        current_items = self._leaderboard_items(
-            db,
-            include_latest_recommendation=False,
-            refresh_quotes=refresh_quotes,
+        current_items = (
+            deepcopy(current_items)
+            if current_items is not None
+            else self._leaderboard_items(
+                db,
+                include_latest_recommendation=False,
+                refresh_quotes=refresh_quotes,
+            )
         )
         curve_map: dict[str, dict[str, Any]] = {
             str(item["agent_id"]): {

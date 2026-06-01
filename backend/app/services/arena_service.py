@@ -1101,12 +1101,27 @@ class ArenaService:
             reviews.append(self._memory_payload(memory))
         return reviews
 
-    def leaderboard(self, db: Session) -> dict[str, Any]:
-        items = self._leaderboard_items(db, include_latest_recommendation=True)
+    def leaderboard(
+        self,
+        db: Session,
+        *,
+        refresh_quotes: bool = False,
+    ) -> dict[str, Any]:
+        items = self._leaderboard_items(
+            db,
+            include_latest_recommendation=True,
+            refresh_quotes=refresh_quotes,
+        )
         items.sort(key=lambda item: item["total_assets"], reverse=True)
         return {"items": items}
 
-    def equity_curves(self, db: Session, *, interval: str = "daily") -> dict[str, Any]:
+    def equity_curves(
+        self,
+        db: Session,
+        *,
+        interval: str = "daily",
+        refresh_quotes: bool = False,
+    ) -> dict[str, Any]:
         normalized_interval = str(interval or "daily").strip().lower()
         if normalized_interval not in {"daily", "weekly", "hourly"}:
             raise ValueError("收益曲线粒度必须是 daily、weekly 或 hourly。")
@@ -1114,7 +1129,11 @@ class ArenaService:
         now = datetime.now(ARENA_SCHEDULE_TIMEZONE)
         agents = self.list_agents(db)["agents"]
         agent_by_id = {str(agent.get("id")): agent for agent in agents}
-        current_items = self._leaderboard_items(db, include_latest_recommendation=False)
+        current_items = self._leaderboard_items(
+            db,
+            include_latest_recommendation=False,
+            refresh_quotes=refresh_quotes,
+        )
         curve_map: dict[str, dict[str, Any]] = {
             str(item["agent_id"]): {
                 "agent_id": str(item["agent_id"]),
@@ -1199,6 +1218,7 @@ class ArenaService:
         db: Session,
         *,
         include_latest_recommendation: bool,
+        refresh_quotes: bool = False,
     ) -> list[dict[str, Any]]:
         accounts = db.scalars(
             select(ArenaAccount)
@@ -1221,7 +1241,9 @@ class ArenaService:
 
         settings = settings_service.get_or_create_settings(db)
         initial_cash = float(settings.arena_initial_cash or ARENA_DEFAULT_INITIAL_CASH)
-        quote_by_symbol = self._realtime_quotes_for_positions(accounts)
+        quote_by_symbol = (
+            self._realtime_quotes_for_positions(accounts) if refresh_quotes else {}
+        )
         items: list[dict[str, Any]] = []
         for agent_id in ordered_agent_ids:
             agent = agent_by_id[agent_id]

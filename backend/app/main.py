@@ -69,7 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(aniu_router)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    async def health() -> dict[str, str]:
         return {"status": "ok"}
 
     # ── Serve frontend static files when built output exists (Docker) ──

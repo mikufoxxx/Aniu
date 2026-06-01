@@ -533,11 +533,13 @@ export const api = {
       body: JSON.stringify(payload),
     })
   },
-  getArenaLeaderboard() {
-    return request<ArenaLeaderboardPayload>(`${API_PREFIX}/arena/leaderboard`)
+  getArenaLeaderboard(refreshQuotes = false) {
+    const query = refreshQuotes ? '?refresh_quotes=true' : ''
+    return request<ArenaLeaderboardPayload>(`${API_PREFIX}/arena/leaderboard${query}`)
   },
-  getArenaEquityCurves(interval: 'daily' | 'weekly' | 'hourly' = 'daily') {
+  getArenaEquityCurves(interval: 'daily' | 'weekly' | 'hourly' = 'daily', refreshQuotes = false) {
     const params = new URLSearchParams({ interval })
+    if (refreshQuotes) params.set('refresh_quotes', 'true')
     return request<ArenaEquityCurvesPayload>(`${API_PREFIX}/arena/equity-curves?${params.toString()}`)
   },
   chat(payload: ChatRequest) {

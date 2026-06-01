@@ -434,20 +434,26 @@ def run_arena_once(
 
 @router.get("/arena/leaderboard", response_model=ArenaLeaderboardResponse)
 def get_arena_leaderboard(
+    refresh_quotes: bool = False,
     db: Session = Depends(get_db),
     _user: str = Depends(get_current_user),
 ) -> ArenaLeaderboardResponse:
-    return arena_service.leaderboard(db)
+    return arena_service.leaderboard(db, refresh_quotes=refresh_quotes)
 
 
 @router.get("/arena/equity-curves", response_model=ArenaEquityCurvesResponse)
 def get_arena_equity_curves(
     interval: str = "daily",
+    refresh_quotes: bool = False,
     db: Session = Depends(get_db),
     _user: str = Depends(get_current_user),
 ) -> ArenaEquityCurvesResponse:
     try:
-        return arena_service.equity_curves(db, interval=interval)
+        return arena_service.equity_curves(
+            db,
+            interval=interval,
+            refresh_quotes=refresh_quotes,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

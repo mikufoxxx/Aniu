@@ -1152,7 +1152,10 @@ def test_arena_leaderboard_revalues_positions_and_exposes_latest_morning(
                     },
                 )
             )
-        response = client.get("/api/aniu/arena/leaderboard", headers=headers)
+        response = client.get(
+            "/api/aniu/arena/leaderboard?refresh_quotes=true",
+            headers=headers,
+        )
 
     assert response.status_code == 200
     items = response.json()["items"]
@@ -1281,11 +1284,11 @@ def test_arena_equity_curves_support_hourly_weekly_and_current_live_point(
                 )
             )
         hourly_response = client.get(
-            "/api/aniu/arena/equity-curves?interval=hourly",
+            "/api/aniu/arena/equity-curves?interval=hourly&refresh_quotes=true",
             headers=headers,
         )
         weekly_response = client.get(
-            "/api/aniu/arena/equity-curves?interval=weekly",
+            "/api/aniu/arena/equity-curves?interval=weekly&refresh_quotes=true",
             headers=headers,
         )
 

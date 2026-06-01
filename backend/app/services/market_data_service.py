@@ -414,7 +414,9 @@ class MarketDataService:
             low_price = _parse_float(row[4])
             if close_price is None:
                 continue
-            display_time = trade_time.strftime("%Y-%m-%d %H:%M")
+            display_time = _display_intraday_bar_time(
+                trade_time.strftime("%Y-%m-%d %H:%M")
+            )
             parsed.append(
                 {
                     "trade_date": display_time,

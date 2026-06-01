@@ -166,6 +166,11 @@ def test_intraday_bars_fall_back_to_tencent_minutes_when_eastmoney_fails(monkeyp
         return FakeTencentResponse()
 
     monkeypatch.setattr(module.httpx, "get", fake_get)
+    monkeypatch.setattr(
+        module,
+        "_market_now",
+        lambda: datetime(2026, 6, 1, 13, 11, tzinfo=module.MARKET_TIMEZONE),
+    )
     market_data_service._intraday_cache = {}
     market_data_service._intraday_cache_expires_at = {}
 
@@ -173,7 +178,7 @@ def test_intraday_bars_fall_back_to_tencent_minutes_when_eastmoney_fails(monkeyp
 
     assert bars == [
         {
-            "trade_date": "2026-06-01 13:15",
+            "trade_date": "2026-06-01 13:11",
             "open": 10.91,
             "high": 10.93,
             "low": 10.9,
@@ -181,7 +186,7 @@ def test_intraday_bars_fall_back_to_tencent_minutes_when_eastmoney_fails(monkeyp
             "volume": 39219.0,
             "amount": 0.0,
             "source": "tencent_m5_aggregated",
-            "timestamp": "2026-06-01 13:15",
+            "timestamp": "2026-06-01 13:11",
             "is_realtime": False,
         }
     ]

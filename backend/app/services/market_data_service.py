@@ -84,12 +84,28 @@ def _parse_float(value: Any) -> float | None:
     return numeric
 
 
+def _market_now() -> datetime:
+    return datetime.now(MARKET_TIMEZONE)
+
+
 def _market_now_text() -> str:
-    return datetime.now(MARKET_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    return _market_now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _market_timestamp_text(value: float | int) -> str:
     return datetime.fromtimestamp(value, tz=MARKET_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _display_intraday_bar_time(value: str) -> str:
+    text = str(value or "").strip()
+    try:
+        bar_time = datetime.strptime(text, "%Y-%m-%d %H:%M").replace(tzinfo=MARKET_TIMEZONE)
+    except ValueError:
+        return text
+    now = _market_now()
+    if bar_time.date() == now.date() and bar_time > now:
+        return now.strftime("%Y-%m-%d %H:%M")
+    return text
 
 
 class MarketDataService:
@@ -309,6 +325,7 @@ class MarketDataService:
             fields = str(line or "").split(",")
             if len(fields) < 7:
                 continue
+            trade_time = _display_intraday_bar_time(fields[0])
             open_price = _parse_float(fields[1])
             close_price = _parse_float(fields[2])
             high_price = _parse_float(fields[3])
@@ -317,7 +334,7 @@ class MarketDataService:
                 continue
             rows.append(
                 {
-                    "trade_date": fields[0],
+                    "trade_date": trade_time,
                     "open": round(open_price if open_price is not None else close_price, 4),
                     "high": round(high_price if high_price is not None else close_price, 4),
                     "low": round(low_price if low_price is not None else close_price, 4),
@@ -325,7 +342,7 @@ class MarketDataService:
                     "volume": float(_parse_float(fields[5]) or 0),
                     "amount": float(_parse_float(fields[6]) or 0),
                     "source": "eastmoney_intraday",
-                    "timestamp": fields[0],
+                    "timestamp": trade_time,
                     "is_realtime": False,
                 }
             )

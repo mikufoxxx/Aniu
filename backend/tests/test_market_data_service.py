@@ -108,6 +108,38 @@ def test_eastmoney_intraday_bars_are_parsed_as_real_hourly_data(monkeypatch) -> 
     ]
 
 
+def test_eastmoney_intraday_current_bar_time_is_not_displayed_as_future(monkeypatch) -> None:
+    from app.services import market_data_service as module
+    from app.services.market_data_service import market_data_service
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": {
+                    "klines": [
+                        "2026-06-01 14:00,10.90,10.92,10.93,10.90,17435,19029042.00,0.20,0.00,0.00,0.01",
+                    ]
+                }
+            }
+
+    monkeypatch.setattr(module.httpx, "get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(
+        module,
+        "_market_now",
+        lambda: datetime(2026, 6, 1, 13, 6, tzinfo=module.MARKET_TIMEZONE),
+    )
+    market_data_service._intraday_cache = {}
+    market_data_service._intraday_cache_expires_at = {}
+
+    bars = market_data_service.get_intraday_bars("000001.SZ", interval="hourly", limit=1)
+
+    assert bars[0]["trade_date"] == "2026-06-01 13:06"
+    assert bars[0]["timestamp"] == "2026-06-01 13:06"
+
+
 def test_tencent_quotes_are_requested_in_batches(monkeypatch) -> None:
     from app.services import market_data_service as module
     from app.services.market_data_service import market_data_service

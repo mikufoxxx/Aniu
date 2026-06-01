@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -139,7 +140,7 @@ class StockAnalysisService:
         return {
             "symbol": normalized_symbol,
             "latest_price": float(latest_price) if isinstance(latest_price, (int, float)) else None,
-            "refreshed_at": datetime.now().isoformat(timespec="seconds"),
+            "refreshed_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds"),
             "charts": charts,
         }
 

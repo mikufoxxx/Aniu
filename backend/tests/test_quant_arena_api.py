@@ -2467,6 +2467,45 @@ def test_stock_analysis_chart_refresh_updates_charts_without_new_report(monkeypa
     _reset_state()
 
 
+def test_stock_analysis_chart_refresh_reports_shanghai_refresh_time(monkeypatch, tmp_path) -> None:
+    from app.services.market_data_service import market_data_service
+    from app.services.stock_analysis_service import stock_analysis_service
+
+    def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
+        return [
+            {
+                "symbol": "000001.SZ",
+                "name": "平安银行",
+                "price": 12.4,
+                "change_pct": 3.33,
+                "amount": 2_000_000_000,
+                "turnover": 1.0,
+                "volume_ratio": 1.2,
+                "source": "tencent",
+                "timestamp": "2026-06-01 10:31:00",
+            }
+        ]
+
+    monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260529", open=11, high=12, low=10.8, close=12, amount=1200))
+        with session_scope() as db:
+            payload = stock_analysis_service.refresh_charts(
+                db,
+                symbol="000001.SZ",
+                action="HOLD",
+                price=0,
+                quantity=0,
+                factor_scores={},
+            )
+
+    assert payload["refreshed_at"].endswith("+08:00")
+
+    _reset_state()
+
+
 def test_stock_analysis_uses_selected_forecast_model_and_skill(
     monkeypatch,
     tmp_path,

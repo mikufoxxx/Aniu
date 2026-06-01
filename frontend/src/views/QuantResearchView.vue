@@ -175,7 +175,7 @@ const researching = ref(false)
 const errorMessage = ref('')
 const symbolsText = ref('600011.SH,000767.SZ,600023.SH')
 const startDate = ref('20250101')
-const endDate = ref('20260531')
+const endDate = ref(todayCompactDate())
 const research = ref<QuantResearchPayload | null>(null)
 
 const riskMetricItems = computed(() => {
@@ -234,6 +234,18 @@ async function runResearch(): Promise<void> {
 
 function parseSymbols(value: string): string[] {
   return value.split(/[\s,，;；]+/).map((item) => item.trim().toUpperCase()).filter(Boolean)
+}
+
+function todayCompactDate(): string {
+  const date = new Date()
+  const parts = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const valueByType = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${valueByType.year}${valueByType.month}${valueByType.day}`
 }
 
 function scoreText(value: number | undefined): string {

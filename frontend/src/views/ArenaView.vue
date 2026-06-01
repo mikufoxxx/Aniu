@@ -326,7 +326,7 @@ async function loadArenaState(silent = false): Promise<void> {
   try {
     const [agentPayload, leaderboardPayload, configPayload, settingsPayload] = await Promise.all([
       api.getArenaAgents(),
-      api.getArenaLeaderboard(),
+      api.getArenaLeaderboard(true),
       api.getArenaAIConfig(),
       api.getSettings(),
     ])
@@ -346,7 +346,7 @@ async function loadArenaState(silent = false): Promise<void> {
 async function loadEquityCurves(silent = false): Promise<void> {
   if (!silent) equityLoading.value = true
   try {
-    equityCurves.value = await api.getArenaEquityCurves(equityInterval.value)
+    equityCurves.value = await api.getArenaEquityCurves(equityInterval.value, true)
   } catch (error) {
     if (!silent) errorMessage.value = error instanceof Error ? error.message : '收益曲线加载失败。'
   } finally {

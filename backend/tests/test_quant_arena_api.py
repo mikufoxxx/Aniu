@@ -1072,7 +1072,14 @@ def test_arena_leaderboard_revalues_positions_and_exposes_latest_morning(
     tmp_path,
 ) -> None:
     from app.db.models import ArenaAccount, ArenaPosition, ArenaRun
+    from app.services.arena_service import arena_service
     from app.services.market_data_service import market_data_service
+
+    monkeypatch.setattr(
+        arena_service,
+        "_now_shanghai",
+        lambda: datetime(2026, 6, 1, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
 
     def fake_quotes(symbols: list[str], prefer_realtime: bool = True):
         return [
@@ -1116,6 +1123,7 @@ def test_arena_leaderboard_revalues_positions_and_exposes_latest_morning(
                 ArenaRun(
                     phase="morning_recommendation",
                     initial_cash=200000,
+                    created_at=datetime(2026, 6, 1, 0, 10),
                     candidate_payload={
                         "agent_recommendations": [
                             {
@@ -1155,6 +1163,60 @@ def test_arena_leaderboard_revalues_positions_and_exposes_latest_morning(
     assert item["positions"][0]["last_price"] == 12
     assert item["positions"][0]["unrealized_pnl"] == 3000
     assert item["latest_recommendation"]["picks"][0]["symbol"] == "000001.SZ"
+
+    _reset_state()
+
+
+def test_arena_hides_pre_schedule_morning_outputs(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.db.models import ArenaRun
+    from app.services.arena_service import arena_service
+
+    monkeypatch.setattr(
+        arena_service,
+        "_now_shanghai",
+        lambda: datetime(2026, 6, 1, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        with session_scope() as db:
+            payload = {
+                "agent_recommendations": [
+                    {
+                        "agent_id": "model_gpt_5_5",
+                        "agent_name": "GPT-5.5",
+                        "style": "auto",
+                        "action": "WATCH",
+                        "symbol": "000001.SZ",
+                        "name": "平安银行",
+                        "score": 88,
+                        "price": 11.5,
+                        "reason": "早于早盘窗口或晚于早盘窗口的调试数据",
+                        "picks": [{"symbol": "000001.SZ", "name": "平安银行"}],
+                    }
+                ]
+            }
+            for created_at in (
+                datetime(2026, 5, 31, 23, 30),
+                datetime(2026, 6, 1, 1, 0),
+            ):
+                db.add(
+                    ArenaRun(
+                        phase="morning_recommendation",
+                        initial_cash=200000,
+                        created_at=created_at,
+                        candidate_payload=payload,
+                    )
+                )
+        response = client.get("/api/aniu/arena/leaderboard", headers=headers)
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    item = next(entry for entry in items if entry["agent_id"] == "model_gpt_5_5")
+    assert item["latest_recommendation"] is None
 
     _reset_state()
 
@@ -2805,6 +2867,7 @@ def test_arena_llm_can_request_extra_data_dimensions_before_decision(
 
 
 def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) -> None:
+    from app.services.arena_service import arena_service
     from app.services.market_data_service import market_data_service
 
     quotes = [
@@ -2881,6 +2944,11 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
         return [item for item in quotes if item["symbol"] in requested]
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
+    monkeypatch.setattr(
+        arena_service,
+        "_now_shanghai",
+        lambda: datetime(2026, 6, 1, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
 
     symbols = ["000001.SZ", "600519.SH", "300750.SZ", "601318.SH", "000858.SZ", "601899.SH"]
     with create_test_client(monkeypatch, tmp_path) as client:
@@ -2937,6 +3005,22 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
                 item["name"] = item["symbol"]
             stored_run.candidate_payload = payload
             flag_modified(stored_run, "candidate_payload")
+            for run in db.scalars(select(ArenaRun)).all():
+                if run.phase == "morning_recommendation":
+                    run.created_at = datetime(2026, 6, 1, 0, 10)
+                elif run.phase == "intraday_trade":
+                    run.created_at = datetime(2026, 6, 1, 1, 45)
+                elif run.phase == "closing_review":
+                    run.created_at = datetime(2026, 6, 1, 7, 20)
+                elif run.phase == "nightly_learning":
+                    run.created_at = datetime(2026, 6, 1, 12, 20)
+            for order in db.scalars(select(ArenaOrder)).all():
+                order.created_at = datetime(2026, 6, 1, 1, 45)
+            for memory in db.scalars(select(ArenaAgentMemory)).all():
+                if memory.memory_type == "closing_review":
+                    memory.created_at = datetime(2026, 6, 1, 7, 20)
+                elif memory.memory_type == "nightly_learning":
+                    memory.created_at = datetime(2026, 6, 1, 12, 20)
         dashboard_response = client.get(
             "/api/aniu/arena/agents/detail_ai/dashboard",
             headers=headers,

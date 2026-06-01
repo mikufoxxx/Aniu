@@ -801,6 +801,7 @@ class ArenaService:
                     agent_id=agent_id,
                     memory_type="closing_review",
                     limit=10,
+                    current_schedule_only=True,
                 )
             },
             "learning": {
@@ -809,6 +810,7 @@ class ArenaService:
                     agent_id=agent_id,
                     memory_type="nightly_learning",
                     limit=10,
+                    current_schedule_only=True,
                 )
             },
         }
@@ -1121,6 +1123,7 @@ class ArenaService:
         agent_id: str,
         memory_type: str,
         limit: int = 20,
+        current_schedule_only: bool = False,
     ) -> list[dict[str, Any]]:
         memories = db.scalars(
             select(ArenaAgentMemory)
@@ -1131,6 +1134,12 @@ class ArenaService:
             .order_by(ArenaAgentMemory.id.desc())
             .limit(max(1, min(limit, 100)))
         ).all()
+        if current_schedule_only:
+            phase = "nightly_learning" if memory_type == "nightly_learning" else "closing_review"
+            memories = [
+                memory for memory in memories
+                if self._is_current_phase_output(phase=phase, created_at=memory.created_at)
+            ]
         return [self._memory_payload(memory) for memory in memories]
 
     def list_agents(self, db: Session) -> dict[str, Any]:
@@ -2379,6 +2388,11 @@ class ArenaService:
         ).all()
         recommendations: list[dict[str, Any]] = []
         for run in runs:
+            if not self._is_current_phase_output(
+                phase="morning_recommendation",
+                created_at=run.created_at,
+            ):
+                continue
             payload = run.candidate_payload or {}
             for item in payload.get("agent_recommendations") or []:
                 if item.get("agent_id") != agent_id:
@@ -2431,6 +2445,13 @@ class ArenaService:
             .order_by(ArenaOrder.id.desc())
             .limit(limit)
         ).all()
+        orders = [
+            order for order in orders
+            if self._is_current_phase_output(
+                phase="intraday_trade",
+                created_at=order.created_at,
+            )
+        ]
         quote_by_symbol = self._realtime_quotes_for_orders(orders)
         return [
             {
@@ -2502,6 +2523,48 @@ class ArenaService:
             year, week, _ = value.isocalendar()
             return f"{year}-W{week:02d}"
         return value.strftime("%Y-%m-%d")
+
+    def _is_current_phase_output(self, *, phase: str, created_at: datetime | None) -> bool:
+        if created_at is None:
+            return False
+        now = self._now_shanghai()
+        created_local = self._local_time(created_at)
+        if created_local.date() != now.date():
+            return False
+        return any(
+            window_start <= created_local <= window_end and now >= window_start
+            for window_start, window_end in self._phase_windows_for_day(
+                phase=phase,
+                now=now,
+            )
+        )
+
+    def _phase_start_for_day(self, *, phase: str, now: datetime) -> datetime | None:
+        windows = self._phase_windows_for_day(phase=phase, now=now)
+        if not windows:
+            return None
+        return min(window[0] for window in windows)
+
+    def _phase_windows_for_day(self, *, phase: str, now: datetime) -> list[tuple[datetime, datetime]]:
+        localized_now = now
+        if localized_now.tzinfo is None:
+            localized_now = localized_now.replace(tzinfo=ARENA_SCHEDULE_TIMEZONE)
+        windows: list[tuple[datetime, datetime]] = []
+        for window in ARENA_SCHEDULE_WINDOWS:
+            if window["phase"] != phase:
+                continue
+            hour, minute = window["start"]
+            window_start = localized_now.replace(
+                hour=hour,
+                minute=minute,
+                second=0,
+                microsecond=0,
+            )
+            windows.append((
+                window_start,
+                window_start + timedelta(minutes=int(window["window_minutes"])),
+            ))
+        return windows
 
     def _closing_summary(
         self,

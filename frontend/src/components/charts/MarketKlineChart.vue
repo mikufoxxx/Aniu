@@ -76,16 +76,17 @@ const intervalOptions = computed(() => {
 })
 
 const selectedPriceSeries = computed(() => {
-  return props.intervalSeries?.[activeInterval.value]?.length
+  const series = props.intervalSeries?.[activeInterval.value]?.length
     ? props.intervalSeries[activeInterval.value]
     : props.priceSeries
+  return normalizePriceSeries(series)
 })
 const latestRealtimePoint = computed(() => {
   const point = props.priceSeries[props.priceSeries.length - 1]
   return point?.is_realtime ? point : null
 })
 const activeForecastSeries = computed(() => (
-  activeInterval.value === 'daily' ? (props.forecastSeries || []) : []
+  activeInterval.value === 'daily' ? normalizeForecastSeries(props.forecastSeries || []) : []
 ))
 const metaItems = computed(() => {
   const summary = props.dataSummary ?? {}
@@ -122,20 +123,81 @@ function compactDateKey(value: string | undefined): string {
   return String(value || '').replace(/\D/g, '').slice(0, 8)
 }
 
+function tradeSortKey(value: string | undefined, fallback = 0): number {
+  const text = String(value || '')
+  const week = text.match(/^(\d{4})W(\d{2})$/)
+  if (week) return Number(`${week[1]}${week[2]}0000`)
+  const digits = text.replace(/\D/g, '')
+  if (digits.length >= 12) return Number(digits.slice(0, 12))
+  if (digits.length >= 8) return Number(`${digits.slice(0, 8)}0000`)
+  if (digits.length >= 6) return Number(`${digits.slice(0, 6)}000000`)
+  return fallback
+}
+
+function normalizePriceSeries(series: PriceSeriesPoint[]): PriceSeriesPoint[] {
+  return [...series]
+    .map((item, index) => {
+      const close = Number(item.close)
+      if (!Number.isFinite(close) || close <= 0) return null
+      const open = Number.isFinite(Number(item.open)) && Number(item.open) > 0 ? Number(item.open) : close
+      const highInput = Number.isFinite(Number(item.high)) && Number(item.high) > 0 ? Number(item.high) : close
+      const lowInput = Number.isFinite(Number(item.low)) && Number(item.low) > 0 ? Number(item.low) : close
+      const high = Math.max(open, close, highInput)
+      const low = Math.min(open, close, lowInput)
+      return {
+        ...item,
+        open,
+        high,
+        low,
+        close,
+        volume: Number(item.volume || 0),
+        amount: Number(item.amount || 0),
+        _sortKey: tradeSortKey(item.trade_date, index),
+      }
+    })
+    .filter((item): item is PriceSeriesPoint & { _sortKey: number } => Boolean(item))
+    .sort((a, b) => a._sortKey - b._sortKey)
+    .map(({ _sortKey: _ignored, ...item }) => item)
+}
+
+function normalizeForecastSeries(series: ForecastPoint[]): ForecastPoint[] {
+  return [...series]
+    .filter((item) => Number.isFinite(Number(item.price)) && Number(item.price) > 0 && item.trade_date)
+    .sort((a, b) => tradeSortKey(a.trade_date) - tradeSortKey(b.trade_date))
+}
+
+function nearestSameDayPoint(
+  markerDate: string,
+  visibleSeries: PriceSeriesPoint[],
+): PriceSeriesPoint | undefined {
+  const markerDay = compactDateKey(markerDate)
+  if (!markerDay) return undefined
+  const markerKey = tradeSortKey(markerDate)
+  const sameDay = visibleSeries.filter((point) => compactDateKey(point.trade_date) === markerDay)
+  if (!sameDay.length) return undefined
+  if (markerKey <= 0 || markerDate.replace(/\D/g, '').length < 12) return sameDay[sameDay.length - 1]
+  return sameDay.reduce((best, point) => {
+    const bestDistance = Math.abs(tradeSortKey(best.trade_date) - markerKey)
+    const pointDistance = Math.abs(tradeSortKey(point.trade_date) - markerKey)
+    return pointDistance < bestDistance ? point : best
+  }, sameDay[0])
+}
+
 function markerCoordinate(
   marker: TradeMarker,
   visibleSeries: PriceSeriesPoint[],
 ): [string, number] | null {
   if (!marker.trade_date) return null
   const markerDate = String(marker.trade_date)
-  const exact = visibleSeries.find((point) => String(point.trade_date) === markerDate)
-  const markerDay = compactDateKey(markerDate)
-  const sameDay = markerDay
-    ? [...visibleSeries].reverse().find((point) => compactDateKey(point.trade_date) === markerDay)
-    : undefined
-  const target = exact || sameDay
+  const markerPrice = Number(marker.price)
+  if (!Number.isFinite(markerPrice) || markerPrice <= 0) return null
+  const markerKey = tradeSortKey(markerDate)
+  const exact = visibleSeries.find((point) => {
+    return String(point.trade_date) === markerDate || tradeSortKey(point.trade_date) === markerKey
+  })
+  const target = exact || nearestSameDayPoint(markerDate, visibleSeries)
   if (!target?.trade_date) return null
-  return [String(target.trade_date), marker.price]
+  return [String(target.trade_date), markerPrice]
 }
 
 function buildOption(): EChartsOption {
@@ -165,16 +227,18 @@ function buildOption(): EChartsOption {
     })),
     ...forecast.map(() => 0),
   ]
+  const lastActualIndex = visibleSeries.length - 1
+  const lastActualClose = lastActualIndex >= 0 ? visibleSeries[lastActualIndex].close : null
   const forecastLine = [
-    ...visibleSeries.map(() => null),
+    ...visibleSeries.map((item, index) => forecast.length && index === lastActualIndex ? item.close : null),
     ...forecast.map((item) => item.price),
   ]
   const forecastUpper = [
-    ...visibleSeries.map(() => null),
+    ...visibleSeries.map((_item, index) => forecast.length && index === lastActualIndex ? lastActualClose : null),
     ...forecast.map((item) => item.upper ?? null),
   ]
   const forecastLower = [
-    ...visibleSeries.map(() => null),
+    ...visibleSeries.map((_item, index) => forecast.length && index === lastActualIndex ? lastActualClose : null),
     ...forecast.map((item) => item.lower ?? null),
   ]
   const markerData: Array<{

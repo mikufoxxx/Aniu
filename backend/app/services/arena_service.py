@@ -1319,7 +1319,7 @@ class ArenaService:
             db,
             symbol=order.symbol,
             action=order.action,
-            trade_date=order.created_at.strftime("%Y%m%d") if order.created_at else None,
+            trade_date=self._order_marker_trade_time(order),
             price=order.price,
             quantity=order.quantity,
         )
@@ -3164,9 +3164,17 @@ class ArenaService:
                 continue
             try:
                 series = chart_data_service.price_series(db, symbol=symbol, limit=120)
+                forecast = chart_data_service._forecast_with_trading_dates(
+                    list(prediction.get("forecast_series") or []),
+                    base_date=str(
+                        prediction.get("history_end_date")
+                        or (series[-1].get("trade_date") if series else "")
+                    ),
+                )
+                prediction["forecast_series"] = forecast
                 prediction["actual_comparison"] = chart_data_service.forecast_actual_comparison(
                     price_series=series,
-                    forecast_series=list(prediction.get("forecast_series") or []),
+                    forecast_series=forecast,
                 )
             except Exception as exc:
                 prediction["actual_comparison"] = {
@@ -3228,7 +3236,7 @@ class ArenaService:
                     db,
                     symbol=order.symbol,
                     action=order.action,
-                    trade_date=order.created_at.strftime("%Y%m%d") if order.created_at else None,
+                    trade_date=self._order_marker_trade_time(order),
                     price=order.price,
                     quantity=order.quantity,
                     realtime_quote=quote_by_symbol.get(normalize_symbol(order.symbol)),
@@ -3303,6 +3311,12 @@ class ArenaService:
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=UTC)
         return timestamp.astimezone(ARENA_SCHEDULE_TIMEZONE)
+
+    def _order_marker_trade_time(self, order: ArenaOrder) -> str | None:
+        timestamp = order.created_at or order.decision_recorded_at
+        if timestamp is None:
+            return None
+        return self._local_time(timestamp).strftime("%Y-%m-%d %H:%M")
 
     def _equity_bucket(self, value: datetime, interval: str) -> str:
         if interval == "hourly":
@@ -3528,7 +3542,7 @@ class ArenaService:
                 db,
                 symbol=order.symbol,
                 action=order.action,
-                trade_date=order.created_at.strftime("%Y%m%d") if order.created_at else None,
+                trade_date=self._order_marker_trade_time(order),
                 price=order.price,
                 quantity=order.quantity,
             ),

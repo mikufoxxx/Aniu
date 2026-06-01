@@ -1,5 +1,5 @@
 from pathlib import Path
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import json
 import sys
 from zoneinfo import ZoneInfo
@@ -1274,6 +1274,140 @@ def test_order_charts_append_realtime_quote_after_latest_daily_bar(monkeypatch, 
     assert latest["source"] == "easy_tdx"
     assert charts["interval_series"]["daily"] == charts["price_series"]
     assert charts["forecast_series"][0]["trade_date"] > "20260601"
+
+    _reset_state()
+
+
+def test_chart_forecast_dates_use_future_trading_days(monkeypatch) -> None:
+    from app.services.chart_data_service import chart_data_service
+
+    def fake_next_trading_day(current: date) -> date:
+        probe = current
+        while probe.weekday() >= 5:
+            probe += timedelta(days=1)
+        return probe
+
+    monkeypatch.setattr(trading_calendar_service, "next_trading_day", fake_next_trading_day)
+    series = [
+        {
+            "trade_date": f"202605{day:02d}",
+            "open": 10 + index * 0.1,
+            "high": 10.2 + index * 0.1,
+            "low": 9.8 + index * 0.1,
+            "close": 10.1 + index * 0.1,
+            "amount": 1000,
+        }
+        for index, day in enumerate(range(20, 30))
+    ]
+
+    forecast = chart_data_service.forecast_series(series, horizon=4)
+
+    assert [point["trade_date"] for point in forecast] == [
+        "20260601",
+        "20260602",
+        "20260603",
+        "20260604",
+    ]
+
+
+def test_order_charts_remap_legacy_frozen_forecast_to_trading_days(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    from app.services.chart_data_service import chart_data_service
+
+    def fake_next_trading_day(current: date) -> date:
+        probe = current
+        while probe.weekday() >= 5:
+            probe += timedelta(days=1)
+        return probe
+
+    monkeypatch.setattr(trading_calendar_service, "next_trading_day", fake_next_trading_day)
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260529", open=10, high=10.4, low=9.8, close=10.2, amount=800))
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260601", open=10.3, high=10.8, low=10.1, close=10.6, amount=900))
+        with session_scope() as db:
+            charts = chart_data_service.order_charts(
+                db,
+                symbol="000001.SZ",
+                action="BUY",
+                trade_date="2026-06-01 09:45",
+                price=10.5,
+                quantity=1000,
+                realtime_quote={"source": "fallback"},
+                hourly_series=[],
+                frozen_prediction={
+                    "frozen": True,
+                    "history_end_date": "20260529",
+                    "forecast_series": [
+                        {"trade_date": "20260530", "price": 10.5, "upper": 10.8, "lower": 10.2},
+                        {"trade_date": "20260531", "price": 10.7, "upper": 11.0, "lower": 10.4},
+                    ],
+                },
+            )
+
+    assert [point["trade_date"] for point in charts["forecast_series"]] == [
+        "20260601",
+        "20260602",
+    ]
+    assert charts["trade_markers"][0]["trade_date"] == "2026-06-01 09:45"
+    assert charts["forecast_snapshot"]["forecast_series"] == charts["forecast_series"]
+    assert charts["forecast_actual_comparison"]["matched_points"][0]["trade_date"] == "20260601"
+
+    _reset_state()
+
+
+def test_order_charts_same_day_realtime_uses_intraday_high_low(monkeypatch, tmp_path) -> None:
+    from app.services.chart_data_service import chart_data_service
+
+    with create_test_client(monkeypatch, tmp_path):
+        with session_scope() as db:
+            db.add(DailyBar(symbol="000001.SZ", trade_date="20260601", open=10, high=10.2, low=9.9, close=10.0, amount=800))
+        with session_scope() as db:
+            charts = chart_data_service.order_charts(
+                db,
+                symbol="000001.SZ",
+                action="BUY",
+                trade_date="2026-06-01 10:30",
+                price=10.1,
+                quantity=1000,
+                realtime_quote={
+                    "symbol": "000001.SZ",
+                    "price": 10.1,
+                    "amount": 1200,
+                    "source": "tencent",
+                    "timestamp": "2026-06-01 10:30:00",
+                },
+                hourly_series=[
+                    {
+                        "trade_date": "2026-06-01 09:30",
+                        "open": 9.8,
+                        "high": 10.8,
+                        "low": 9.7,
+                        "close": 10.0,
+                        "amount": 1000,
+                        "volume": 100,
+                    },
+                    {
+                        "trade_date": "2026-06-01 10:30",
+                        "open": 10.0,
+                        "high": 10.5,
+                        "low": 9.9,
+                        "close": 10.1,
+                        "amount": 1200,
+                        "volume": 120,
+                    },
+                ],
+            )
+
+    latest = charts["price_series"][-1]
+    assert latest["trade_date"] == "20260601"
+    assert latest["close"] == 10.1
+    assert latest["high"] == 10.8
+    assert latest["low"] == 9.7
+    assert latest["is_realtime"] is True
 
     _reset_state()
 

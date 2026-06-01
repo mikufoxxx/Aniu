@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import math
 from statistics import mean, pstdev
 from typing import Any
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DailyBar
 from app.services.market_data_service import market_data_service, normalize_symbol
+from app.services.trading_calendar_service import trading_calendar_service
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
@@ -215,11 +216,20 @@ class ChartDataService:
             realtime_quote=realtime_quote,
             intraday_series=hourly,
         )
+        frozen_snapshot = dict(frozen_prediction or {})
         forecast = (
-            list(frozen_prediction.get("forecast_series") or [])
-            if frozen_prediction
+            self._forecast_with_trading_dates(
+                list(frozen_snapshot.get("forecast_series") or []),
+                base_date=str(
+                    frozen_snapshot.get("history_end_date")
+                    or (series[-1].get("trade_date") if series else "")
+                ),
+            )
+            if frozen_snapshot
             else self.forecast_series(series)
         )
+        if frozen_snapshot:
+            frozen_snapshot["forecast_series"] = forecast
         markers = [
             {
                 "action": action,
@@ -234,7 +244,7 @@ class ChartDataService:
             "interval_series": self.interval_series(series, hourly_series=hourly),
             "forecast_series": forecast,
             "trade_markers": markers,
-            "forecast_snapshot": dict(frozen_prediction or {}),
+            "forecast_snapshot": frozen_snapshot,
             "forecast_actual_comparison": self.forecast_actual_comparison(
                 price_series=series,
                 forecast_series=forecast,
@@ -472,6 +482,7 @@ class ChartDataService:
         expected_return = max(-0.045, min(0.045, trend_signal + rsi_bias))
         current = closes[-1]
         trade_date = self._parse_trade_date(str(price_series[-1].get("trade_date") or ""))
+        forecast_dates = self._future_trading_dates(trade_date.date(), horizon)
         points: list[dict[str, Any]] = []
         for step in range(1, horizon + 1):
             resistance_gap = (resistance - current) / current if current > 0 else 0.0
@@ -488,7 +499,7 @@ class ChartDataService:
             trend_score = max(-100.0, min(100.0, step_return / max(volatility, 0.0025) * 20))
             points.append(
                 {
-                    "trade_date": (trade_date + timedelta(days=step)).strftime("%Y%m%d"),
+                    "trade_date": forecast_dates[step - 1].strftime("%Y%m%d"),
                     "price": round(current, 4),
                     "upper": round(current * (1 + confidence), 4),
                     "lower": round(max(0.01, current * (1 - confidence)), 4),
@@ -498,6 +509,43 @@ class ChartDataService:
                 }
             )
         return points
+
+    def _forecast_with_trading_dates(
+        self,
+        forecast_series: list[dict[str, Any]],
+        *,
+        base_date: str,
+    ) -> list[dict[str, Any]]:
+        if not forecast_series:
+            return []
+        parsed_base = self._parse_trade_date(base_date).date()
+        dates = self._future_trading_dates(parsed_base, len(forecast_series))
+        result: list[dict[str, Any]] = []
+        for index, point in enumerate(forecast_series):
+            item = dict(point)
+            item["trade_date"] = dates[index].strftime("%Y%m%d")
+            result.append(item)
+        return result
+
+    def _future_trading_dates(self, base_date: date, horizon: int) -> list[date]:
+        dates: list[date] = []
+        probe = base_date + timedelta(days=1)
+        while len(dates) < horizon:
+            try:
+                next_day = trading_calendar_service.next_trading_day(probe)
+            except Exception:
+                next_day = self._next_weekday(probe)
+            if dates and next_day <= dates[-1]:
+                next_day = self._next_weekday(dates[-1] + timedelta(days=1))
+            dates.append(next_day)
+            probe = next_day + timedelta(days=1)
+        return dates
+
+    def _next_weekday(self, current: date) -> date:
+        probe = current
+        while probe.weekday() >= 5:
+            probe += timedelta(days=1)
+        return probe
 
     def return_distribution_from_equity(
         self,
@@ -671,11 +719,14 @@ class ChartDataService:
         price: float,
         intraday_series: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        day_points = [
-            point
-            for point in intraday_series
-            if self._compact_trade_date(str(point.get("trade_date") or "")) == quote_date
-        ]
+        day_points = sorted(
+            [
+                point
+                for point in intraday_series
+                if self._compact_trade_date(str(point.get("trade_date") or "")) == quote_date
+            ],
+            key=lambda point: self._series_sort_key(str(point.get("trade_date") or "")),
+        )
         if not day_points:
             return None
         open_price = self._safe_float(day_points[0].get("open")) or price
@@ -709,17 +760,27 @@ class ChartDataService:
         realtime_close = self._safe_float(realtime.get("close"))
         existing_high = self._safe_float(existing.get("high"))
         existing_low = self._safe_float(existing.get("low"))
+        realtime_high = self._safe_float(realtime.get("high"))
+        realtime_low = self._safe_float(realtime.get("low"))
         existing_amount = self._safe_float(existing.get("amount")) or 0.0
         realtime_amount = self._safe_float(realtime.get("amount")) or 0.0
         merged = dict(existing)
         if realtime_close is not None and realtime_close > 0:
             merged["close"] = round(realtime_close, 4)
             merged["high"] = round(
-                max(value for value in (existing_high, realtime_close) if value is not None),
+                max(
+                    value
+                    for value in (existing_high, realtime_high, realtime_close)
+                    if value is not None
+                ),
                 4,
             )
             merged["low"] = round(
-                min(value for value in (existing_low, realtime_close) if value is not None),
+                min(
+                    value
+                    for value in (existing_low, realtime_low, realtime_close)
+                    if value is not None
+                ),
                 4,
             )
         if realtime_amount > 0:
@@ -877,11 +938,19 @@ class ChartDataService:
         return f"{year}W{week:02d}"
 
     def _parse_trade_date(self, value: str) -> datetime:
-        compact = value[:8]
+        compact = self._compact_trade_date(value)
         try:
             return datetime.strptime(compact, "%Y%m%d")
         except ValueError:
             return datetime.utcnow()
+
+    def _series_sort_key(self, value: str) -> int:
+        digits = "".join(char for char in value if char.isdigit())
+        if len(digits) >= 12:
+            return int(digits[:12])
+        if len(digits) >= 8:
+            return int(f"{digits[:8]}0000")
+        return 0
 
     def _rsi(self, closes: list[float], window: int) -> float | None:
         if len(closes) <= window:

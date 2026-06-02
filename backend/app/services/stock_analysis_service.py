@@ -453,6 +453,7 @@ class StockAnalysisService:
                 quantity=int(source_snapshot.get("suggested_quantity") or 0),
                 factor_scores=source_snapshot.get("factor_scores") if isinstance(source_snapshot.get("factor_scores"), dict) else {},
             )
+        payload["sections"] = self._ensure_report_detail_sections(payload)
         payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
         return payload
 
@@ -661,6 +662,86 @@ class StockAnalysisService:
         except (TypeError, ValueError):
             return None
         return number
+
+    def _ensure_report_detail_sections(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        sections = list(payload.get("sections") or [])
+        section_ids = {str(section.get("id") or "") for section in sections if isinstance(section, dict)}
+        snapshot = payload.get("source_snapshot")
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        charts = payload.get("charts")
+        charts = charts if isinstance(charts, dict) else {}
+        summary = charts.get("data_summary")
+        summary = summary if isinstance(summary, dict) else {}
+        latest_indicators = summary.get("latest_indicators")
+        latest_indicators = latest_indicators if isinstance(latest_indicators, dict) else {}
+        price_series = charts.get("price_series")
+        price_series = price_series if isinstance(price_series, list) else []
+        latest_point = price_series[-1] if price_series and isinstance(price_series[-1], dict) else {}
+        support_resistance = charts.get("support_resistance")
+        support_resistance = support_resistance if isinstance(support_resistance, dict) else {}
+        data_sources = snapshot.get("data_sources")
+        data_sources = data_sources if isinstance(data_sources, list) else []
+        daily = snapshot.get("daily_factors")
+        daily = daily if isinstance(daily, dict) else {}
+        financial = snapshot.get("financial_factors")
+        financial = financial if isinstance(financial, dict) else {}
+
+        if "market_snapshot" not in section_ids:
+            sections.append(
+                {
+                    "id": "market_snapshot",
+                    "title": "行情与成交",
+                    "content": "根据保存快照和最新图表数据补齐价格、成交、支撑压力和行情源。",
+                    "items": [
+                        {"label": "现价", "value": self._format_price(snapshot.get("price") or latest_point.get("close"))},
+                        {"label": "涨跌幅", "value": self._format_pct(snapshot.get("change_pct"))},
+                        {"label": "成交额", "value": self._format_amount(snapshot.get("amount") or latest_point.get("amount"))},
+                        {"label": "支撑", "value": self._format_price(support_resistance.get("support"))},
+                        {"label": "压力", "value": self._format_price(support_resistance.get("resistance"))},
+                        {"label": "行情源", "value": str(summary.get("latest_hourly_source") or snapshot.get("source") or latest_point.get("source") or "--")},
+                    ],
+                }
+            )
+        if "technical_snapshot" not in section_ids:
+            sections.append(
+                {
+                    "id": "technical_snapshot",
+                    "title": "技术面底稿",
+                    "content": "从图表计算出的均线、RSI、MACD、KDJ 和数据覆盖情况。",
+                    "items": [
+                        {"label": "日线覆盖", "value": f"{summary.get('daily_points') or len(price_series)} 根"},
+                        {"label": "最新交易日", "value": str(summary.get("latest_daily_trade_date") or latest_point.get("trade_date") or "--")},
+                        {"label": "MA20", "value": self._format_price(latest_indicators.get("ma20") or latest_point.get("ma20"))},
+                        {"label": "MA60", "value": self._format_price(latest_indicators.get("ma60") or latest_point.get("ma60"))},
+                        {"label": "RSI14", "value": self._format_number(latest_indicators.get("rsi14") or latest_point.get("rsi14"), digits=1)},
+                        {"label": "MACD柱", "value": self._format_number(latest_indicators.get("macd_hist") or latest_point.get("macd_hist"), digits=4)},
+                        {"label": "KDJ J", "value": self._format_number(latest_indicators.get("kdj_j") or latest_point.get("kdj_j"), digits=1)},
+                        {"label": "预测点", "value": f"{summary.get('forecast_points') or 0} 个"},
+                    ],
+                }
+            )
+        if "capital_snapshot" not in section_ids:
+            margin = daily.get("margin_detail") if isinstance(daily.get("margin_detail"), dict) else {}
+            dragon_tiger = daily.get("dragon_tiger") if isinstance(daily.get("dragon_tiger"), dict) else {}
+            pledge = daily.get("pledge_stat") if isinstance(daily.get("pledge_stat"), dict) else {}
+            sections.append(
+                {
+                    "id": "capital_snapshot",
+                    "title": "资金与财务",
+                    "content": "展示保存报告时可用的资金流、两融、龙虎榜、估值和财务质量；旧报告缺字段时保留空值。",
+                    "items": [
+                        {"label": "资金净流", "value": self._format_amount(daily.get("moneyflow_net_amount"))},
+                        {"label": "两融净买", "value": self._format_amount(margin.get("net_financing_buy"))},
+                        {"label": "龙虎榜净额", "value": self._format_amount(dragon_tiger.get("net_amount"))},
+                        {"label": "ROE", "value": self._format_pct(financial.get("roe") or financial.get("roe_dt"))},
+                        {"label": "净利同比", "value": self._format_pct(financial.get("netprofit_yoy"))},
+                        {"label": "市盈率", "value": self._format_number(daily.get("pe_ttm"), digits=2)},
+                        {"label": "质押比例", "value": self._format_pct(pledge.get("pledge_ratio"))},
+                        {"label": "数据源", "value": f"{len(data_sources)} 个"},
+                    ],
+                }
+            )
+        return sections
 
     def _skill_opinion_items(
         self,

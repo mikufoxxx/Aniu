@@ -113,13 +113,17 @@ const headlineItems = computed(() => {
   const currentReport = report.value
   if (!currentReport) return []
   const snapshot = currentReport.source_snapshot || {}
+  const priceSeries = currentReport.charts?.price_series || []
+  const latestPoint = priceSeries.length
+    ? priceSeries[priceSeries.length - 1] as unknown as Record<string, unknown>
+    : {}
   const support = currentReport.charts?.support_resistance || {}
   const summary = currentReport.charts?.data_summary || {}
   return [
-    { label: '现价', value: formatPrice(snapshot.price) },
+    { label: '现价', value: formatPrice(snapshot.price ?? latestPoint.close) },
     { label: '评分', value: formatNumber(snapshot.score, 1) },
     { label: '涨跌幅', value: formatPercent(snapshot.change_pct) },
-    { label: '成交额', value: formatAmount(snapshot.amount) },
+    { label: '成交额', value: formatAmount(snapshot.amount ?? latestPoint.amount) },
     { label: '支撑', value: formatPrice(support.support) },
     { label: '压力', value: formatPrice(support.resistance) },
     { label: '日线覆盖', value: `${summary.daily_points ?? currentReport.charts?.price_series?.length ?? 0} 根` },

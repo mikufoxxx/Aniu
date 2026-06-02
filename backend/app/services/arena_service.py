@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
@@ -3242,13 +3243,15 @@ class ArenaService:
         prediction_by_symbol = prediction_by_symbol or {}
         hourly_by_symbol: dict[str, list[dict[str, Any]]] = {}
         if include_charts:
+            symbols: list[str] = []
             for order in orders:
                 try:
                     symbol = normalize_symbol(order.symbol)
                 except ValueError:
                     continue
-                if symbol not in hourly_by_symbol:
-                    hourly_by_symbol[symbol] = chart_data_service.real_hourly_series(symbol)
+                if symbol not in symbols:
+                    symbols.append(symbol)
+            hourly_by_symbol = self._hourly_series_by_symbol(symbols)
 
         payloads: list[dict[str, Any]] = []
         for order in orders:
@@ -3281,6 +3284,25 @@ class ArenaService:
                 )
             payloads.append(item)
         return payloads
+
+    def _hourly_series_by_symbol(self, symbols: list[str]) -> dict[str, list[dict[str, Any]]]:
+        if not symbols:
+            return {}
+        normalized_symbols = list(dict.fromkeys(symbols))
+        max_workers = min(4, len(normalized_symbols))
+        results: dict[str, list[dict[str, Any]]] = {symbol: [] for symbol in normalized_symbols}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_by_symbol = {
+                executor.submit(chart_data_service.real_hourly_series, symbol): symbol
+                for symbol in normalized_symbols
+            }
+            for future in as_completed(future_by_symbol):
+                symbol = future_by_symbol[future]
+                try:
+                    results[symbol] = future.result()
+                except Exception:
+                    results[symbol] = []
+        return results
 
     def _prediction_by_symbol(
         self,

@@ -33,6 +33,7 @@ _TENCENT_QUOTE_BATCH_SIZE = 60
 _EASTMONEY_QUOTE_BATCH_SIZE = 80
 _SINA_QUOTE_BATCH_SIZE = 220
 _TENCENT_QUOTE_TIMEOUT_SECONDS = 3.0
+_INTRADAY_HTTP_TIMEOUT_SECONDS = 3.0
 _EASY_TDX_TIMEOUT_SECONDS = 4.0
 _MAX_QUOTE_CACHE_KEYS = 64
 _MAX_INTRADAY_CACHE_KEYS = 160
@@ -610,7 +611,7 @@ class MarketDataService:
             response = httpx.get(
                 "https://push2his.eastmoney.com/api/qt/stock/kline/get",
                 params=params,
-                timeout=8.0,
+                timeout=_INTRADAY_HTTP_TIMEOUT_SECONDS,
                 follow_redirects=True,
                 headers={"User-Agent": "Aniu/1.0"},
             )
@@ -677,7 +678,7 @@ class MarketDataService:
             response = httpx.get(
                 "http://ifzq.gtimg.cn/appstock/app/kline/mkline",
                 params=params,
-                timeout=8.0,
+                timeout=_INTRADAY_HTTP_TIMEOUT_SECONDS,
                 follow_redirects=True,
                 headers={"User-Agent": "Aniu/1.0"},
             )

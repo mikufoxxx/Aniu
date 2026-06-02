@@ -200,6 +200,11 @@ class ArenaService:
     def _now_shanghai(self) -> datetime:
         return datetime.now(ARENA_SCHEDULE_TIMEZONE)
 
+    def _local_iso(self, value: datetime | None, *, timespec: str = "minutes") -> str | None:
+        if value is None:
+            return None
+        return self._local_time(value).isoformat(timespec=timespec)
+
     def run_once(
         self,
         db: Session,
@@ -1167,15 +1172,17 @@ class ArenaService:
         *,
         agent_id: str,
         section: str = "morning",
+        date: str | None = None,
     ) -> dict[str, Any] | None:
         normalized_section = self._normalize_dashboard_section(section)
+        date_key = self._normalize_dashboard_date(date)
         agent = self.get_agent(db, agent_id=agent_id)
         if agent is None:
             agent = self._default_agent(agent_id)
         if agent is None:
             return None
 
-        cache_key = f"agent_dashboard:{agent_id}:{normalized_section}"
+        cache_key = f"agent_dashboard:{agent_id}:{normalized_section}:{date_key}"
         cached = self._cached_live_payload(cache_key)
         if cached is not None:
             return cached
@@ -1189,6 +1196,7 @@ class ArenaService:
                 agent_id=agent_id,
                 agent=agent,
                 normalized_section=normalized_section,
+                date_key=date_key,
             )
             return self._store_live_payload(
                 cache_key,
@@ -1203,6 +1211,7 @@ class ArenaService:
         agent_id: str,
         agent: dict[str, Any],
         normalized_section: str,
+        date_key: str,
     ) -> dict[str, Any]:
         account = db.scalar(
             select(ArenaAccount)
@@ -1215,12 +1224,13 @@ class ArenaService:
             agent_id=agent_id,
             limit=20,
             include_charts=False,
+            date_key=date_key,
         )
         summary["charts"] = chart_data_service.arena_summary_charts(
             orders=summary_orders,
             positions=list(summary.get("positions") or []),
         )
-        section_counts = self._dashboard_section_counts(db, agent_id=agent_id)
+        section_counts = self._dashboard_section_counts(db, agent_id=agent_id, date_key=date_key)
         morning_recommendations: list[dict[str, Any]] = []
         recent_orders: list[dict[str, Any]] = []
         closing_reviews: list[dict[str, Any]] = []
@@ -1232,6 +1242,7 @@ class ArenaService:
                 agent_id=agent_id,
                 limit=10,
                 attach_actuals=True,
+                date_key=date_key,
             )
         elif normalized_section == "intraday":
             prediction_source = self._recent_agent_recommendations(
@@ -1239,6 +1250,7 @@ class ArenaService:
                 agent_id=agent_id,
                 limit=1,
                 attach_actuals=False,
+                date_key=date_key,
             )
             recent_orders = self._recent_orders(
                 db,
@@ -1246,6 +1258,7 @@ class ArenaService:
                 limit=ARENA_DASHBOARD_INTRADAY_ORDER_LIMIT,
                 prediction_by_symbol=self._prediction_by_symbol(prediction_source),
                 include_charts=True,
+                date_key=date_key,
             )
         elif normalized_section == "closing":
             closing_reviews = self.recent_agent_memories_by_type(
@@ -1254,6 +1267,7 @@ class ArenaService:
                 memory_type="closing_review",
                 limit=10,
                 current_schedule_only=True,
+                date_key=date_key,
             )
         else:
             learning_reviews = self.recent_agent_memories_by_type(
@@ -1262,12 +1276,14 @@ class ArenaService:
                 memory_type="nightly_learning",
                 limit=10,
                 current_schedule_only=True,
+                date_key=date_key,
             )
 
         return {
             "agent": agent,
             "summary": summary,
             "section": normalized_section,
+            "date": date_key,
             "section_counts": section_counts,
             "morning": {
                 "recommendations": morning_recommendations
@@ -1287,13 +1303,27 @@ class ArenaService:
         normalized = str(section or "morning").strip().lower()
         return normalized if normalized in ARENA_DASHBOARD_SECTIONS else "morning"
 
-    def _dashboard_section_counts(self, db: Session, *, agent_id: str) -> dict[str, int]:
+    def _normalize_dashboard_date(self, value: str | None) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            return self._now_shanghai().date().isoformat()
+        compact = raw.replace("-", "")
+        if re.fullmatch(r"\d{8}", compact):
+            return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return self._now_shanghai().date().isoformat()
+        return self._local_time(parsed).date().isoformat()
+
+    def _dashboard_section_counts(self, db: Session, *, agent_id: str, date_key: str) -> dict[str, int]:
         morning = len(
             self._recent_agent_recommendations(
                 db,
                 agent_id=agent_id,
                 limit=10,
                 attach_actuals=False,
+                date_key=date_key,
             )
         )
         intraday = len(
@@ -1302,6 +1332,7 @@ class ArenaService:
                 agent_id=agent_id,
                 limit=100,
                 include_charts=False,
+                date_key=date_key,
             )
         )
         closing = len(
@@ -1312,6 +1343,7 @@ class ArenaService:
                 limit=20,
                 current_schedule_only=True,
                 include_metrics=False,
+                date_key=date_key,
             )
         )
         learning = len(
@@ -1322,6 +1354,7 @@ class ArenaService:
                 limit=20,
                 current_schedule_only=True,
                 include_metrics=False,
+                date_key=date_key,
             )
         )
         return {
@@ -1354,7 +1387,7 @@ class ArenaService:
             quantity=order.quantity,
             marker_amount=order.amount,
             marker_reason=order.reason,
-            marker_created_at=order.created_at.isoformat() if order.created_at else None,
+            marker_created_at=self._local_iso(order.created_at),
         )
         forecast = ai_forecast_service.analyze_order(
             order_id=order.id,
@@ -1794,6 +1827,7 @@ class ArenaService:
         limit: int = 20,
         current_schedule_only: bool = False,
         include_metrics: bool = True,
+        date_key: str | None = None,
     ) -> list[dict[str, Any]]:
         memories = db.scalars(
             select(ArenaAgentMemory)
@@ -1802,15 +1836,22 @@ class ArenaService:
                 ArenaAgentMemory.memory_type == memory_type,
             )
             .order_by(ArenaAgentMemory.id.desc())
-            .limit(max(1, min(limit, 100)))
+            .limit(max(1, min(limit * 5, 100)))
         ).all()
         if current_schedule_only:
             phase = "nightly_learning" if memory_type == "nightly_learning" else "closing_review"
             memories = [
                 memory for memory in memories
-                if self._is_current_phase_output(phase=phase, created_at=memory.created_at)
+                if self._is_phase_output_for_date(
+                    phase=phase,
+                    created_at=memory.created_at,
+                    date_key=date_key,
+                )
             ]
-        return [self._memory_payload(memory, include_metrics=include_metrics) for memory in memories]
+        return [
+            self._memory_payload(memory, include_metrics=include_metrics)
+            for memory in memories[:limit]
+        ]
 
     def list_agents(self, db: Session) -> dict[str, Any]:
         stored = db.scalars(
@@ -2688,9 +2729,9 @@ class ArenaService:
             (decision_recorded_at - decision_generated_at).total_seconds() * 1000
         )
         return {
-            "decision_started_at": decision_started_at.isoformat(),
-            "decision_generated_at": decision_generated_at.isoformat(),
-            "decision_recorded_at": decision_recorded_at.isoformat(),
+            "decision_started_at": self._local_iso(decision_started_at, timespec="milliseconds"),
+            "decision_generated_at": self._local_iso(decision_generated_at, timespec="milliseconds"),
+            "decision_recorded_at": self._local_iso(decision_recorded_at, timespec="milliseconds"),
             "decision_latency_ms": max(decision_latency_ms, 0),
             "record_latency_ms": max(record_latency_ms, 0),
         }
@@ -3075,6 +3116,7 @@ class ArenaService:
         agent_id: str,
         limit: int,
         attach_actuals: bool = True,
+        date_key: str | None = None,
     ) -> list[dict[str, Any]]:
         runs = db.scalars(
             select(ArenaRun)
@@ -3088,10 +3130,11 @@ class ArenaService:
         recommendations: list[dict[str, Any]] = []
         for run in runs:
             payload = run.candidate_payload or {}
-            if not self._is_current_phase_output(
+            if not self._is_phase_output_for_date(
                 phase="morning_recommendation",
                 created_at=run.created_at,
                 schedule_context=payload.get("schedule_context"),
+                date_key=date_key,
             ):
                 continue
             for item in payload.get("agent_recommendations") or []:
@@ -3102,7 +3145,12 @@ class ArenaService:
                 if attach_actuals:
                     self._attach_recommendation_prediction_actuals(db, enriched)
                 enriched["run_id"] = run.id
-                enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
+                enriched["created_at"] = self._phase_output_iso(
+                    phase="morning_recommendation",
+                    created_at=run.created_at,
+                    schedule_context=payload.get("schedule_context"),
+                )
+                enriched["recorded_at"] = self._local_iso(run.created_at)
                 recommendations.append(enriched)
                 if len(recommendations) >= limit:
                     return recommendations
@@ -3151,7 +3199,12 @@ class ArenaService:
                 self._enrich_recommendation_names(db, enriched)
                 self._attach_recommendation_prediction_actuals(db, enriched)
                 enriched["run_id"] = run.id
-                enriched["created_at"] = run.created_at.isoformat() if run.created_at else None
+                enriched["created_at"] = self._phase_output_iso(
+                    phase="morning_recommendation",
+                    created_at=run.created_at,
+                    schedule_context=payload.get("schedule_context"),
+                )
+                enriched["recorded_at"] = self._local_iso(run.created_at)
                 recommendations[agent_id].append(enriched)
         return recommendations
 
@@ -3225,20 +3278,22 @@ class ArenaService:
         limit: int,
         prediction_by_symbol: dict[str, dict[str, Any]] | None = None,
         include_charts: bool = True,
+        date_key: str | None = None,
     ) -> list[dict[str, Any]]:
         orders = db.scalars(
             select(ArenaOrder)
             .where(ArenaOrder.agent_id == agent_id)
             .order_by(ArenaOrder.id.desc())
-            .limit(limit)
+            .limit(max(1, min(limit * 10, 200)))
         ).all()
         orders = [
             order for order in orders
-            if self._is_current_phase_output(
+            if self._is_phase_output_for_date(
                 phase="intraday_trade",
                 created_at=order.created_at,
+                date_key=date_key,
             )
-        ]
+        ][:limit]
         quote_by_symbol = self._realtime_quotes_for_orders(orders) if include_charts else {}
         prediction_by_symbol = prediction_by_symbol or {}
         hourly_by_symbol: dict[str, list[dict[str, Any]]] = {}
@@ -3264,7 +3319,7 @@ class ArenaService:
                 "price": order.price,
                 "amount": order.amount,
                 "reason": order.reason,
-                "created_at": order.created_at.isoformat() if order.created_at else None,
+                "created_at": self._local_iso(order.created_at),
             }
             if include_charts:
                 normalized_symbol = normalize_symbol(order.symbol)
@@ -3277,7 +3332,7 @@ class ArenaService:
                     quantity=order.quantity,
                     marker_amount=order.amount,
                     marker_reason=order.reason,
-                    marker_created_at=order.created_at.isoformat() if order.created_at else None,
+                    marker_created_at=self._local_iso(order.created_at),
                     realtime_quote=quote_by_symbol.get(normalize_symbol(order.symbol)),
                     frozen_prediction=prediction_by_symbol.get(normalize_symbol(order.symbol)),
                     hourly_series=hourly_by_symbol.get(normalized_symbol, []),
@@ -3391,6 +3446,21 @@ class ArenaService:
         created_at: datetime | None,
         schedule_context: dict[str, Any] | None = None,
     ) -> bool:
+        return self._is_phase_output_for_date(
+            phase=phase,
+            created_at=created_at,
+            schedule_context=schedule_context,
+            date_key=None,
+        )
+
+    def _is_phase_output_for_date(
+        self,
+        *,
+        phase: str,
+        created_at: datetime | None,
+        schedule_context: dict[str, Any] | None = None,
+        date_key: str | None = None,
+    ) -> bool:
         reference_at = self._phase_output_reference_time(
             created_at=created_at,
             schedule_context=schedule_context,
@@ -3399,15 +3469,35 @@ class ArenaService:
             return False
         now = self._now_shanghai()
         created_local = self._local_time(reference_at)
-        if created_local.date() != now.date():
+        target_date_key = self._normalize_dashboard_date(date_key)
+        if created_local.date().isoformat() != target_date_key:
             return False
-        return any(
-            window_start <= created_local <= window_end and now >= window_start
+        matching_windows = [
+            (window_start, window_end)
             for window_start, window_end in self._phase_windows_for_day(
                 phase=phase,
-                now=now,
+                now=created_local,
             )
+            if window_start <= created_local <= window_end
+        ]
+        if not matching_windows:
+            return False
+        if created_local.date() == now.date():
+            return any(now >= window_start for window_start, _ in matching_windows)
+        return created_local.date() < now.date()
+
+    def _phase_output_iso(
+        self,
+        *,
+        phase: str,
+        created_at: datetime | None,
+        schedule_context: dict[str, Any] | None = None,
+    ) -> str | None:
+        reference_at = self._phase_output_reference_time(
+            created_at=created_at,
+            schedule_context=schedule_context,
         )
+        return self._local_iso(reference_at)
 
     def _phase_output_reference_time(
         self,
@@ -3553,7 +3643,7 @@ class ArenaService:
             "memory_type": memory.memory_type,
             "summary": memory.summary,
             "metrics": (memory.metrics_payload or {}) if include_metrics else {},
-            "created_at": memory.created_at.isoformat() if memory.created_at else None,
+            "created_at": self._local_iso(memory.created_at),
         }
 
     def _select_affordable_candidate(
@@ -3585,15 +3675,10 @@ class ArenaService:
             "remaining_cash": order.remaining_cash,
             "reason": order.reason,
             "decision_context": order.decision_payload or {},
-            "decision_started_at": order.decision_started_at.isoformat()
-            if order.decision_started_at
-            else None,
-            "decision_generated_at": order.decision_generated_at.isoformat()
-            if order.decision_generated_at
-            else None,
-            "decision_recorded_at": order.decision_recorded_at.isoformat()
-            if order.decision_recorded_at
-            else None,
+            "decision_started_at": self._local_iso(order.decision_started_at, timespec="milliseconds"),
+            "decision_generated_at": self._local_iso(order.decision_generated_at, timespec="milliseconds"),
+            "decision_recorded_at": self._local_iso(order.decision_recorded_at, timespec="milliseconds"),
+            "created_at": self._local_iso(order.created_at),
             "decision_latency_ms": int(order.decision_latency_ms or 0),
             "record_latency_ms": int(order.record_latency_ms or 0),
             "charts": chart_data_service.order_charts(
@@ -3605,7 +3690,7 @@ class ArenaService:
                 quantity=order.quantity,
                 marker_amount=order.amount,
                 marker_reason=order.reason,
-                marker_created_at=order.created_at.isoformat() if order.created_at else None,
+                marker_created_at=self._local_iso(order.created_at),
             ),
         }
 

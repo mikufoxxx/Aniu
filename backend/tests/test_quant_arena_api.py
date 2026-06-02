@@ -1172,7 +1172,11 @@ def test_quant_research_compares_strategies_for_ai_learning(monkeypatch, tmp_pat
     ]
     charts = payload["best_strategy"]["charts"]
     assert [point["close"] for point in charts["price_series"]] == [10.0, 11.0, 12.0]
-    assert charts["trade_markers"] == [
+    marker_core_fields = ["action", "symbol", "trade_date", "price", "quantity"]
+    assert [
+        {field: marker[field] for field in marker_core_fields}
+        for marker in charts["trade_markers"]
+    ] == [
         {"action": "BUY", "symbol": "000001.SZ", "trade_date": "20260101", "price": 10.0, "quantity": 20000},
         {"action": "SELL", "symbol": "000001.SZ", "trade_date": "20260103", "price": 12.0, "quantity": 20000},
     ]
@@ -2328,7 +2332,7 @@ def test_arena_orders_record_decision_timing_for_latency_audit(
             }
         ]
 
-    base = datetime(2026, 5, 29, 10, 20, 0)
+    base = datetime(2026, 5, 29, 2, 20, 0)
     ticks = iter(
         [
             base,
@@ -2355,9 +2359,9 @@ def test_arena_orders_record_decision_timing_for_latency_audit(
 
     assert response.status_code == 200
     order = response.json()["orders"][0]
-    assert order["decision_started_at"] == "2026-05-29T10:20:00"
-    assert order["decision_generated_at"] == "2026-05-29T10:20:00.180000"
-    assert order["decision_recorded_at"] == "2026-05-29T10:20:00.240000"
+    assert order["decision_started_at"] == "2026-05-29T10:20:00.000+08:00"
+    assert order["decision_generated_at"] == "2026-05-29T10:20:00.180+08:00"
+    assert order["decision_recorded_at"] == "2026-05-29T10:20:00.240+08:00"
     assert order["decision_latency_ms"] == 180
     assert order["record_latency_ms"] == 60
     assert order["decision_context"]["timing"]["decision_latency_ms"] == 180
@@ -3898,11 +3902,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
 
     monkeypatch.setattr(market_data_service, "get_quotes", fake_quotes)
     monkeypatch.setattr(market_data_service, "get_intraday_bars", fake_intraday_bars)
-    monkeypatch.setattr(
-        arena_service,
-        "_now_shanghai",
-        lambda: datetime(2026, 6, 1, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
-    )
+    now_value = {"value": datetime(2026, 6, 1, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai"))}
+    monkeypatch.setattr(arena_service, "_now_shanghai", lambda: now_value["value"])
 
     symbols = ["000001.SZ", "600519.SH", "300750.SZ", "601318.SH", "000858.SZ", "601899.SH"]
     with create_test_client(monkeypatch, tmp_path) as client:
@@ -3975,20 +3976,21 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
                     memory.created_at = datetime(2026, 6, 1, 7, 20)
                 elif memory.memory_type == "nightly_learning":
                     memory.created_at = datetime(2026, 6, 1, 12, 20)
+        now_value["value"] = datetime(2026, 6, 2, 9, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
         morning_response = client.get(
-            "/api/aniu/arena/agents/detail_ai/dashboard?section=morning",
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=morning&date=2026-06-01",
             headers=headers,
         )
         intraday_response = client.get(
-            "/api/aniu/arena/agents/detail_ai/dashboard?section=intraday",
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=intraday&date=2026-06-01",
             headers=headers,
         )
         closing_response = client.get(
-            "/api/aniu/arena/agents/detail_ai/dashboard?section=closing",
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=closing&date=2026-06-01",
             headers=headers,
         )
         learning_response = client.get(
-            "/api/aniu/arena/agents/detail_ai/dashboard?section=learning",
+            "/api/aniu/arena/agents/detail_ai/dashboard?section=learning&date=2026-06-01",
             headers=headers,
         )
 
@@ -4001,6 +4003,7 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     payload = morning_response.json()
     assert payload["agent"]["id"] == "detail_ai"
     assert payload["section"] == "morning"
+    assert payload["date"] == "2026-06-01"
     assert payload["section_counts"]["morning"] == 1
     assert payload["section_counts"]["intraday"] >= 1
     assert payload["summary"]["playbook"]["mode"] == "ai_adaptive"
@@ -4010,6 +4013,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert payload["closing"]["reviews"] == []
     assert payload["learning"]["reviews"] == []
     morning = payload["morning"]["recommendations"][0]
+    assert morning["created_at"].startswith("2026-06-01T08:10")
+    assert morning["created_at"].endswith("+08:00")
     assert len(morning["picks"]) == 5
     assert len(morning["picks"]) < 6
     assert morning["playbook"]["mode"] == "ai_adaptive"
@@ -4023,6 +4028,7 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert intraday_payload["morning"]["recommendations"] == []
     assert len(intraday_payload["intraday"]["orders"]) >= 1
     assert len(intraday_payload["intraday"]["orders"]) <= 5
+    assert intraday_payload["intraday"]["orders"][0]["created_at"].startswith("2026-06-01T09:45")
     order_chart = intraday_payload["intraday"]["orders"][0]["charts"]
     assert order_chart["trade_markers"][0]["action"] in {"BUY", "SELL"}
     assert order_chart["trade_markers"][0]["reason"]
@@ -4032,8 +4038,12 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert "forecast_actual_comparison" in order_chart
     assert payload["summary"]["charts"]["action_distribution"]
     assert payload["summary"]["charts"]["symbol_exposure"]
-    assert closing_response.json()["closing"]["reviews"][0]["memory_type"] == "closing_review"
-    assert learning_response.json()["learning"]["reviews"][0]["memory_type"] == "nightly_learning"
+    closing_review = closing_response.json()["closing"]["reviews"][0]
+    learning_review = learning_response.json()["learning"]["reviews"][0]
+    assert closing_review["memory_type"] == "closing_review"
+    assert closing_review["created_at"].startswith("2026-06-01T15:20")
+    assert learning_review["memory_type"] == "nightly_learning"
+    assert learning_review["created_at"].startswith("2026-06-01T20:20")
 
     _reset_state()
 

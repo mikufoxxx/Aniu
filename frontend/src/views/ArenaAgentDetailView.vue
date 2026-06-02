@@ -7,6 +7,30 @@
           <p class="section-kicker">{{ dashboard?.summary.playbook?.label || 'AI Detail' }}</p>
         </div>
         <div class="panel-head-actions">
+          <div class="arena-date-controls" aria-label="详情日期">
+            <button
+              class="button ghost small soft-header-button"
+              type="button"
+              :class="{ active: selectedDate === todayDateKey }"
+              @click="selectedDate = todayDateKey"
+            >
+              今天
+            </button>
+            <button
+              class="button ghost small soft-header-button"
+              type="button"
+              :class="{ active: selectedDate === yesterdayDateKey }"
+              @click="selectedDate = yesterdayDateKey"
+            >
+              昨天
+            </button>
+            <input
+              class="arena-date-input"
+              type="date"
+              :value="selectedDate"
+              @input="setSelectedDate(($event.target as HTMLInputElement).value)"
+            />
+          </div>
           <RouterLink class="button ghost small soft-header-button overview-refresh-button" to="/arena">
             <span class="material-symbols-rounded" aria-hidden="true">arrow_back</span>
             返回竞技场
@@ -135,7 +159,7 @@
             <article>
               <div class="arena-agent-section-head">
                 <strong>{{ morningRecommendation.playbook?.label || '早盘精选' }}</strong>
-                <span>{{ morningRecommendation.created_at || '--' }}</span>
+                <span>{{ formatArenaTime(morningRecommendation.created_at) }}</span>
               </div>
               <p>{{ morningRecommendation.reason }}</p>
               <div class="arena-agent-picks">
@@ -211,7 +235,7 @@
             <article v-for="review in dashboard.closing.reviews" :key="review.id">
               <div class="arena-agent-section-head">
                 <strong>收盘复盘</strong>
-                <span>{{ review.created_at || '--' }}</span>
+                <span>{{ formatArenaTime(review.created_at) }}</span>
               </div>
               <p>{{ review.summary }}</p>
             </article>
@@ -224,7 +248,7 @@
             <article v-for="review in dashboard.learning.reviews" :key="review.id">
               <div class="arena-agent-section-head">
                 <strong>回测学习</strong>
-                <span>{{ review.created_at || '--' }}</span>
+                <span>{{ formatArenaTime(review.created_at) }}</span>
               </div>
               <p>{{ review.summary }}</p>
             </article>
@@ -246,6 +270,7 @@ import { api } from '@/services/api'
 import type { ArenaAgentDashboardPayload, ArenaAgentRecommendation, ArenaOrder } from '@/types'
 import BreakdownChart from '@/components/charts/BreakdownChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
+import { formatMinuteTime, getBeijingDateKey } from '@/utils/formatters'
 
 type ArenaPhase = 'morning_recommendation' | 'intraday_trade' | 'closing_review' | 'nightly_learning'
 type DetailSection = 'morning' | 'intraday' | 'closing' | 'learning'
@@ -280,6 +305,8 @@ const errorMessage = ref('')
 let dashboardRefreshTimer: number | null = null
 let dashboardLoading = false
 const detailSections: DetailSection[] = ['morning', 'intraday', 'closing', 'learning']
+const todayDateKey = computed(() => getBeijingDateKey(new Date()) || new Date().toISOString().slice(0, 10))
+const yesterdayDateKey = computed(() => shiftDateKey(todayDateKey.value, -1))
 const activeSection = computed<DetailSection>({
   get() {
     const section = String(route.query.section || 'morning')
@@ -287,6 +314,21 @@ const activeSection = computed<DetailSection>({
   },
   set(section) {
     router.replace({ path: route.path, query: { ...route.query, section } })
+  },
+})
+const selectedDate = computed<string>({
+  get() {
+    return normalizeDateKey(String(route.query.date || '')) || todayDateKey.value
+  },
+  set(date) {
+    const normalized = normalizeDateKey(date) || todayDateKey.value
+    router.replace({
+      path: route.path,
+      query: {
+        ...route.query,
+        date: normalized === todayDateKey.value ? undefined : normalized,
+      },
+    })
   },
 })
 
@@ -398,7 +440,7 @@ async function loadDashboard(silent = false): Promise<void> {
     errorMessage.value = ''
   }
   try {
-    dashboard.value = await api.getArenaAgentDashboard(agentId.value, activeSection.value)
+    dashboard.value = await api.getArenaAgentDashboard(agentId.value, activeSection.value, selectedDate.value)
   } catch (error) {
     if (!silent) errorMessage.value = error instanceof Error ? error.message : 'AI 详情加载失败。'
   } finally {
@@ -493,7 +535,7 @@ function orderPricePlan(order: ArenaOrder): string {
 
 function orderExecutionText(order: ArenaOrder): string {
   const marker = order.charts?.trade_markers?.[0]
-  const time = marker?.time_label || marker?.trade_date || order.created_at || '--'
+  const time = marker?.time_label || marker?.trade_date || formatArenaTime(order.created_at)
   const amount = typeof marker?.amount === 'number' ? marker.amount : order.amount
   return `${time} · ${order.action} ${order.quantity} 股 · 成交 ${formatPrice(order.price)} · 金额 ${formatAmount(amount)}`
 }
@@ -545,6 +587,28 @@ function predictionText(value: Record<string, unknown>): string {
   return base
 }
 
+function formatArenaTime(value: string | null | undefined): string {
+  return formatMinuteTime(value)
+}
+
+function normalizeDateKey(value: string): string {
+  const normalized = value.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized
+  const compact = normalized.replace(/-/g, '')
+  if (/^\d{8}$/.test(compact)) return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`
+  return ''
+}
+
+function shiftDateKey(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().slice(0, 10)
+}
+
+function setSelectedDate(value: string): void {
+  selectedDate.value = value
+}
+
 onMounted(() => {
   loadDashboard()
   dashboardRefreshTimer = window.setInterval(() => {
@@ -552,7 +616,7 @@ onMounted(() => {
   }, 60000)
 })
 
-watch(activeSection, () => {
+watch([activeSection, selectedDate], () => {
   void loadDashboard()
 })
 
@@ -577,6 +641,28 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
+}
+
+.arena-date-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arena-date-controls .button.active {
+  border-color: #111827;
+  color: #111827;
+}
+
+.arena-date-input {
+  height: 34px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 13px;
 }
 
 .arena-allocation-panel {

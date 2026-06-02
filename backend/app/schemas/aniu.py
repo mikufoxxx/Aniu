@@ -872,6 +872,7 @@ class ArenaOrderRead(BaseModel):
     decision_started_at: str | None = None
     decision_generated_at: str | None = None
     decision_recorded_at: str | None = None
+    created_at: str | None = None
     decision_latency_ms: int = 0
     record_latency_ms: int = 0
     charts: OrderChartsRead | None = None
@@ -945,6 +946,7 @@ class ArenaAgentMemoriesResponse(BaseModel):
 class ArenaAgentDashboardResponse(BaseModel):
     agent: ArenaAgentRequest
     section: Literal["morning", "intraday", "closing", "learning"] = "morning"
+    date: str | None = None
     section_counts: dict[str, int] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
     morning: dict[str, Any] = Field(default_factory=dict)

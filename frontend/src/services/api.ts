@@ -550,8 +550,9 @@ export const api = {
   getArenaAgent(agentId: string) {
     return request<ArenaAgentConfig>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}`)
   },
-  getArenaAgentDashboard(agentId: string, section = 'morning') {
+  getArenaAgentDashboard(agentId: string, section = 'morning', date?: string) {
     const params = new URLSearchParams({ section })
+    if (date) params.set('date', date)
     return request<ArenaAgentDashboardPayload>(`${API_PREFIX}/arena/agents/${encodeURIComponent(agentId)}/dashboard?${params.toString()}`, {
       timeoutMs: 60000,
     })

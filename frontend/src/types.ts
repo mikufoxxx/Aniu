@@ -960,6 +960,7 @@ export interface ArenaRunPayload {
 export interface ArenaAgentDashboardPayload {
   agent: ArenaAgentConfig
   section?: 'morning' | 'intraday' | 'closing' | 'learning'
+  date?: string | null
   section_counts?: Record<'morning' | 'intraday' | 'closing' | 'learning', number>
   summary: Record<string, unknown> & {
     playbook?: {

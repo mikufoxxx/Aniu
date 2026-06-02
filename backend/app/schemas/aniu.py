@@ -1003,6 +1003,7 @@ class StockAnalysisReportResponse(BaseModel):
     selected_skills: list[dict[str, Any]] = Field(default_factory=list)
     sections: list[dict[str, Any]] = Field(default_factory=list)
     source_snapshot: dict[str, Any] = Field(default_factory=dict)
+    charts: StockAnalysisChartsRead = Field(default_factory=StockAnalysisChartsRead)
     created_at: str | None = None
 
 

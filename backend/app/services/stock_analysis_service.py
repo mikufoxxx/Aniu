@@ -91,6 +91,7 @@ class StockAnalysisService:
             retail_analysis=retail_analysis,
             llm_decision=llm_decision,
             data_sources=snapshot["data_sources"],
+            charts=charts,
         )
 
         return {
@@ -389,6 +390,7 @@ class StockAnalysisService:
         retail_analysis: dict[str, Any],
         llm_decision: dict[str, Any],
         data_sources: list[str],
+        charts: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = self._build_analysis_report_payload(
             report_id=0,
@@ -401,6 +403,7 @@ class StockAnalysisService:
             retail_analysis=retail_analysis,
             llm_decision=llm_decision,
             data_sources=data_sources,
+            charts=charts,
             created_at=None,
         )
         record = StockAnalysisReport(
@@ -439,6 +442,17 @@ class StockAnalysisService:
         payload.setdefault("selected_skills", list(record.selected_skills_payload or []))
         payload.setdefault("sections", [])
         payload.setdefault("source_snapshot", {})
+        if not payload.get("charts"):
+            source_snapshot = payload.get("source_snapshot")
+            source_snapshot = source_snapshot if isinstance(source_snapshot, dict) else {}
+            payload["charts"] = chart_data_service.stock_analysis_charts(
+                db,
+                symbol=record.symbol,
+                action=record.action if record.action in {"BUY", "HOLD", "SELL"} else "HOLD",
+                price=float(source_snapshot.get("price") or 0),
+                quantity=int(source_snapshot.get("suggested_quantity") or 0),
+                factor_scores=source_snapshot.get("factor_scores") if isinstance(source_snapshot.get("factor_scores"), dict) else {},
+            )
         payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
         return payload
 
@@ -482,12 +496,23 @@ class StockAnalysisService:
         retail_analysis: dict[str, Any],
         llm_decision: dict[str, Any],
         data_sources: list[str],
+        charts: dict[str, Any] | None,
         created_at: str | None,
     ) -> dict[str, Any]:
         raw = llm_decision.get("raw_decision") if llm_decision.get("used") else {}
         raw = raw if isinstance(raw, dict) else {}
         summary = str(raw.get("report_summary") or decision["reason"])
         selected_public_skills = [self._public_skill(skill) for skill in selected_skills]
+        daily = candidate.get("daily_factors") if isinstance(candidate.get("daily_factors"), dict) else {}
+        financial = candidate.get("financial_factors") if isinstance(candidate.get("financial_factors"), dict) else {}
+        profile = candidate.get("profile") if isinstance(candidate.get("profile"), dict) else {}
+        margin = daily.get("margin_detail") if isinstance(daily.get("margin_detail"), dict) else {}
+        dragon_tiger = daily.get("dragon_tiger") if isinstance(daily.get("dragon_tiger"), dict) else {}
+        pledge = daily.get("pledge_stat") if isinstance(daily.get("pledge_stat"), dict) else {}
+        chart_summary = (charts or {}).get("data_summary")
+        chart_summary = chart_summary if isinstance(chart_summary, dict) else {}
+        latest_indicators = chart_summary.get("latest_indicators")
+        latest_indicators = latest_indicators if isinstance(latest_indicators, dict) else {}
         sections = [
             {
                 "id": "decision",
@@ -497,6 +522,55 @@ class StockAnalysisService:
                     {"label": "动作", "value": decision["action"]},
                     {"label": "评级", "value": decision["rating"]},
                     {"label": "目标仓位", "value": f"{float(decision.get('target_allocation_ratio') or 0) * 100:.1f}%"},
+                    {"label": "建议股数", "value": f"{int(decision.get('suggested_quantity') or 0):,}"},
+                    {"label": "建议金额", "value": self._format_amount(decision.get("suggested_amount"))},
+                ],
+            },
+            {
+                "id": "market_snapshot",
+                "title": "行情与成交",
+                "content": "保存分析当时的实时快照、行业归属、成交活跃度和价格位置。",
+                "items": [
+                    {"label": "现价", "value": self._format_price(candidate.get("price"))},
+                    {"label": "涨跌幅", "value": self._format_pct(candidate.get("change_pct"))},
+                    {"label": "成交额", "value": self._format_amount(candidate.get("amount"))},
+                    {"label": "换手率", "value": self._format_pct(candidate.get("turnover"))},
+                    {"label": "量比", "value": self._format_number(candidate.get("volume_ratio"), digits=2)},
+                    {"label": "行业", "value": str(profile.get("industry") or profile.get("market") or "--")},
+                    {"label": "地区", "value": str(profile.get("area") or "--")},
+                    {"label": "行情源", "value": str(candidate.get("source") or "--")},
+                ],
+            },
+            {
+                "id": "technical_snapshot",
+                "title": "技术面底稿",
+                "content": "均线、动量、RSI、MACD 与阶段偏离，用于解释买卖点和风险纪律。",
+                "items": [
+                    {"label": "日线覆盖", "value": f"{daily.get('bars_used') or chart_summary.get('daily_points') or 0} 根"},
+                    {"label": "最新交易日", "value": str(chart_summary.get("latest_daily_trade_date") or "--")},
+                    {"label": "阶段动量", "value": self._format_pct(daily.get("momentum_pct"))},
+                    {"label": "短线动量", "value": self._format_pct(daily.get("recent_momentum_pct"))},
+                    {"label": "MA20", "value": self._format_price(latest_indicators.get("ma20") or daily.get("ma20"))},
+                    {"label": "MA60", "value": self._format_price(latest_indicators.get("ma60") or daily.get("ma60"))},
+                    {"label": "距 MA20", "value": self._format_pct(daily.get("distance_to_ma20_pct"))},
+                    {"label": "RSI14", "value": self._format_number(latest_indicators.get("rsi14"), digits=1)},
+                    {"label": "MACD柱", "value": self._format_number(latest_indicators.get("macd_hist"), digits=4)},
+                    {"label": "KDJ J", "value": self._format_number(latest_indicators.get("kdj_j"), digits=1)},
+                ],
+            },
+            {
+                "id": "capital_snapshot",
+                "title": "资金与财务",
+                "content": "资金流、两融、龙虎榜、财务质量和质押情况，避免只看图形信号。",
+                "items": [
+                    {"label": "资金净流", "value": self._format_amount(daily.get("moneyflow_net_amount"))},
+                    {"label": "两融净买", "value": self._format_amount(margin.get("net_financing_buy"))},
+                    {"label": "龙虎榜净额", "value": self._format_amount(dragon_tiger.get("net_amount"))},
+                    {"label": "ROE", "value": self._format_pct(financial.get("roe") or financial.get("roe_dt"))},
+                    {"label": "净利同比", "value": self._format_pct(financial.get("netprofit_yoy"))},
+                    {"label": "负债率", "value": self._format_pct(financial.get("debt_to_assets"))},
+                    {"label": "市盈率", "value": self._format_number(daily.get("pe_ttm"), digits=2)},
+                    {"label": "质押比例", "value": self._format_pct(pledge.get("pledge_ratio"))},
                 ],
             },
             {
@@ -539,10 +613,54 @@ class StockAnalysisService:
                 "price": candidate.get("price"),
                 "score": candidate.get("score"),
                 "change_pct": candidate.get("change_pct"),
+                "amount": candidate.get("amount"),
+                "turnover": candidate.get("turnover"),
+                "volume_ratio": candidate.get("volume_ratio"),
+                "source": candidate.get("source"),
+                "profile": profile,
+                "daily_factors": daily,
+                "financial_factors": financial,
+                "factor_scores": candidate.get("factor_scores") or {},
+                "suggested_quantity": decision.get("suggested_quantity"),
+                "suggested_amount": decision.get("suggested_amount"),
+                "target_allocation_ratio": decision.get("target_allocation_ratio"),
+                "retail_analysis": retail_analysis,
+                "llm_decision": llm_decision,
                 "data_sources": data_sources,
             },
+            "charts": charts or {},
             "created_at": created_at,
         }
+
+    def _format_price(self, value: Any) -> str:
+        number = self._optional_float(value)
+        return "--" if number is None else f"{number:.3f}"
+
+    def _format_number(self, value: Any, *, digits: int = 2) -> str:
+        number = self._optional_float(value)
+        return "--" if number is None else f"{number:.{digits}f}"
+
+    def _format_pct(self, value: Any) -> str:
+        number = self._optional_float(value)
+        return "--" if number is None else f"{number:.2f}%"
+
+    def _format_amount(self, value: Any) -> str:
+        number = self._optional_float(value)
+        if number is None:
+            return "--"
+        absolute = abs(number)
+        if absolute >= 100000000:
+            return f"{number / 100000000:.2f}亿"
+        if absolute >= 10000:
+            return f"{number / 10000:.2f}万"
+        return f"{number:.2f}"
+
+    def _optional_float(self, value: Any) -> float | None:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number
 
     def _skill_opinion_items(
         self,

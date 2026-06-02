@@ -1053,6 +1053,7 @@ export interface StockAnalysisReportPayload {
     }>
   }>
   source_snapshot: Record<string, unknown>
+  charts?: StockAnalysisCharts
   created_at?: string | null
 }
 

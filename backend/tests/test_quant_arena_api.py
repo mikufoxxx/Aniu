@@ -3449,7 +3449,14 @@ def test_stock_analysis_uses_multiple_skills_and_persists_report(
         "uzi_trap_detector",
     ]
     assert "多技能汇总" in report["summary"]
-    assert len(report["sections"]) >= 3
+    assert {section["id"] for section in report["sections"]} >= {
+        "market_snapshot",
+        "technical_snapshot",
+        "capital_snapshot",
+        "data",
+    }
+    assert report["charts"]["price_series"]
+    assert report["charts"]["signal_markers"][0]["symbol"] == "000001.SZ"
 
     with create_test_client(monkeypatch, tmp_path) as client:
         headers = _auth_headers(client)
@@ -3470,6 +3477,13 @@ def test_stock_analysis_uses_multiple_skills_and_persists_report(
     detail_payload = detail_response.json()
     assert detail_payload["id"] == report["id"]
     assert detail_payload["summary"] == report["summary"]
+    assert detail_payload["charts"]["price_series"]
+    assert detail_payload["charts"]["support_resistance"]["support"] == 9.7
+    assert {section["id"] for section in detail_payload["sections"]} >= {
+        "market_snapshot",
+        "technical_snapshot",
+        "capital_snapshot",
+    }
     assert "forecast-secret-key" not in detail_response.text
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["id"] == report["id"]

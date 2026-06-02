@@ -442,6 +442,7 @@ class StockAnalysisService:
         payload.setdefault("selected_skills", list(record.selected_skills_payload or []))
         payload.setdefault("sections", [])
         payload.setdefault("source_snapshot", {})
+        backfilled = False
         if not payload.get("charts"):
             source_snapshot = payload.get("source_snapshot")
             source_snapshot = source_snapshot if isinstance(source_snapshot, dict) else {}
@@ -453,8 +454,16 @@ class StockAnalysisService:
                 quantity=int(source_snapshot.get("suggested_quantity") or 0),
                 factor_scores=source_snapshot.get("factor_scores") if isinstance(source_snapshot.get("factor_scores"), dict) else {},
             )
-        payload["sections"] = self._ensure_report_detail_sections(payload)
+            backfilled = True
+        sections = self._ensure_report_detail_sections(payload)
+        if sections != payload.get("sections"):
+            payload["sections"] = sections
+            backfilled = True
         payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
+        if backfilled:
+            record.report_payload = payload
+            db.add(record)
+            db.commit()
         return payload
 
     def list_reports(self, db: Session, *, limit: int = 20) -> dict[str, Any]:

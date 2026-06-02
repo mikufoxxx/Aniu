@@ -4,12 +4,12 @@ from datetime import datetime, timedelta
 import threading
 from typing import Any
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.timezone import BEIJING_TZ, beijing_iso, now_beijing
 from app.db.database import session_scope
 from app.db.models import DailyBar, MarketDataMaintenanceRun, StockProfile
 from app.services.historical_data_service import historical_data_service
@@ -38,9 +38,7 @@ class MarketDataMaintenanceService:
         if not settings.market_data_maintenance_enabled:
             return {"status": "disabled"}
 
-        current = (now or datetime.now(ZoneInfo("Asia/Shanghai"))).astimezone(
-            ZoneInfo("Asia/Shanghai")
-        )
+        current = (now or now_beijing()).astimezone(BEIJING_TZ)
         due_time = self._due_time(current, settings.market_data_maintenance_times)
         if due_time is None:
             return {"status": "skipped", "reason": "not_due"}
@@ -273,7 +271,7 @@ class MarketDataMaintenanceService:
             job = {
                 "job_id": job_id,
                 "status": "queued",
-                "submitted_at": datetime.now(ZoneInfo("Asia/Shanghai")),
+                "submitted_at": now_beijing(),
                 "completed_at": None,
                 "progress": None,
                 "result": None,
@@ -345,14 +343,14 @@ class MarketDataMaintenanceService:
             with self._job_lock:
                 job = self._jobs[job_id]
                 job["status"] = "completed"
-                job["completed_at"] = datetime.now(ZoneInfo("Asia/Shanghai"))
+                job["completed_at"] = now_beijing()
                 job["progress"] = self._completed_progress(result)
                 job["result"] = result
         except Exception as exc:
             with self._job_lock:
                 job = self._jobs[job_id]
                 job["status"] = "failed"
-                job["completed_at"] = datetime.now(ZoneInfo("Asia/Shanghai"))
+                job["completed_at"] = now_beijing()
                 job["error"] = str(exc)
 
     def _update_job_progress(self, job_id: str, progress: dict[str, Any]) -> None:
@@ -430,12 +428,12 @@ class MarketDataMaintenanceService:
             "refresh_reason": row.refresh_reason,
             "coverage": row.coverage_payload or {},
             "result": row.result_payload or {},
-            "created_at": row.created_at,
+            "created_at": beijing_iso(row.created_at),
         }
 
     def _normalize_end_date(self, end_date: str | None) -> str:
         if not end_date:
-            return datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+            return now_beijing().strftime("%Y%m%d")
         text = str(end_date).strip().replace("-", "")
         if len(text) != 8 or not text.isdigit():
             raise ValueError(f"交易日期格式不正确: {end_date}")

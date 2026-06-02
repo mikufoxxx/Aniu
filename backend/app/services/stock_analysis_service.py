@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.core.timezone import beijing_iso, now_beijing
 from app.db.models import StockAnalysisReport
 from app.services.a_share_retail_analysis_service import a_share_retail_analysis_service
 from app.core.config import get_settings
@@ -142,7 +141,7 @@ class StockAnalysisService:
         return {
             "symbol": normalized_symbol,
             "latest_price": float(latest_price) if isinstance(latest_price, (int, float)) else None,
-            "refreshed_at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds"),
+            "refreshed_at": now_beijing().isoformat(timespec="seconds"),
             "charts": charts,
         }
 
@@ -420,7 +419,7 @@ class StockAnalysisService:
         db.commit()
         db.refresh(record)
         payload["id"] = record.id
-        payload["created_at"] = record.created_at.isoformat() if record.created_at else None
+        payload["created_at"] = beijing_iso(record.created_at)
         record.report_payload = payload
         db.add(record)
         db.commit()
@@ -459,7 +458,7 @@ class StockAnalysisService:
         if sections != payload.get("sections"):
             payload["sections"] = sections
             backfilled = True
-        payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
+        payload["created_at"] = beijing_iso(record.created_at)
         if backfilled:
             record.report_payload = payload
             db.add(record)
@@ -490,7 +489,7 @@ class StockAnalysisService:
             "rating": record.rating,
             "summary": summary,
             "selected_skills": list(record.selected_skills_payload or []),
-            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "created_at": beijing_iso(record.created_at),
         }
 
     def _build_analysis_report_payload(

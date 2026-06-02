@@ -23,8 +23,11 @@ from app.db.models import (
     ArenaRun,
     ArenaPosition,
     DailyBar,
+    MarketDataMaintenanceRun,
+    QuantResearchReport,
     SectorBar,
     SectorMember,
+    StockAnalysisReport,
     StockProfile,
 )
 from app.main import create_app
@@ -150,6 +153,100 @@ def test_page_overview_endpoints_collapse_initial_requests(monkeypatch, tmp_path
     assert arena_payload["equity_curves"]["interval"] == "daily"
     assert refresh_response.status_code == 200
     assert calls == [(("000001.SZ",), False)]
+
+    _reset_state()
+
+
+def test_user_visible_report_times_are_beijing_time(monkeypatch, tmp_path) -> None:
+    with create_test_client(monkeypatch, tmp_path) as client:
+        headers = _auth_headers(client)
+        utc_midnight = datetime(2026, 6, 1, 0, 10)
+        with session_scope() as db:
+            maintenance_run = MarketDataMaintenanceRun(
+                status="completed",
+                refresh_start_date="20260601",
+                refresh_end_date="20260601",
+                processed_days=1,
+                stored_count=1,
+                skipped_count=0,
+                refresh_unique_symbols=1,
+                dataset_universe_size=1,
+                dataset_item_count=1,
+                latest_trade_date="20260601",
+                latest_trade_date_symbols=1,
+                most_complete_trade_date="20260601",
+                most_complete_trade_date_symbols=1,
+                refresh_needed=False,
+                refresh_reason="test",
+                coverage_payload={},
+                result_payload={},
+                created_at=utc_midnight,
+            )
+            stock_report = StockAnalysisReport(
+                symbol="000001.SZ",
+                name="平安银行",
+                title="平安银行 分析报告",
+                model="gpt-5.5",
+                action="HOLD",
+                rating="观察",
+                selected_skills_payload=[],
+                report_payload={
+                    "symbol": "000001.SZ",
+                    "name": "平安银行",
+                    "title": "平安银行 分析报告",
+                    "model": "gpt-5.5",
+                    "action": "HOLD",
+                    "rating": "观察",
+                    "summary": "测试报告",
+                    "selected_skills": [],
+                    "sections": [],
+                    "source_snapshot": {},
+                    "charts": {},
+                },
+                created_at=utc_midnight,
+            )
+            quant_report = QuantResearchReport(
+                title="量化测试报告",
+                summary="测试报告",
+                symbols_json=["000001.SZ"],
+                start_date="20260601",
+                end_date="20260601",
+                initial_cash=200000,
+                symbol_count=1,
+                bar_count=1,
+                best_strategy_name="daily_momentum",
+                best_strategy_display_name="日线动量",
+                final_assets=200000,
+                return_ratio=0,
+                max_drawdown=0,
+                trade_count=0,
+                report_payload={},
+                created_at=utc_midnight,
+            )
+            db.add_all([maintenance_run, stock_report, quant_report])
+            db.flush()
+            stock_report.report_payload["id"] = stock_report.id
+            stock_report.report_payload["created_at"] = None
+            stock_report_id = stock_report.id
+            flag_modified(stock_report, "report_payload")
+
+        data_response = client.get("/api/aniu/data-lab/overview?limit=5", headers=headers)
+        stock_list_response = client.get("/api/aniu/stocks/analysis-reports?limit=5", headers=headers)
+        stock_detail_response = client.get(
+            f"/api/aniu/stocks/analysis-reports/{stock_report_id}",
+            headers=headers,
+        )
+        quant_list_response = client.get("/api/aniu/quant/research-reports?limit=5", headers=headers)
+
+    expected = "2026-06-01T08:10:00+08:00"
+    assert data_response.status_code == 200
+    assert data_response.json()["maintenance_runs"]["items"][0]["created_at"] == expected
+    assert stock_list_response.status_code == 200
+    assert stock_list_response.json()["items"][0]["created_at"] == expected
+    assert stock_detail_response.status_code == 200
+    assert stock_detail_response.json()["created_at"] == expected
+    assert quant_list_response.status_code == 200
+    assert quant_list_response.json()["items"][0]["created_at"] == expected
 
     _reset_state()
 

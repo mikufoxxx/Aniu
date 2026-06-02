@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime
 import json
 import math
 from statistics import mean, pstdev
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.timezone import now_beijing
 from app.services.chart_data_service import chart_data_service
 from app.services.llm_service import llm_service
 
@@ -77,7 +77,7 @@ class AIForecastService:
                 "交易计划：买入区、目标区、止损位、失效条件",
             ],
             "model_forecasts": model_forecasts,
-            "generated_at": datetime.now(UTC).isoformat(),
+            "generated_at": now_beijing().isoformat(timespec="seconds"),
         }
 
     def technical_context(self, price_series: list[dict[str, Any]]) -> dict[str, Any]:

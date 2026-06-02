@@ -327,6 +327,7 @@ import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
 import TechnicalIndicatorChart from '@/components/charts/TechnicalIndicatorChart.vue'
 import VolumeProfileChart from '@/components/charts/VolumeProfileChart.vue'
+import { formatMinuteTime } from '@/utils/formatters'
 
 const router = useRouter()
 const candidateLimit = ref(5)
@@ -684,8 +685,7 @@ function formatPrice(value: number | null | undefined): string {
 }
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) return '--'
-  return value.replace('T', ' ').slice(0, 16)
+  return formatMinuteTime(value)
 }
 
 function retailText(key: string): string {

@@ -1018,7 +1018,7 @@ class ChartDataService:
         try:
             return datetime.strptime(compact, "%Y%m%d")
         except ValueError:
-            return datetime.utcnow()
+            return datetime.now(MARKET_TIMEZONE).replace(tzinfo=None)
 
     def _series_sort_key(self, value: str) -> int:
         digits = "".join(char for char in value if char.isdigit())

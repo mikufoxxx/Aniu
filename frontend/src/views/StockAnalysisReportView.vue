@@ -101,6 +101,7 @@ import FactorRadarChart from '@/components/charts/FactorRadarChart.vue'
 import MarketKlineChart from '@/components/charts/MarketKlineChart.vue'
 import TechnicalIndicatorChart from '@/components/charts/TechnicalIndicatorChart.vue'
 import VolumeProfileChart from '@/components/charts/VolumeProfileChart.vue'
+import { formatTime } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -153,8 +154,7 @@ function goBack(): void {
 }
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) return '--'
-  return value.replace('T', ' ').slice(0, 19)
+  return formatTime(value)
 }
 
 function formatPrice(value: unknown): string {

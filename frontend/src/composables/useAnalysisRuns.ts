@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 
 import type { ApiDetail, RawToolPreview, RawToolPreviewDetail, RunDetail, RunSummary, RunSummaryPage, TradeDetail, TradeOrder } from '@/types'
+import { getBeijingDateKey } from '@/utils/formatters'
 
 export interface AnalysisRunViewModel {
   id: number
@@ -297,10 +298,7 @@ function mapRunDetailToViewModel(detail: RunDetail): AnalysisRunViewModel {
 }
 
 function isSameDay(value: string, target: Date) {
-  const date = new Date(value)
-  return date.getFullYear() === target.getFullYear()
-    && date.getMonth() === target.getMonth()
-    && date.getDate() === target.getDate()
+  return getBeijingDateKey(value) === getBeijingDateKey(target)
 }
 
 function getLatestRun(runs: AnalysisRunViewModel[]) {

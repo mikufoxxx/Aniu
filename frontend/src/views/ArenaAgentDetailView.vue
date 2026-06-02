@@ -305,7 +305,7 @@ const errorMessage = ref('')
 let dashboardRefreshTimer: number | null = null
 let dashboardLoading = false
 const detailSections: DetailSection[] = ['morning', 'intraday', 'closing', 'learning']
-const todayDateKey = computed(() => getBeijingDateKey(new Date()) || new Date().toISOString().slice(0, 10))
+const todayDateKey = computed(() => getBeijingDateKey(new Date()) || '')
 const yesterdayDateKey = computed(() => shiftDateKey(todayDateKey.value, -1))
 const activeSection = computed<DetailSection>({
   get() {
@@ -602,7 +602,10 @@ function normalizeDateKey(value: string): string {
 function shiftDateKey(dateKey: string, days: number): string {
   const [year, month, day] = dateKey.split('-').map(Number)
   const date = new Date(Date.UTC(year, month - 1, day + days))
-  return date.toISOString().slice(0, 10)
+  const shiftedYear = date.getUTCFullYear()
+  const shiftedMonth = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const shiftedDay = String(date.getUTCDate()).padStart(2, '0')
+  return `${shiftedYear}-${shiftedMonth}-${shiftedDay}`
 }
 
 function setSelectedDate(value: string): void {

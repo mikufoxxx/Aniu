@@ -10,12 +10,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 from threading import RLock
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
+from app.core.timezone import BEIJING_TZ, beijing_iso, to_beijing
 from app.db.models import (
     AppSettings,
     ArenaAccount,
@@ -50,7 +50,7 @@ ARENA_STORED_CANDIDATE_LIMIT = 20
 ARENA_STORED_POOL_SYMBOL_LIMIT = 30
 ARENA_CANDIDATE_PAYLOAD_MAX_READ_BYTES = 2_000_000
 ARENA_DASHBOARD_INTRADAY_ORDER_LIMIT = 5
-ARENA_SCHEDULE_TIMEZONE = ZoneInfo("Asia/Shanghai")
+ARENA_SCHEDULE_TIMEZONE = BEIJING_TZ
 ARENA_DASHBOARD_SECTIONS = {"morning", "intraday", "closing", "learning"}
 ARENA_SCHEDULE_WINDOWS = (
     {
@@ -201,9 +201,7 @@ class ArenaService:
         return datetime.now(ARENA_SCHEDULE_TIMEZONE)
 
     def _local_iso(self, value: datetime | None, *, timespec: str = "minutes") -> str | None:
-        if value is None:
-            return None
-        return self._local_time(value).isoformat(timespec=timespec)
+        return beijing_iso(value, timespec=timespec)
 
     def run_once(
         self,
@@ -3420,10 +3418,7 @@ class ArenaService:
         }
 
     def _local_time(self, value: datetime | None) -> datetime:
-        timestamp = value or datetime.now(UTC)
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=UTC)
-        return timestamp.astimezone(ARENA_SCHEDULE_TIMEZONE)
+        return to_beijing(value or datetime.now(UTC)) or self._now_shanghai()
 
     def _order_marker_trade_time(self, order: ArenaOrder) -> str | None:
         timestamp = order.created_at or order.decision_recorded_at

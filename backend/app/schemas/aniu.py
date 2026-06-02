@@ -604,7 +604,7 @@ class MarketDataMaintenanceRunRead(BaseModel):
     refresh_reason: str
     coverage: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime
+    created_at: str
 
 
 class MarketDataMaintenanceRunListResponse(BaseModel):

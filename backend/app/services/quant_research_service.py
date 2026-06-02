@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.core.timezone import beijing_iso
 from app.db.models import DailyBar, QuantResearchReport
 from app.services.chart_data_service import chart_data_service
 from app.services.historical_data_service import _normalize_trade_date
@@ -96,7 +97,7 @@ class QuantResearchService:
         payload.setdefault("id", record.id)
         payload.setdefault("title", record.title)
         payload.setdefault("summary", record.summary)
-        payload.setdefault("created_at", record.created_at.isoformat() if record.created_at else None)
+        payload["created_at"] = beijing_iso(record.created_at)
         return payload
 
     def _save_report(
@@ -134,7 +135,7 @@ class QuantResearchService:
             "id": record.id,
             "title": title,
             "summary": summary,
-            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "created_at": beijing_iso(record.created_at),
         }
         record.report_payload = saved_payload
         db.add(record)
@@ -158,7 +159,7 @@ class QuantResearchService:
             "return_ratio": record.return_ratio,
             "max_drawdown": record.max_drawdown,
             "trade_count": record.trade_count,
-            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "created_at": beijing_iso(record.created_at),
         }
 
     def _report_title(self, symbols: list[str], payload: dict[str, Any]) -> str:

@@ -101,6 +101,7 @@ import StrategyComparisonChart from '@/components/charts/StrategyComparisonChart
 import TechnicalIndicatorChart from '@/components/charts/TechnicalIndicatorChart.vue'
 import { api } from '@/services/api'
 import type { QuantResearchPayload } from '@/types'
+import { formatTime } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -130,8 +131,7 @@ function goBack(): void {
 }
 
 function formatDate(value: string | null | undefined): string {
-  if (!value) return '--'
-  return value.replace('T', ' ').slice(0, 19)
+  return formatTime(value)
 }
 
 function formatPercent(value: number): string {

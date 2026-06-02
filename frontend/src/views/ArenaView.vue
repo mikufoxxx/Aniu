@@ -250,6 +250,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/services/api'
 import type { ArenaAgentConfig, ArenaAIConfigPayload, ArenaEquityCurvesPayload, ArenaLeaderboardPayload } from '@/types'
 import MultiEquityCurveChart from '@/components/charts/MultiEquityCurveChart.vue'
+import { formatTime as formatBeijingTime } from '@/utils/formatters'
 
 const router = useRouter()
 const route = useRoute()
@@ -462,9 +463,7 @@ function formatPercent(value: number): string {
 }
 
 function formatTime(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatBeijingTime(value)
 }
 
 function normalizeInitialCash(value: number): number {

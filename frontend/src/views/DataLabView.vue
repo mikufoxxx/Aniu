@@ -147,7 +147,7 @@
       <div class="run-list">
         <article v-for="run in maintenanceRuns" :key="run.id">
           <strong>#{{ run.id }} {{ run.status }}</strong>
-          <span>{{ run.created_at }} · {{ run.latest_trade_date || '--' }}</span>
+          <span>{{ formatTime(run.created_at) }} · {{ run.latest_trade_date || '--' }}</span>
           <p>{{ run.refresh_reason }}</p>
         </article>
       </div>
@@ -158,6 +158,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api } from '@/services/api'
+import { formatTime } from '@/utils/formatters'
 import type {
   BacktestPayload,
   MarketDataCoveragePayload,

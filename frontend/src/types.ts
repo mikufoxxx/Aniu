@@ -574,11 +574,16 @@ export interface PriceSeriesPoint {
   timestamp?: string | null
   is_realtime?: boolean
   ma5?: number | null
+  ma10?: number | null
   ma20?: number | null
+  ma60?: number | null
   rsi14?: number | null
   macd?: number | null
   macd_signal?: number | null
   macd_hist?: number | null
+  kdj_k?: number | null
+  kdj_d?: number | null
+  kdj_j?: number | null
 }
 
 export interface TradeMarker {
@@ -587,6 +592,10 @@ export interface TradeMarker {
   trade_date?: string | null
   price: number
   quantity: number
+  amount?: number | null
+  reason?: string | null
+  created_at?: string | null
+  time_label?: string | null
 }
 
 export interface EquityCurvePoint {
@@ -654,6 +663,11 @@ export interface OrderCharts {
   interval_series: Record<'daily' | 'weekly' | 'monthly' | 'hourly', PriceSeriesPoint[]>
   forecast_series: ForecastPoint[]
   trade_markers: TradeMarker[]
+  support_resistance?: {
+    support?: number | null
+    resistance?: number | null
+    last_close?: number | null
+  }
   forecast_snapshot?: Record<string, unknown>
   forecast_actual_comparison?: Record<string, unknown>
   data_summary?: Record<string, unknown>
@@ -829,6 +843,7 @@ export interface ArenaOrder {
   amount: number
   remaining_cash: number
   reason: string
+  created_at?: string | null
   decision_context?: Record<string, unknown>
   decision_started_at?: string | null
   decision_generated_at?: string | null

@@ -10,8 +10,12 @@
           实时 {{ latestRealtimePoint.source || 'quote' }} {{ latestRealtimePoint.trade_date }}
         </span>
         <span>MA5</span>
+        <span>MA10</span>
         <span>MA20</span>
+        <span>MA60</span>
+        <span>支撑/压力</span>
         <span>成交额</span>
+        <span>MACD</span>
         <span v-if="activeForecastSeries.length">AI未来线</span>
       </div>
     </div>
@@ -51,6 +55,11 @@ const props = defineProps<{
   intervalSeries?: Record<ChartInterval, PriceSeriesPoint[]>
   forecastSeries?: ForecastPoint[]
   markers?: TradeMarker[]
+  supportResistance?: {
+    support?: number | null
+    resistance?: number | null
+    last_close?: number | null
+  }
   dataSummary?: Record<string, unknown>
   forecastSnapshot?: Record<string, unknown>
   forecastActualComparison?: Record<string, unknown>
@@ -70,7 +79,7 @@ const baseIntervalOptions: Array<{ key: ChartInterval; label: string }> = [
 const intervalOptions = computed(() => {
   const options = [...baseIntervalOptions]
   if (props.intervalSeries?.hourly?.length) {
-    options.push({ key: 'hourly' as const, label: '小时' })
+    options.push({ key: 'hourly' as const, label: '60分' })
   }
   return options
 })
@@ -88,6 +97,15 @@ const latestRealtimePoint = computed(() => {
 const activeForecastSeries = computed(() => (
   activeInterval.value === 'daily' ? normalizeForecastSeries(props.forecastSeries || []) : []
 ))
+const activeSupportResistance = computed(() => {
+  const summarySupport = props.dataSummary?.support_resistance
+  const supportResistance = props.supportResistance || (
+    summarySupport && typeof summarySupport === 'object'
+      ? summarySupport as { support?: number | null; resistance?: number | null; last_close?: number | null }
+      : null
+  )
+  return supportResistance || {}
+})
 const metaItems = computed(() => {
   const summary = props.dataSummary ?? {}
   const comparison = props.forecastActualComparison ?? {}
@@ -114,6 +132,20 @@ const metaItems = computed(() => {
   }
   return items
 })
+
+function formatPrice(value: unknown): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  return numeric >= 100 ? numeric.toFixed(2) : numeric.toFixed(3)
+}
+
+function formatAmount(value: unknown): string {
+  const numeric = Number(value || 0)
+  if (!Number.isFinite(numeric) || numeric <= 0) return '--'
+  if (numeric >= 100000000) return `${(numeric / 100000000).toFixed(2)}亿`
+  if (numeric >= 10000) return `${(numeric / 10000).toFixed(2)}万`
+  return numeric.toFixed(2)
+}
 
 function resize(): void {
   chart?.resize()
@@ -214,8 +246,16 @@ function buildOption(): EChartsOption {
     ...visibleSeries.map((item) => item.ma5 ?? null),
     ...forecast.map(() => null),
   ]
+  const ma10 = [
+    ...visibleSeries.map((item) => item.ma10 ?? null),
+    ...forecast.map(() => null),
+  ]
   const ma20 = [
     ...visibleSeries.map((item) => item.ma20 ?? null),
+    ...forecast.map(() => null),
+  ]
+  const ma60 = [
+    ...visibleSeries.map((item) => item.ma60 ?? null),
     ...forecast.map(() => null),
   ]
   const amounts = [
@@ -226,6 +266,21 @@ function buildOption(): EChartsOption {
       },
     })),
     ...forecast.map(() => 0),
+  ]
+  const macdHist = [
+    ...visibleSeries.map((item) => ({
+      value: item.macd_hist ?? null,
+      itemStyle: { color: Number(item.macd_hist || 0) >= 0 ? '#dc2626' : '#16a34a' },
+    })),
+    ...forecast.map(() => null),
+  ]
+  const macd = [
+    ...visibleSeries.map((item) => item.macd ?? null),
+    ...forecast.map(() => null),
+  ]
+  const macdSignal = [
+    ...visibleSeries.map((item) => item.macd_signal ?? null),
+    ...forecast.map(() => null),
   ]
   const lastActualIndex = visibleSeries.length - 1
   const lastActualClose = lastActualIndex >= 0 ? visibleSeries[lastActualIndex].close : null
@@ -247,6 +302,7 @@ function buildOption(): EChartsOption {
     value: string
     itemStyle: { color: string }
     label: { color: string; formatter: string }
+    marker: TradeMarker
   }> = []
   for (const marker of (props.markers || []).filter(
     (item): item is TradeMarker & { trade_date: string } => Boolean(item.trade_date),
@@ -259,32 +315,80 @@ function buildOption(): EChartsOption {
       value: `${marker.action} ${marker.quantity}`,
       itemStyle: { color: marker.action === 'SELL' ? '#16a34a' : '#dc2626' },
       label: { color: '#111827', formatter: marker.action === 'SELL' ? 'S' : 'B' },
+      marker,
+    })
+  }
+  const support = Number(activeSupportResistance.value.support)
+  const resistance = Number(activeSupportResistance.value.resistance)
+  const supportLines: Array<Record<string, unknown>> = []
+  if (Number.isFinite(support) && support > 0) {
+    supportLines.push({
+      name: '支撑',
+      yAxis: support,
+      lineStyle: { color: '#0f766e', type: 'dashed', width: 1 },
+      label: { formatter: `支撑 ${formatPrice(support)}`, color: '#0f766e', fontSize: 10 },
+    })
+  }
+  if (Number.isFinite(resistance) && resistance > 0) {
+    supportLines.push({
+      name: '压力',
+      yAxis: resistance,
+      lineStyle: { color: '#be123c', type: 'dashed', width: 1 },
+      label: { formatter: `压力 ${formatPrice(resistance)}`, color: '#be123c', fontSize: 10 },
     })
   }
   return {
     animation: false,
     grid: [
-      { left: 46, right: 18, top: 34, height: 210 },
-      { left: 46, right: 18, top: 274, height: 64 },
+      { left: 50, right: 20, top: 34, height: 216 },
+      { left: 50, right: 20, top: 282, height: 58 },
+      { left: 50, right: 20, top: 366, height: 58 },
     ],
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' },
       borderWidth: 1,
       textStyle: { fontSize: 12 },
+      formatter(params: unknown) {
+        const items = Array.isArray(params) ? params : [params]
+        const first = items[0] as { axisValue?: string } | undefined
+        const tradeDate = String(first?.axisValue || '')
+        const point = visibleSeries.find((item) => String(item.trade_date) === tradeDate)
+        if (!point) return tradeDate
+        const lines = [
+          `<strong>${tradeDate}</strong>`,
+          `开 ${formatPrice(point.open)} 高 ${formatPrice(point.high)} 低 ${formatPrice(point.low)} 收 ${formatPrice(point.close)}`,
+          `MA5 ${formatPrice(point.ma5)} / MA10 ${formatPrice(point.ma10)} / MA20 ${formatPrice(point.ma20)} / MA60 ${formatPrice(point.ma60)}`,
+          `成交额 ${formatAmount(point.amount)} · RSI14 ${formatPrice(point.rsi14)}`,
+          `MACD ${formatPrice(point.macd)} / Signal ${formatPrice(point.macd_signal)} / Hist ${formatPrice(point.macd_hist)}`,
+          `KDJ ${formatPrice(point.kdj_k)} / ${formatPrice(point.kdj_d)} / ${formatPrice(point.kdj_j)}`,
+        ]
+        const sameDayMarkers = (props.markers || []).filter((marker) => {
+          return marker.trade_date && compactDateKey(marker.trade_date) === compactDateKey(tradeDate)
+        })
+        for (const marker of sameDayMarkers) {
+          lines.push(
+            `${marker.action} ${formatPrice(marker.price)} × ${marker.quantity} · ${formatAmount(marker.amount)}`
+          )
+          if (marker.reason) lines.push(String(marker.reason))
+        }
+        return lines.join('<br/>')
+      },
     },
-    axisPointer: { link: [{ xAxisIndex: [0, 1] }] },
+    axisPointer: { link: [{ xAxisIndex: [0, 1, 2] }] },
     dataZoom: [
-      { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1], height: 18, bottom: 4 },
+      { type: 'inside', xAxisIndex: [0, 1, 2], start: 0, end: 100 },
+      { type: 'slider', xAxisIndex: [0, 1, 2], height: 18, bottom: 4 },
     ],
     xAxis: [
       { type: 'category', data: dates, boundaryGap: true, axisLabel: { show: false } },
-      { type: 'category', data: dates, gridIndex: 1, boundaryGap: true, axisLabel: { fontSize: 10 } },
+      { type: 'category', data: dates, gridIndex: 1, boundaryGap: true, axisLabel: { show: false } },
+      { type: 'category', data: dates, gridIndex: 2, boundaryGap: true, axisLabel: { fontSize: 10 } },
     ],
     yAxis: [
       { scale: true, splitLine: { lineStyle: { color: '#eef0f4' } } },
       { scale: true, gridIndex: 1, splitLine: { show: false }, axisLabel: { fontSize: 10 } },
+      { scale: true, gridIndex: 2, splitLine: { show: false }, axisLabel: { fontSize: 10 } },
     ],
     series: [
       {
@@ -301,10 +405,31 @@ function buildOption(): EChartsOption {
           symbol: 'pin',
           symbolSize: 38,
           data: markerData,
+          tooltip: {
+            formatter(params: unknown) {
+              const data = (params as { data?: { marker?: TradeMarker } }).data
+              const marker = data?.marker
+              if (!marker) return ''
+              return [
+                `<strong>${marker.action} ${marker.symbol}</strong>`,
+                `时间 ${marker.time_label || marker.trade_date || marker.created_at || '--'}`,
+                `价格 ${formatPrice(marker.price)} · 数量 ${marker.quantity}`,
+                `金额 ${formatAmount(marker.amount)}`,
+                marker.reason ? `理由 ${marker.reason}` : '',
+              ].filter(Boolean).join('<br/>')
+            },
+          },
+        },
+        markLine: {
+          symbol: 'none',
+          silent: true,
+          data: supportLines,
         },
       },
       { name: 'MA5', type: 'line', data: ma5, smooth: true, symbol: 'none', lineStyle: { width: 1.4, color: '#2563eb' } },
+      { name: 'MA10', type: 'line', data: ma10, smooth: true, symbol: 'none', lineStyle: { width: 1.2, color: '#f59e0b' } },
       { name: 'MA20', type: 'line', data: ma20, smooth: true, symbol: 'none', lineStyle: { width: 1.4, color: '#7c3aed' } },
+      { name: 'MA60', type: 'line', data: ma60, smooth: true, symbol: 'none', lineStyle: { width: 1.2, color: '#475569' } },
       {
         name: 'AI未来线',
         type: 'line',
@@ -323,6 +448,33 @@ function buildOption(): EChartsOption {
         yAxisIndex: 1,
         data: amounts,
         itemStyle: { color: '#94a3b8' },
+      },
+      {
+        name: 'MACD柱',
+        type: 'bar',
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        data: macdHist,
+      },
+      {
+        name: 'MACD',
+        type: 'line',
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        data: macd,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 1.2, color: '#2563eb' },
+      },
+      {
+        name: 'Signal',
+        type: 'line',
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        data: macdSignal,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 1.2, color: '#f59e0b' },
       },
     ],
   }

@@ -43,6 +43,9 @@ class ChartDataService:
     def price_series_from_bars(self, rows: list[DailyBar]) -> list[dict[str, Any]]:
         closes: list[float] = []
         macd_values: list[float] = []
+        raw_rows: list[dict[str, Any]] = []
+        kdj_k: float | None = None
+        kdj_d: float | None = None
         points: list[dict[str, Any]] = []
         for bar in rows:
             close = float(bar.close or 0)
@@ -57,6 +60,18 @@ class ChartDataService:
             open_price = float(bar.open or close)
             high_price = float(bar.high or max(open_price, close))
             low_price = float(bar.low or min(open_price, close))
+            raw_rows.append(
+                {
+                    "trade_date": bar.trade_date,
+                    "open": open_price,
+                    "high": high_price,
+                    "low": low_price,
+                    "close": close,
+                    "volume": float(bar.vol or 0),
+                    "amount": float(bar.amount or 0),
+                }
+            )
+            kdj_k, kdj_d, kdj_j = self._kdj(raw_rows, previous_k=kdj_k, previous_d=kdj_d)
             points.append(
                 {
                     "trade_date": bar.trade_date,
@@ -67,11 +82,16 @@ class ChartDataService:
                     "volume": float(bar.vol or 0),
                     "amount": float(bar.amount or 0),
                     "ma5": self._moving_average(closes, 5),
+                    "ma10": self._moving_average(closes, 10),
                     "ma20": self._moving_average(closes, 20),
+                    "ma60": self._moving_average(closes, 60),
                     "rsi14": self._rsi(closes, 14),
                     "macd": round(macd, 6) if macd is not None else None,
                     "macd_signal": round(macd_signal, 6) if macd_signal is not None else None,
                     "macd_hist": round(macd_hist, 6) if macd_hist is not None else None,
+                    "kdj_k": kdj_k,
+                    "kdj_d": kdj_d,
+                    "kdj_j": kdj_j,
                 }
             )
         return points
@@ -154,19 +174,23 @@ class ChartDataService:
         trade_date = series[-1]["trade_date"] if series else None
         marker_price = float(price or (series[-1]["close"] if series else 0))
         forecast = self.forecast_series(series)
+        markers = [
+            {
+                "action": action,
+                "symbol": normalize_symbol(symbol),
+                "trade_date": trade_date,
+                "price": round(marker_price, 4),
+                "quantity": int(quantity or 0),
+                "amount": round(marker_price * int(quantity or 0), 2),
+                "reason": "股票分析信号",
+                "time_label": str(trade_date or ""),
+            }
+        ]
         return {
             "price_series": series,
             "interval_series": self.interval_series(series, hourly_series=hourly),
             "forecast_series": forecast,
-            "signal_markers": [
-                {
-                    "action": action,
-                    "symbol": normalize_symbol(symbol),
-                    "trade_date": trade_date,
-                    "price": round(marker_price, 4),
-                    "quantity": int(quantity or 0),
-                }
-            ],
+            "signal_markers": markers,
             "factor_radar": [
                 {"name": self._factor_label(key), "key": key, "value": round(float(value or 0), 4)}
                 for key, value in factor_scores.items()
@@ -179,15 +203,7 @@ class ChartDataService:
                 price_series=series,
                 hourly_series=hourly,
                 forecast_series=forecast,
-                markers=[
-                    {
-                        "action": action,
-                        "symbol": normalize_symbol(symbol),
-                        "trade_date": trade_date,
-                        "price": round(marker_price, 4),
-                        "quantity": int(quantity or 0),
-                    }
-                ],
+                markers=markers,
             ),
             "forecast_actual_comparison": self.forecast_actual_comparison(
                 price_series=series,
@@ -208,6 +224,9 @@ class ChartDataService:
         realtime_quote: dict[str, Any] | None = None,
         hourly_series: list[dict[str, Any]] | None = None,
         frozen_prediction: dict[str, Any] | None = None,
+        marker_reason: str | None = None,
+        marker_amount: float | None = None,
+        marker_created_at: str | None = None,
     ) -> dict[str, Any]:
         hourly = hourly_series if hourly_series is not None else self.real_hourly_series(symbol)
         series = self.price_series_with_realtime(
@@ -238,13 +257,19 @@ class ChartDataService:
                 "trade_date": trade_date or (series[-1]["trade_date"] if series else None),
                 "price": round(float(price or 0), 4),
                 "quantity": int(quantity or 0),
+                "amount": round(float(marker_amount if marker_amount is not None else float(price or 0) * int(quantity or 0)), 2),
+                "reason": marker_reason,
+                "created_at": marker_created_at,
+                "time_label": str(trade_date or marker_created_at or ""),
             }
         ]
+        support_resistance = self.support_resistance(series)
         return {
             "price_series": series,
             "interval_series": self.interval_series(series, hourly_series=hourly),
             "forecast_series": forecast,
             "trade_markers": markers,
+            "support_resistance": support_resistance,
             "forecast_snapshot": frozen_snapshot,
             "forecast_actual_comparison": self.forecast_actual_comparison(
                 price_series=series,
@@ -378,6 +403,20 @@ class ChartDataService:
             "forecast_frozen": bool((frozen_prediction or {}).get("frozen")),
             "forecast_generated_at": (frozen_prediction or {}).get("generated_at"),
             "forecast_history_end_date": (frozen_prediction or {}).get("history_end_date"),
+            "support_resistance": self.support_resistance(price_series[-60:]),
+            "latest_indicators": {
+                "ma5": latest_daily.get("ma5"),
+                "ma10": latest_daily.get("ma10"),
+                "ma20": latest_daily.get("ma20"),
+                "ma60": latest_daily.get("ma60"),
+                "rsi14": latest_daily.get("rsi14"),
+                "macd": latest_daily.get("macd"),
+                "macd_signal": latest_daily.get("macd_signal"),
+                "macd_hist": latest_daily.get("macd_hist"),
+                "kdj_k": latest_daily.get("kdj_k"),
+                "kdj_d": latest_daily.get("kdj_d"),
+                "kdj_j": latest_daily.get("kdj_j"),
+            },
         }
 
     def risk_metrics(
@@ -913,6 +952,9 @@ class ChartDataService:
     def _enrich_price_points(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         closes: list[float] = []
         macd_values: list[float] = []
+        kdj_k: float | None = None
+        kdj_d: float | None = None
+        raw_rows: list[dict[str, Any]] = []
         enriched: list[dict[str, Any]] = []
         for row in rows:
             close = float(row.get("close") or 0)
@@ -922,18 +964,47 @@ class ChartDataService:
                 macd_values.append(macd)
             macd_signal = self._ema(macd_values, 9) if macd_values else None
             macd_hist = macd - macd_signal if macd is not None and macd_signal is not None else None
+            raw_rows.append(row)
+            kdj_k, kdj_d, kdj_j = self._kdj(raw_rows, previous_k=kdj_k, previous_d=kdj_d)
             enriched.append(
                 {
                     **row,
                     "ma5": self._moving_average(closes, 5),
+                    "ma10": self._moving_average(closes, 10),
                     "ma20": self._moving_average(closes, 20),
+                    "ma60": self._moving_average(closes, 60),
                     "rsi14": self._rsi(closes, 14),
                     "macd": round(macd, 6) if macd is not None else None,
                     "macd_signal": round(macd_signal, 6) if macd_signal is not None else None,
                     "macd_hist": round(macd_hist, 6) if macd_hist is not None else None,
+                    "kdj_k": kdj_k,
+                    "kdj_d": kdj_d,
+                    "kdj_j": kdj_j,
                 }
             )
         return enriched
+
+    def _kdj(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        previous_k: float | None,
+        previous_d: float | None,
+        window: int = 9,
+    ) -> tuple[float | None, float | None, float | None]:
+        if len(rows) < window:
+            return None, None, None
+        recent = rows[-window:]
+        lows = [float(item.get("low") or item.get("close") or 0) for item in recent]
+        highs = [float(item.get("high") or item.get("close") or 0) for item in recent]
+        close = float(rows[-1].get("close") or 0)
+        high = max(highs)
+        low = min(lows)
+        rsv = 50.0 if high <= low else (close - low) / (high - low) * 100
+        k = ((previous_k if previous_k is not None else 50.0) * 2 + rsv) / 3
+        d = ((previous_d if previous_d is not None else 50.0) * 2 + k) / 3
+        j = 3 * k - 2 * d
+        return round(k, 4), round(d, 4), round(j, 4)
 
     def _period_key(self, value: str, interval: str) -> str:
         trade_date = self._parse_trade_date(value)

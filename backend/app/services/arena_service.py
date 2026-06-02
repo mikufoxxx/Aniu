@@ -1174,6 +1174,35 @@ class ArenaService:
         if agent is None:
             return None
 
+        cache_key = f"agent_dashboard:{agent_id}:{normalized_section}"
+        cached = self._cached_live_payload(cache_key)
+        if cached is not None:
+            return cached
+        lock = self._live_payload_inflight_lock(cache_key)
+        with lock:
+            cached = self._cached_live_payload(cache_key)
+            if cached is not None:
+                return cached
+            payload = self._agent_dashboard_uncached(
+                db,
+                agent_id=agent_id,
+                agent=agent,
+                normalized_section=normalized_section,
+            )
+            return self._store_live_payload(
+                cache_key,
+                payload,
+                ttl_seconds=self._live_payload_ttl(refresh_quotes=normalized_section == "intraday"),
+            )
+
+    def _agent_dashboard_uncached(
+        self,
+        db: Session,
+        *,
+        agent_id: str,
+        agent: dict[str, Any],
+        normalized_section: str,
+    ) -> dict[str, Any]:
         account = db.scalar(
             select(ArenaAccount)
             .options(selectinload(ArenaAccount.positions))
@@ -1322,6 +1351,9 @@ class ArenaService:
             trade_date=self._order_marker_trade_time(order),
             price=order.price,
             quantity=order.quantity,
+            marker_amount=order.amount,
+            marker_reason=order.reason,
+            marker_created_at=order.created_at.isoformat() if order.created_at else None,
         )
         forecast = ai_forecast_service.analyze_order(
             order_id=order.id,
@@ -3240,6 +3272,9 @@ class ArenaService:
                     trade_date=self._order_marker_trade_time(order),
                     price=order.price,
                     quantity=order.quantity,
+                    marker_amount=order.amount,
+                    marker_reason=order.reason,
+                    marker_created_at=order.created_at.isoformat() if order.created_at else None,
                     realtime_quote=quote_by_symbol.get(normalize_symbol(order.symbol)),
                     frozen_prediction=prediction_by_symbol.get(normalize_symbol(order.symbol)),
                     hourly_series=hourly_by_symbol.get(normalized_symbol, []),
@@ -3546,6 +3581,9 @@ class ArenaService:
                 trade_date=self._order_marker_trade_time(order),
                 price=order.price,
                 quantity=order.quantity,
+                marker_amount=order.amount,
+                marker_reason=order.reason,
+                marker_created_at=order.created_at.isoformat() if order.created_at else None,
             ),
         }
 

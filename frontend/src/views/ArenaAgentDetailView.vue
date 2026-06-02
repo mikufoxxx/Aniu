@@ -163,6 +163,10 @@
               <p>{{ order.reason }}</p>
               <div class="arena-order-explain">
                 <div>
+                  <strong>成交信息</strong>
+                  <span>{{ orderExecutionText(order) }}</span>
+                </div>
+                <div>
                   <strong>为什么{{ order.action === 'SELL' ? '卖' : '买' }}</strong>
                   <span>{{ orderDecisionReason(order) }}</span>
                 </div>
@@ -171,8 +175,16 @@
                   <span>{{ orderPricePlan(order) }}</span>
                 </div>
                 <div>
+                  <strong>纪律条件</strong>
+                  <span>{{ orderRiskPlan(order) }}</span>
+                </div>
+                <div>
                   <strong>数据输入</strong>
                   <span>{{ orderDataSources(order) }}</span>
+                </div>
+                <div>
+                  <strong>图表对照</strong>
+                  <span>{{ orderChartSummary(order) }}</span>
                 </div>
               </div>
               <MarketKlineChart
@@ -183,6 +195,7 @@
                 :interval-series="order.charts.interval_series"
                 :forecast-series="order.charts.forecast_series"
                 :markers="order.charts.trade_markers"
+                :support-resistance="order.charts.support_resistance"
                 :data-summary="order.charts.data_summary"
                 :forecast-snapshot="order.charts.forecast_snapshot"
                 :forecast-actual-comparison="order.charts.forecast_actual_comparison"
@@ -478,12 +491,51 @@ function orderPricePlan(order: ArenaOrder): string {
   return `${entryText}；${sellText}`
 }
 
+function orderExecutionText(order: ArenaOrder): string {
+  const marker = order.charts?.trade_markers?.[0]
+  const time = marker?.time_label || marker?.trade_date || order.created_at || '--'
+  const amount = typeof marker?.amount === 'number' ? marker.amount : order.amount
+  return `${time} · ${order.action} ${order.quantity} 股 · 成交 ${formatPrice(order.price)} · 金额 ${formatAmount(amount)}`
+}
+
+function orderRiskPlan(order: ArenaOrder): string {
+  const retail = nestedRecord(order.decision_context, 'retail_analysis')
+  const sell = nestedRecord(retail, 'sell_plan')
+  const stop = sell.stop_loss
+  const firstTarget = sell.first_target
+  const secondTarget = sell.second_target
+  const rule = typeof sell.rule === 'string' ? sell.rule : ''
+  if (stop || firstTarget || secondTarget) {
+    return `止损 ${stop ?? '--'}；第一目标 ${firstTarget ?? '--'}；第二目标 ${secondTarget ?? '--'}。${rule}`
+  }
+  const support = order.charts?.support_resistance?.support
+  const resistance = order.charts?.support_resistance?.resistance
+  if (support || resistance) return `跌破支撑 ${formatPrice(support)} 失效；接近压力 ${formatPrice(resistance)} 降低仓位。`
+  return '暂无结构化纪律价，按账户风控和最新图表信号执行。'
+}
+
 function orderDataSources(order: ArenaOrder): string {
   const sources = (order.decision_context?.data_sources ?? []) as unknown
   if (Array.isArray(sources) && sources.length) return sources.slice(0, 5).join(' / ')
   const summary = order.charts?.data_summary
   if (summary?.latest_hourly_source) return `分时 ${String(summary.latest_hourly_source)}`
   return '本地日线 + 后端统一行情缓存'
+}
+
+function orderChartSummary(order: ArenaOrder): string {
+  const summary = order.charts?.data_summary ?? {}
+  const indicators = summary.latest_indicators
+  const indicatorRecord = indicators && typeof indicators === 'object'
+    ? indicators as Record<string, unknown>
+    : {}
+  const parts = [
+    `日线 ${summary.latest_daily_trade_date || '--'}${summary.latest_daily_is_realtime ? ' 实时合并' : ''}`,
+    summary.latest_hourly_trade_time ? `分时 ${summary.latest_hourly_trade_time}` : '',
+    `MA20 ${formatPrice(Number(indicatorRecord.ma20))}`,
+    `MA60 ${formatPrice(Number(indicatorRecord.ma60))}`,
+    `RSI ${formatPrice(Number(indicatorRecord.rsi14))}`,
+  ].filter(Boolean)
+  return parts.join('；')
 }
 
 function predictionText(value: Record<string, unknown>): string {

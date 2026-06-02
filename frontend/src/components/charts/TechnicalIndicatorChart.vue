@@ -9,6 +9,7 @@
         <span>MACD</span>
         <span>Signal</span>
         <span>RSI14</span>
+        <span>KDJ</span>
       </div>
     </div>
     <div ref="chartEl" class="comparison-canvas"></div>
@@ -36,6 +37,9 @@ function buildOption(): EChartsOption {
   const macd = props.priceSeries.map((item) => item.macd ?? null)
   const signal = props.priceSeries.map((item) => item.macd_signal ?? null)
   const rsi = props.priceSeries.map((item) => item.rsi14 ?? null)
+  const kdjK = props.priceSeries.map((item) => item.kdj_k ?? null)
+  const kdjD = props.priceSeries.map((item) => item.kdj_d ?? null)
+  const kdjJ = props.priceSeries.map((item) => item.kdj_j ?? null)
   return {
     animation: false,
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, textStyle: { fontSize: 12 } },
@@ -79,6 +83,36 @@ function buildOption(): EChartsOption {
           label: { color: '#64748b', fontSize: 10 },
           data: [{ yAxis: 70 }, { yAxis: 30 }],
         },
+      },
+      {
+        name: 'K',
+        type: 'line',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: kdjK,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 1.2, color: '#0f766e' },
+      },
+      {
+        name: 'D',
+        type: 'line',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: kdjD,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 1.2, color: '#f97316' },
+      },
+      {
+        name: 'J',
+        type: 'line',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: kdjJ,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 1.1, color: '#64748b' },
       },
     ],
   }

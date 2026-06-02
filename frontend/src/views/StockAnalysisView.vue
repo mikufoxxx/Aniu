@@ -126,6 +126,56 @@
             <span>接口 {{ analysis.analysis_config.ai_config?.base_url || aiConfig.base_url || '--' }}</span>
             <span>Key {{ analysis.analysis_config.ai_config?.api_key_configured ? analysis.analysis_config.ai_config.api_key_masked : '未配置' }}</span>
           </div>
+          <div class="analysis-rich-grid">
+            <section class="analysis-info-panel">
+              <div>
+                <strong>交易计划</strong>
+                <span>仓位、买入区间、止损和目标位</span>
+              </div>
+              <dl>
+                <template v-for="item in decisionPlanItems" :key="item.label">
+                  <dt>{{ item.label }}</dt>
+                  <dd>{{ item.value }}</dd>
+                </template>
+              </dl>
+            </section>
+            <section class="analysis-info-panel">
+              <div>
+                <strong>行情底稿</strong>
+                <span>实时快照、行业和成交活跃度</span>
+              </div>
+              <dl>
+                <template v-for="item in marketSnapshotItems" :key="item.label">
+                  <dt>{{ item.label }}</dt>
+                  <dd :class="item.tone">{{ item.value }}</dd>
+                </template>
+              </dl>
+            </section>
+            <section class="analysis-info-panel">
+              <div>
+                <strong>技术状态</strong>
+                <span>均线、动量、波动和区间位置</span>
+              </div>
+              <dl>
+                <template v-for="item in technicalSnapshotItems" :key="item.label">
+                  <dt>{{ item.label }}</dt>
+                  <dd :class="item.tone">{{ item.value }}</dd>
+                </template>
+              </dl>
+            </section>
+            <section class="analysis-info-panel">
+              <div>
+                <strong>资金与财务</strong>
+                <span>资金流、估值、利润和负债</span>
+              </div>
+              <dl>
+                <template v-for="item in capitalSnapshotItems" :key="item.label">
+                  <dt>{{ item.label }}</dt>
+                  <dd :class="item.tone">{{ item.value }}</dd>
+                </template>
+              </dl>
+            </section>
+          </div>
           <button
             v-if="analysis.analysis_report"
             class="analysis-report-card"
@@ -154,6 +204,26 @@
               <li v-for="warning in retailList('warnings')" :key="warning">{{ warning }}</li>
             </ul>
           </div>
+          <div class="analysis-evidence-grid">
+            <section class="analysis-evidence-panel">
+              <strong>风险检查</strong>
+              <ul>
+                <li v-for="item in riskEvidenceItems" :key="item">{{ item }}</li>
+              </ul>
+            </section>
+            <section class="analysis-evidence-panel">
+              <strong>Skill / AI 观点</strong>
+              <ul>
+                <li v-for="item in skillEvidenceItems" :key="item">{{ item }}</li>
+              </ul>
+            </section>
+            <section class="analysis-evidence-panel">
+              <strong>数据覆盖</strong>
+              <ul>
+                <li v-for="item in dataCoverageItems" :key="item">{{ item }}</li>
+              </ul>
+            </section>
+          </div>
           <p>{{ analysis.reason }}</p>
           <div class="analysis-chart-grid">
             <MarketKlineChart
@@ -163,6 +233,9 @@
               :interval-series="analysis.charts.interval_series"
               :forecast-series="analysis.charts.forecast_series"
               :markers="analysis.charts.signal_markers"
+              :support-resistance="analysis.charts.support_resistance"
+              :data-summary="analysis.charts.data_summary"
+              :forecast-actual-comparison="analysis.charts.forecast_actual_comparison"
             />
             <FactorRadarChart
               title="量化因子雷达"
@@ -284,6 +357,12 @@ interface RetailDimension {
   score?: number
 }
 
+interface InfoItem {
+  label: string
+  value: string
+  tone?: string
+}
+
 const retailAnalysis = computed<Record<string, unknown> | null>(() => analysis.value?.retail_analysis ?? null)
 const retailDimensions = computed<RetailDimension[]>(() => {
   const items = retailAnalysis.value?.dimension_scores
@@ -294,6 +373,103 @@ const analysisSkills = computed(() => {
     if (!skill.enabled || skill.role === 'runtime') return false
     return !skill.run_types.length || skill.run_types.includes('analysis')
   })
+})
+const analysisCandidate = computed<QuantCandidate | null>(() => {
+  const recommendations = analysis.value?.stock_pick_snapshot?.recommendations
+  if (!Array.isArray(recommendations)) return null
+  return recommendations[0] ?? null
+})
+const latestIndicators = computed<Record<string, unknown>>(() => {
+  const value = analysis.value?.charts.data_summary?.latest_indicators
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+})
+const decisionPlanItems = computed<InfoItem[]>(() => {
+  const decision = analysis.value?.decision ?? {}
+  const entry = nestedRecord(retailAnalysis.value, 'entry_zone')
+  const sell = nestedRecord(retailAnalysis.value, 'sell_plan')
+  return [
+    { label: '目标仓位', value: formatRatio(decision.target_allocation_ratio) },
+    { label: '建议股数', value: formatInteger(decision.suggested_quantity) },
+    { label: '建议金额', value: formatAmount(Number(decision.suggested_amount)) },
+    { label: '买入区间', value: entry.low && entry.high ? `${formatPrice(Number(entry.low))}-${formatPrice(Number(entry.high))}` : '--' },
+    { label: '止损', value: formatPrice(Number(sell.stop_loss)) },
+    { label: '第一目标', value: formatPrice(Number(sell.first_target)) },
+  ]
+})
+const marketSnapshotItems = computed<InfoItem[]>(() => {
+  const candidate = analysisCandidate.value
+  return [
+    { label: '行业', value: candidate?.profile?.industry || candidate?.profile?.market || '--' },
+    { label: '地区', value: candidate?.profile?.area || '--' },
+    { label: '现价', value: formatPrice(analysis.value?.price) },
+    { label: '涨跌幅', value: formatPctPoint(candidate?.change_pct), tone: toneForNumber(candidate?.change_pct) },
+    { label: '成交额', value: formatAmount(candidate?.amount) },
+    { label: '换手率', value: formatPctPoint(candidate?.turnover) },
+    { label: '量比', value: formatDecimal(candidate?.volume_ratio, 2) },
+    { label: '来源', value: candidate?.source || analysis.value?.data_sources?.[0] || '--' },
+  ]
+})
+const technicalSnapshotItems = computed<InfoItem[]>(() => {
+  const daily = analysisCandidate.value?.daily_factors ?? {}
+  return [
+    { label: '日线覆盖', value: `${daily.bars_used ?? analysis.value?.charts.price_series.length ?? 0} 根` },
+    { label: '阶段动量', value: formatPctPoint(daily.momentum_pct), tone: toneForNumber(daily.momentum_pct) },
+    { label: '短线动量', value: formatPctPoint(daily.recent_momentum_pct), tone: toneForNumber(daily.recent_momentum_pct) },
+    { label: 'MA20', value: formatPrice(Number(latestIndicators.value.ma20 ?? daily.ma20)) },
+    { label: 'MA60', value: formatPrice(Number(latestIndicators.value.ma60 ?? daily.ma60)) },
+    { label: '距 MA20', value: formatPctPoint(daily.distance_to_ma20_pct), tone: toneForNumber(daily.distance_to_ma20_pct) },
+    { label: 'RSI14', value: formatDecimal(Number(latestIndicators.value.rsi14), 1) },
+    { label: 'MACD柱', value: formatDecimal(Number(latestIndicators.value.macd_hist), 4), tone: toneForNumber(Number(latestIndicators.value.macd_hist)) },
+  ]
+})
+const capitalSnapshotItems = computed<InfoItem[]>(() => {
+  const daily = analysisCandidate.value?.daily_factors ?? {}
+  const financial = analysisCandidate.value?.financial_factors ?? {}
+  const margin = daily.margin_detail ?? null
+  const dragonTiger = daily.dragon_tiger ?? null
+  const pledge = daily.pledge_stat ?? null
+  return [
+    { label: '资金净流', value: formatAmount((daily as Record<string, unknown>).moneyflow_net_amount as number | undefined), tone: toneForNumber((daily as Record<string, unknown>).moneyflow_net_amount as number | undefined) },
+    { label: '两融净买', value: formatAmount(margin?.net_financing_buy), tone: toneForNumber(margin?.net_financing_buy) },
+    { label: '龙虎榜净额', value: formatAmount(dragonTiger?.net_amount), tone: toneForNumber(dragonTiger?.net_amount) },
+    { label: 'ROE', value: formatPctPoint(financial.roe ?? financial.roe_dt) },
+    { label: '净利同比', value: formatPctPoint(financial.netprofit_yoy), tone: toneForNumber(financial.netprofit_yoy) },
+    { label: '负债率', value: formatPctPoint(financial.debt_to_assets) },
+    { label: '市盈率', value: formatDecimal((daily as Record<string, unknown>).pe_ttm as number | undefined, 2) },
+    { label: '质押比例', value: formatPctPoint(pledge?.pledge_ratio) },
+  ]
+})
+const riskEvidenceItems = computed<string[]>(() => {
+  const warnings = retailList('warnings')
+  const notes = retailList('retail_notes')
+  return [...warnings, ...notes].slice(0, 8).length
+    ? [...warnings, ...notes].slice(0, 8)
+    : ['暂无高危风险标记，仍需观察盘中量价确认。']
+})
+const skillEvidenceItems = computed<string[]>(() => {
+  const raw = nestedRecord(analysis.value?.llm_decision, 'raw_decision')
+  const opinions = raw.skill_opinions
+  if (Array.isArray(opinions) && opinions.length) {
+    return opinions
+      .map((item) => {
+        const record = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+        return `${record.skill_id || 'skill'} · ${record.stance || 'neutral'}：${record.summary || '--'}`
+      })
+      .slice(0, 6)
+  }
+  const selected = selectedSkillNames(analysis.value?.analysis_config.selected_skills || [])
+  if (selected.length) return selected.map((item) => `${item}：已纳入本次分析底稿。`)
+  return [analysis.value?.llm_decision?.used ? 'AI 已参与决策，但未返回分技能拆解。' : '当前使用量化/规则底稿，未调用 AI 或 AI 未返回可用结果。']
+})
+const dataCoverageItems = computed<string[]>(() => {
+  const summary = analysis.value?.charts.data_summary ?? {}
+  const items = [
+    `日线 ${summary.daily_points ?? analysis.value?.charts.price_series.length ?? 0} 根 · ${summary.latest_daily_trade_date || '--'}`,
+    `分时 ${summary.hourly_points ?? 0} 根 · ${summary.latest_hourly_source || '--'}`,
+    `预测 ${summary.forecast_points ?? analysis.value?.charts.forecast_series.length ?? 0} 点`,
+    `数据源 ${(analysis.value?.data_sources || []).join(' / ') || '--'}`,
+  ]
+  return items
 })
 
 async function loadAnalysisWorkspace(): Promise<void> {
@@ -451,6 +627,51 @@ function profitClass(value: number): string {
 
 function scoreText(value: number | undefined): string {
   return typeof value === 'number' ? value.toFixed(1) : '--'
+}
+
+function nestedRecord(value: unknown, key: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object') return {}
+  const record = value as Record<string, unknown>
+  const child = record[key]
+  return child && typeof child === 'object' ? child as Record<string, unknown> : {}
+}
+
+function formatInteger(value: unknown): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  return Math.round(numeric).toLocaleString('zh-CN')
+}
+
+function formatRatio(value: unknown): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  return `${(numeric * 100).toFixed(1)}%`
+}
+
+function formatDecimal(value: unknown, digits = 2): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  return numeric.toFixed(digits)
+}
+
+function formatPctPoint(value: unknown): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  return `${numeric.toFixed(2)}%`
+}
+
+function formatAmount(value: unknown): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  if (Math.abs(numeric) >= 100000000) return `${(numeric / 100000000).toFixed(2)}亿`
+  if (Math.abs(numeric) >= 10000) return `${(numeric / 10000).toFixed(2)}万`
+  return numeric.toFixed(2)
+}
+
+function toneForNumber(value: unknown): string {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric === 0) return ''
+  return numeric > 0 ? 'profit-up' : 'profit-down'
 }
 
 function formatPercent(value: number): string {
@@ -864,6 +1085,77 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.analysis-rich-grid,
+.analysis-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.analysis-info-panel,
+.analysis-evidence-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.analysis-info-panel > div {
+  display: grid;
+  gap: 3px;
+}
+
+.analysis-info-panel strong,
+.analysis-evidence-panel strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.analysis-info-panel span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.analysis-info-panel dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.analysis-info-panel dt {
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.analysis-info-panel dd {
+  min-width: 0;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-evidence-panel ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.analysis-evidence-panel li {
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .analysis-chart-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.55fr);
@@ -973,6 +1265,8 @@ onBeforeUnmount(() => {
   .analysis-hero,
   .analysis-grid,
   .analysis-chart-grid,
+  .analysis-rich-grid,
+  .analysis-evidence-grid,
   .analysis-report-list,
   .support-grid {
     grid-template-columns: 1fr;

@@ -646,11 +646,16 @@ class PriceSeriesPointRead(BaseModel):
     timestamp: str | None = None
     is_realtime: bool = False
     ma5: float | None = None
+    ma10: float | None = None
     ma20: float | None = None
+    ma60: float | None = None
     rsi14: float | None = None
     macd: float | None = None
     macd_signal: float | None = None
     macd_hist: float | None = None
+    kdj_k: float | None = None
+    kdj_d: float | None = None
+    kdj_j: float | None = None
 
 
 class TradeMarkerRead(BaseModel):
@@ -659,6 +664,10 @@ class TradeMarkerRead(BaseModel):
     trade_date: str | None = None
     price: float
     quantity: int = 0
+    amount: float | None = None
+    reason: str | None = None
+    created_at: str | None = None
+    time_label: str | None = None
 
 
 class EquityCurvePointRead(BaseModel):
@@ -707,6 +716,7 @@ class OrderChartsRead(BaseModel):
     interval_series: dict[str, list[PriceSeriesPointRead]] = Field(default_factory=dict)
     forecast_series: list[dict[str, Any]] = Field(default_factory=list)
     trade_markers: list[TradeMarkerRead] = Field(default_factory=list)
+    support_resistance: dict[str, Any] = Field(default_factory=dict)
     forecast_snapshot: dict[str, Any] = Field(default_factory=dict)
     forecast_actual_comparison: dict[str, Any] = Field(default_factory=dict)
     data_summary: dict[str, Any] = Field(default_factory=dict)

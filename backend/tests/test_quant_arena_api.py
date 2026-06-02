@@ -1274,6 +1274,9 @@ def test_order_charts_append_realtime_quote_after_latest_daily_bar(monkeypatch, 
     assert latest["source"] == "easy_tdx"
     assert charts["interval_series"]["daily"] == charts["price_series"]
     assert charts["forecast_series"][0]["trade_date"] > "20260601"
+    assert {"ma10", "ma60", "kdj_k", "kdj_d", "kdj_j"} <= set(latest)
+    assert charts["support_resistance"]["last_close"] == 74.55
+    assert charts["trade_markers"][0]["amount"] == 59520.0
 
     _reset_state()
 
@@ -1353,6 +1356,7 @@ def test_order_charts_remap_legacy_frozen_forecast_to_trading_days(
         "20260602",
     ]
     assert charts["trade_markers"][0]["trade_date"] == "2026-06-01 09:45"
+    assert charts["trade_markers"][0]["amount"] == 10500.0
     assert charts["forecast_snapshot"]["forecast_series"] == charts["forecast_series"]
     assert charts["forecast_actual_comparison"]["matched_points"][0]["trade_date"] == "20260601"
 
@@ -3042,7 +3046,19 @@ def test_stock_analysis_returns_purchase_advice_from_quant_snapshot(
     assert payload["charts"]["forecast_series"][0]["trade_date"] > payload["charts"]["price_series"][-1]["trade_date"]
     assert payload["charts"]["forecast_series"][0]["source"] == "quant_regime_projection"
     assert "confidence" in payload["charts"]["forecast_series"][0]
-    assert {"macd", "macd_signal", "macd_hist", "rsi14"} <= set(payload["charts"]["price_series"][-1])
+    assert {
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "rsi14",
+        "ma10",
+        "ma60",
+        "kdj_k",
+        "kdj_d",
+        "kdj_j",
+    } <= set(payload["charts"]["price_series"][-1])
+    assert payload["charts"]["signal_markers"][0]["amount"] >= 0
+    assert "latest_indicators" in payload["charts"]["data_summary"]
 
     _reset_state()
 
@@ -3995,6 +4011,8 @@ def test_arena_agent_dashboard_groups_four_phase_details(monkeypatch, tmp_path) 
     assert len(intraday_payload["intraday"]["orders"]) <= 5
     order_chart = intraday_payload["intraday"]["orders"][0]["charts"]
     assert order_chart["trade_markers"][0]["action"] in {"BUY", "SELL"}
+    assert order_chart["trade_markers"][0]["reason"]
+    assert order_chart["support_resistance"]
     assert order_chart["price_series"]
     assert order_chart["data_summary"]["daily_points"] > 0
     assert "forecast_actual_comparison" in order_chart
